@@ -35,26 +35,29 @@ def fetch_data_from_urls(urls):
     
     return all_data
 
-def summarize_whale_transactions(df, selected_symbol=None, exclude_spx=True):
+def summarize_transactions(df, whale_filter=False, selected_symbol=None, exclude_spx=True):
     """
-    Summarize whale transactions from the given DataFrame.
-
+    Summarize transactions from the given DataFrame.
+    
     :param df: DataFrame with options data
+    :param whale_filter: Boolean, whether to apply the whale transaction filter (>5M)
     :param selected_symbol: Optional, filter to a specific symbol
     :param exclude_spx: Boolean, whether to exclude SPX and SPXW options
-    :return: DataFrame with summarized whale transactions
+    :return: DataFrame with summarized transactions
     """
     if exclude_spx:
         df = df[~df['Symbol'].isin(['SPX', 'SPXW'])]
     
-    df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
-    whale_transactions = df[df['Transaction Value'] > 5_000_000]
+    # Only apply whale transaction filter if selected
+    if whale_filter:
+        df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
+        df = df[df['Transaction Value'] > 5_000_000]
 
     if selected_symbol:
-        whale_transactions = whale_transactions[whale_transactions['Symbol'] == selected_symbol]
+        df = df[df['Symbol'] == selected_symbol]
 
     summary = (
-        whale_transactions.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
+        df.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
         .agg({'Volume': 'sum', 'Transaction Value': 'sum'})
         .reset_index()
     )
@@ -92,10 +95,10 @@ def run():
             if view_option == "Specific Stock":
                 symbols = sorted(data['Symbol'].unique())
                 selected_symbol = st.selectbox("Select Symbol to Analyze", symbols)
-                summary = summarize_whale_transactions(data, selected_symbol, exclude_spx)
+                summary = summarize_transactions(data, whale_filter=True, selected_symbol=selected_symbol, exclude_spx=exclude_spx)
                 st.subheader(f"Whale Transactions for {selected_symbol}")
             else:
-                summary = summarize_whale_transactions(data, exclude_spx=exclude_spx)
+                summary = summarize_transactions(data, whale_filter=True, exclude_spx=exclude_spx)
                 st.subheader("Whale Transactions Across All Stocks")
 
             st.dataframe(summary)
@@ -120,7 +123,7 @@ def run():
                 if selected_call_put == 'All':
                     selected_call_put = None  
                 
-                summary = summarize_whale_transactions(data[data['Symbol'] == selected_symbol])
+                summary = summarize_transactions(data[data['Symbol'] == selected_symbol], whale_filter=False)
                 st.subheader(f"Summary of Flows for {selected_symbol}")
                 st.dataframe(summary)
 
