@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import streamlit as st
 import plotly.express as px
@@ -7,14 +6,11 @@ import plotly.express as px
 # Default parameters
 DEFAULT_BENCHMARK = "SPY"
 DEFAULT_STOCKS = ["AAPL", "META", "TSLA", "NVDA"]
+PERIOD = "1y"  # Time period for historical data
+MOMENTUM_WINDOW = 14  # Window for calculating momentum
 
-def run():
-    """Main function to run the Streamlit application."""
-    st.title("Relative Rotation Graph (RRG)")
-    main()
-
-def fetch_data(symbol, period="1y"):
-    """Fetch historical data for a symbol using yfinance."""
+def fetch_data(symbol, period=PERIOD):
+    """Fetch historical price data for a symbol using yfinance."""
     try:
         data = yf.download(symbol, period=period)
         if data.empty:
@@ -29,23 +25,23 @@ def calculate_relative_strength(stock_data, benchmark_data):
     """Calculate relative strength (stock price / benchmark price)."""
     if stock_data is None or benchmark_data is None:
         return None
-    return (stock_data / benchmark_data).squeeze()  # Ensure it's a Series
+    return stock_data / benchmark_data
 
-def calculate_momentum(data, window=14):
+def calculate_momentum(data, window=MOMENTUM_WINDOW):
     """Calculate momentum as the percentage change over a given window."""
     if data is None:
         return None
-    return data.pct_change(window, fill_method=None).squeeze()  # Ensure it's a Series
+    return data.pct_change(window)
 
-def calculate_rrg_data(stocks, benchmark, period="1y"):
+def calculate_rrg_data(stocks, benchmark):
     """Calculate RRG data (relative strength and momentum) for the given stocks."""
-    benchmark_data = fetch_data(benchmark, period)
+    benchmark_data = fetch_data(benchmark)
     if benchmark_data is None:
         return None
 
     rrg_data = []
     for stock in stocks:
-        stock_data = fetch_data(stock, period)
+        stock_data = fetch_data(stock)
         if stock_data is None:
             continue
 
@@ -55,7 +51,7 @@ def calculate_rrg_data(stocks, benchmark, period="1y"):
 
         # Ensure relative_strength and momentum are valid
         if relative_strength is not None and momentum is not None:
-            # Extract the last value from the Series
+            # Get the latest values
             last_relative_strength = relative_strength.iloc[-1]
             last_momentum = momentum.iloc[-1]
 
@@ -63,8 +59,8 @@ def calculate_rrg_data(stocks, benchmark, period="1y"):
             if not pd.isna(last_relative_strength) and not pd.isna(last_momentum):
                 rrg_data.append({
                     "Stock": stock,
-                    "Relative Strength": last_relative_strength,  # Store the numerical value
-                    "Momentum": last_momentum  # Store the numerical value
+                    "Relative Strength": last_relative_strength,
+                    "Momentum": last_momentum
                 })
 
     return pd.DataFrame(rrg_data)
@@ -73,11 +69,6 @@ def plot_rrg(rrg_data):
     """Plot the Relative Rotation Graph using Plotly."""
     if rrg_data.empty:
         st.warning("No data available to plot.")
-        return
-
-    # Ensure there are valid values for plotting
-    if rrg_data["Relative Strength"].isna().all() or rrg_data["Momentum"].isna().all():
-        st.warning("No valid data to plot.")
         return
 
     # Create the RRG plot
@@ -131,9 +122,10 @@ def plot_rrg(rrg_data):
 
 def main():
     """Main function to run the RRG app."""
-    st.sidebar.header("Configuration")
+    st.title("Relative Rotation Graph (RRG)")
 
     # User inputs
+    st.sidebar.header("Configuration")
     benchmark = st.sidebar.text_input("Benchmark Index", DEFAULT_BENCHMARK)
     default_stocks = st.sidebar.text_input("Stocks to Analyze (comma-separated)", ", ".join(DEFAULT_STOCKS))
     stocks = [s.strip() for s in default_stocks.split(",")]
@@ -150,6 +142,6 @@ def main():
 
     st.write("This is the Relative Rotation Graph (RRG) application.")
 
-# This part allows the script to be imported as a module or run directly
+# Run the app
 if __name__ == "__main__":
-    run()
+    main()
