@@ -42,11 +42,12 @@ def apply_weekend_rule(data):
     prev_high = prev_week["High"]
     prev_low = prev_week["Low"]
 
-    # Check for long and short setups
-    long_setup = last_close > prev_high
-    short_setup = last_close < prev_low
+    # Check for long and short setups and convert them to boolean values
+    long_setup = bool(last_close > prev_high)
+    short_setup = bool(last_close < prev_low)
 
     return long_setup, short_setup
+
 
 
 def run():
