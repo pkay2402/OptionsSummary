@@ -4,7 +4,7 @@ import streamlit as st
 
 # Predefined list of top 100 US stocks by market cap (example)
 TOP_100_STOCKS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "JNJ", "V",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "PLTR", "JNJ", "V",
     "WMT", "XOM", "UNH", "JPM", "PG", "MA", "HD", "CVX", "LLY", "ABBV",
     "PFE", "MRK", "BAC", "KO", "PEP", "TMO", "AVGO", "COST", "DIS", "CSCO",
     "WFC", "ABT", "VZ", "ACN", "CMCSA", "ADBE", "CRM", "NFLX", "TXN", "DHR",
@@ -12,8 +12,8 @@ TOP_100_STOCKS = [
     "IBM", "T", "LOW", "MDT", "GS", "UNP", "CAT", "BLK", "AXP", "SPGI",
     "PYPL", "DE", "NOW", "PLD", "GE", "ISRG", "MMM", "BKNG", "ADI", "LMT",
     "RTX", "UPS", "SYK", "BA", "MDLZ", "SCHW", "ZTS", "CI", "GILD", "MO",
-    "TMUS", "FIS", "CVS", "ANTM", "BDX", "CME", "CB", "SO", "DUK", "CL",
-    "NEE", "APD", "PNC", "BSX", "CCI", "ICE", "AON", "SHW", "ITW", "ETN"
+    "TMUS", "FIS", "CVS", "MDB", "SNOW", "CME", "CB", "SO", "DUK", "CL",
+    "NEE", "APD", "PNC", "BSX", "NET", "ICE", "AON", "SHW", "ITW", "ETN"
 ]
 
 def fetch_weekly_data(symbol):
