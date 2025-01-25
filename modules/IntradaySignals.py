@@ -6,8 +6,6 @@ from datetime import datetime, time as dt_time
 import requests
 import pytz
 
-def run():
-    st.title("Intraday Signals")
 # Parameters
 SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA"]
 INTERVAL = "30m"
@@ -15,6 +13,11 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1332367135023956009/8HH_
 LENGTH = 14
 CALC_LENGTH = 5
 SMOOTH_LENGTH = 3
+
+def run():
+    import streamlit as st
+    st.title("Intraday Signals")
+    main()  # Call the main function here to run the app
 
 # Calculate EMA
 def calculate_ema(data, period):
@@ -75,24 +78,20 @@ def is_market_open():
 
     return market_open <= now.time() <= market_close
 
-# Main loop
+# Main function
 def main():
     last_signals = {}
     market_status_sent = False  # Flag to track if the "Market is closed" message was sent
 
     while True:
         if not is_market_open():
-            print("Market is closed!")
-            
-            # Send the message only once when the market is closed
             if not market_status_sent:
+                print("Market is closed!")
                 send_to_discord("Market is currently closed. Signals will resume during market hours.")
-                market_status_sent = True  # Set the flag so it doesn't send repeatedly
-            
+                market_status_sent = True
             time.sleep(900)  # Sleep for 15 minutes
             continue
         else:
-            # Reset the flag once the market opens
             if market_status_sent:
                 print("Market is now open!")
                 send_to_discord("Market has opened. Starting signal detection!")
@@ -118,9 +117,6 @@ def main():
         print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         time.sleep(900)  # Run every 15 minutes
 
-
+# This part allows the script to be imported as a module or run directly
 if __name__ == "__main__":
-    main()
-
-# Add your Intraday Signals logic here
-    st.write("This is the Intraday Signals application.")
+    run()
