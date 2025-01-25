@@ -46,10 +46,9 @@ def main():
     if 'selected_app' not in st.session_state:
         st.session_state['selected_app'] = None
 
-    # Use columns to layout icons
+    # Use columns to layout icons as clickable buttons
     col1, col2, col3, col4 = st.columns(4)
 
-    # We'll use buttons to trigger module switching (instead of JS)
     with col1:
         if st.button("Flow Summary"):
             st.session_state['selected_app'] = 'Flow Summary'
