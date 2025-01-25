@@ -42,44 +42,22 @@ st.markdown('<link rel="stylesheet" href="https://use.fontawesome.com/releases/v
 def main():
     st.title("Trading Tools Hub")
 
-    # State to control which module is currently displayed
-    if 'selected_app' not in st.session_state:
-        st.session_state['selected_app'] = None
+    # Create a radio button for module selection
+    selected_app = st.radio("Choose a module", ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals"])
 
-    # Use columns to layout icons as clickable buttons
-    col1, col2, col3, col4 = st.columns(4)
+    # Display the selected module's content
+    if selected_app == "Flow Summary":
+        flowSummary.run()
+    elif selected_app == "Momentum Signals":
+        MomentumSignals.run()
+    elif selected_app == "Momentum ETF":
+        MomentumETF.run()
+    elif selected_app == "Intraday Signals":
+        IntradaySignals.run()
 
-    with col1:
-        if st.button("Flow Summary"):
-            st.session_state['selected_app'] = 'Flow Summary'
-    
-    with col2:
-        if st.button("Momentum Signals"):
-            st.session_state['selected_app'] = 'Momentum Signals'
-    
-    with col3:
-        if st.button("Momentum ETF"):
-            st.session_state['selected_app'] = 'Momentum ETF'
-    
-    with col4:
-        if st.button("Intraday Signals"):
-            st.session_state['selected_app'] = 'Intraday Signals'
-
-    # Display the selected module
-    if st.session_state['selected_app']:
-        st.write(f"### {st.session_state['selected_app']}")
-        if st.session_state['selected_app'] == 'Flow Summary':
-            flowSummary.run()
-        elif st.session_state['selected_app'] == 'Momentum Signals':
-            MomentumSignals.run()
-        elif st.session_state['selected_app'] == 'Momentum ETF':
-            MomentumETF.run()
-        elif st.session_state['selected_app'] == 'Intraday Signals':
-            IntradaySignals.run()
-
-        # Add a back button to return to the main menu
-        if st.button("Back to Main Menu"):
-            st.session_state['selected_app'] = None
+    # Back button to return to the main menu (clears the selection)
+    if st.button("Back to Main Menu"):
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
