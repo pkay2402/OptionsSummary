@@ -49,12 +49,13 @@ def calculate_rrg_data(stocks, benchmark, period="1y"):
         relative_strength = calculate_relative_strength(stock_data, benchmark_data)
         momentum = calculate_momentum(relative_strength)
 
-        # Store the latest values
-        rrg_data.append({
-            "Stock": stock,
-            "Relative Strength": relative_strength.iloc[-1],
-            "Momentum": momentum.iloc[-1]
-        })
+        # Store the latest values (ignore NaN values)
+        if not pd.isna(relative_strength.iloc[-1]) and not pd.isna(momentum.iloc[-1]):
+            rrg_data.append({
+                "Stock": stock,
+                "Relative Strength": relative_strength.iloc[-1],  # Store the numerical value
+                "Momentum": momentum.iloc[-1]  # Store the numerical value
+            })
 
     return pd.DataFrame(rrg_data)
 
@@ -62,6 +63,11 @@ def plot_rrg(rrg_data):
     """Plot the Relative Rotation Graph using Plotly."""
     if rrg_data.empty:
         st.warning("No data available to plot.")
+        return
+
+    # Ensure there are valid values for plotting
+    if rrg_data["Relative Strength"].isna().all() or rrg_data["Momentum"].isna().all():
+        st.warning("No valid data to plot.")
         return
 
     # Create the RRG plot
@@ -80,12 +86,12 @@ def plot_rrg(rrg_data):
     # Add quadrant lines
     fig.add_shape(
         type="line",
-        x0=1, y0=0, x1=1, y1=rrg_data["Momentum"].max(),
+        x0=1, y0=rrg_data["Momentum"].min(), x1=1, y1=rrg_data["Momentum"].max(),
         line=dict(color="gray", dash="dash")
     )
     fig.add_shape(
         type="line",
-        x0=0, y0=0, x1=rrg_data["Relative Strength"].max(), y1=0,
+        x0=rrg_data["Relative Strength"].min(), y0=0, x1=rrg_data["Relative Strength"].max(), y1=0,
         line=dict(color="gray", dash="dash")
     )
 
