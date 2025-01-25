@@ -1,5 +1,5 @@
 import streamlit as st
-from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals, RRG
+from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals  # Removed RRG
 
 # Set page configuration (must be the first Streamlit command)
 st.set_page_config(page_title="Trading Tools Hub", layout="wide")
@@ -48,7 +48,7 @@ def main():
     # Create a radio button for module selection
     selected_app = st.radio(
         "Choose a module",
-        ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals", "Relative Rotation Graph (RRG)"]
+        ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals"]  # Removed RRG
     )
 
     # Display the selected module's content
@@ -60,8 +60,8 @@ def main():
         MomentumETF.run()
     elif selected_app == "Intraday Signals":
         IntradaySignals.run()
-    elif selected_app == "Relative Rotation Graph (RRG)":
-        RRG.run()
+    # elif selected_app == "Relative Rotation Graph (RRG)":  # Commented out RRG
+    #     RRG.run()
 
     # Back button to return to the main menu (clears the selection)
     if st.button("Back to Main Menu"):
