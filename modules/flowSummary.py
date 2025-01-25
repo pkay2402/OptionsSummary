@@ -48,9 +48,11 @@ def summarize_transactions(df, whale_filter=False, selected_symbol=None, exclude
     if exclude_spx:
         df = df[~df['Symbol'].isin(['SPX', 'SPXW'])]
     
-    # Only apply whale transaction filter if selected
+    # Always calculate Transaction Value for consistency
+    df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
+
+    # Apply whale transaction filter if selected
     if whale_filter:
-        df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
         df = df[df['Transaction Value'] > 5_000_000]
 
     if selected_symbol:
