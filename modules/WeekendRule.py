@@ -37,16 +37,17 @@ def apply_weekend_rule(data):
     last_week = data.iloc[-1]
     prev_week = data.iloc[-2]
 
-    # Extract scalar values for comparison
-    last_close = last_week["Close"]
-    prev_high = prev_week["High"]
-    prev_low = prev_week["Low"]
+    # Ensure scalar values for comparison (convert to float to avoid pandas Series)
+    last_close = float(last_week["Close"])
+    prev_high = float(prev_week["High"])
+    prev_low = float(prev_week["Low"])
 
     # Check for long and short setups and convert them to boolean values
-    long_setup = bool(last_close > prev_high)
-    short_setup = bool(last_close < prev_low)
+    long_setup = last_close > prev_high
+    short_setup = last_close < prev_low
 
     return long_setup, short_setup
+
 
 
 
