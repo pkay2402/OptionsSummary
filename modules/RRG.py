@@ -120,7 +120,7 @@ def plot_rrg(rrg_data):
 
     st.plotly_chart(fig)
 
-def main():
+def run():
     """Main function to run the RRG app."""
     st.title("Relative Rotation Graph (RRG)")
 
@@ -141,7 +141,3 @@ def main():
         plot_rrg(rrg_data)
 
     st.write("This is the Relative Rotation Graph (RRG) application.")
-
-# Run the app
-if __name__ == "__main__":
-    main()
