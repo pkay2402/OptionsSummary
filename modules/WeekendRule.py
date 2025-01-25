@@ -37,12 +37,16 @@ def apply_weekend_rule(data):
     last_week = data.iloc[-1]
     prev_week = data.iloc[-2]
 
-    # Check for long and short setups
-    long_setup = last_week["Close"] > prev_week["High"]
-    short_setup = last_week["Close"] < prev_week["Low"]
+    # Extract scalar values for comparison
+    last_close = last_week["Close"]
+    prev_high = prev_week["High"]
+    prev_low = prev_week["Low"]
 
-    # Ensure the results are scalar boolean values
-    return bool(long_setup), bool(short_setup)
+    # Check for long and short setups
+    long_setup = last_close > prev_high
+    short_setup = last_close < prev_low
+
+    return long_setup, short_setup
 
 def run():
     """Main function to run the Weekend Rule module."""
