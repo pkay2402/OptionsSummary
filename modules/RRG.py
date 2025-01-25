@@ -60,11 +60,11 @@ def calculate_rrg_data(stocks, benchmark, period="1y"):
             last_momentum = momentum.iloc[-1]
 
             # Check if the values are not NaN
-            if not pd.isna(last_relative_strength) and not pd.isna(last_momentum):
+            if not pd.isna(last_relative_strength.item()) and not pd.isna(last_momentum.item()):
                 rrg_data.append({
                     "Stock": stock,
-                    "Relative Strength": last_relative_strength,  # Store the numerical value
-                    "Momentum": last_momentum  # Store the numerical value
+                    "Relative Strength": last_relative_strength.item(),  # Store the numerical value
+                    "Momentum": last_momentum.item()  # Store the numerical value
                 })
 
     return pd.DataFrame(rrg_data)
