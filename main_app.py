@@ -1,7 +1,7 @@
 import streamlit as st
 from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals
 
-# Custom CSS to hide Streamlit's default menu and footer, and style buttons
+# Custom CSS to style buttons and improve visibility
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -10,19 +10,27 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         align-items: center;
+        justify-content: center;
         padding: 20px;
         margin: 10px;
         border-radius: 10px;
         background-color: #f0f2f6;
-        transition: background-color 0.3s;
+        color: black; /* Ensure text color is visible */
+        transition: background-color 0.3s, transform 0.3s;
         cursor: pointer;
+        text-align: center;
+        height: 150px; /* Fixed height for consistency */
     }
     .icon-button:hover {
         background-color: #d1d9e6;
+        transform: scale(1.05); /* Slight zoom effect on hover */
     }
     .icon-button i {
         font-size: 3em;
         margin-bottom: 10px;
+    }
+    .icon-button span {
+        font-size: 1em; /* Adjust text size */
     }
     </style>
 """, unsafe_allow_html=True)
@@ -33,28 +41,44 @@ st.markdown('<link rel="stylesheet" href="https://use.fontawesome.com/releases/v
 def main():
     st.title("Trading Tools Hub")
 
+    # State to control which module is currently displayed
+    if 'selected_app' not in st.session_state:
+        st.session_state['selected_app'] = None
+
     # Use columns to layout icons
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.markdown('<div class="icon-button" onclick="flowSummary.run()"><i class="fas fa-chart-line"></i><br>Flow Summary</div>', unsafe_allow_html=True)
-        if st.button("Flow Summary", key="flowSummary"):
-            flowSummary.run()
+        if st.button('<div class="icon-button"><i class="fas fa-chart-line"></i><span>Flow Summary</span></div>', key="flowSummary"):
+            st.session_state['selected_app'] = 'Flow Summary'
 
     with col2:
-        st.markdown('<div class="icon-button" onclick="MomentumSignals.run()"><i class="fas fa-tachometer-alt"></i><br>Momentum Signals</div>', unsafe_allow_html=True)
-        if st.button("Momentum Signals", key="momentumSignals"):
-            MomentumSignals.run()
+        if st.button('<div class="icon-button"><i class="fas fa-tachometer-alt"></i><span>Momentum Signals</span></div>', key="momentumSignals"):
+            st.session_state['selected_app'] = 'Momentum Signals'
 
     with col3:
-        st.markdown('<div class="icon-button" onclick="MomentumETF.run()"><i class="fas fa-globe"></i><br>Momentum ETF</div>', unsafe_allow_html=True)
-        if st.button("Momentum ETF", key="momentumETF"):
-            MomentumETF.run()
+        if st.button('<div class="icon-button"><i class="fas fa-globe"></i><span>Momentum ETF</span></div>', key="momentumETF"):
+            st.session_state['selected_app'] = 'Momentum ETF'
 
     with col4:
-        st.markdown('<div class="icon-button" onclick="IntradaySignals.run()"><i class="fas fa-clock"></i><br>Intraday Signals</div>', unsafe_allow_html=True)
-        if st.button("Intraday Signals", key="intradaySignals"):
+        if st.button('<div class="icon-button"><i class="fas fa-clock"></i><span>Intraday Signals</span></div>', key="intradaySignals"):
+            st.session_state['selected_app'] = 'Intraday Signals'
+
+    # Display the selected module
+    if st.session_state['selected_app']:
+        st.write(f"### {st.session_state['selected_app']}")
+        if st.session_state['selected_app'] == 'Flow Summary':
+            flowSummary.run()
+        elif st.session_state['selected_app'] == 'Momentum Signals':
+            MomentumSignals.run()
+        elif st.session_state['selected_app'] == 'Momentum ETF':
+            MomentumETF.run()
+        elif st.session_state['selected_app'] == 'Intraday Signals':
             IntradaySignals.run()
+
+        # Add a back button to return to the main menu
+        if st.button("Back to Main Menu"):
+            st.session_state['selected_app'] = None
 
 if __name__ == "__main__":
     main()
