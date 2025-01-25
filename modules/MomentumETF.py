@@ -9,9 +9,6 @@ from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, time
 import pytz
 
-def run():
-    st.title("Momentum ETF")
-
 # Parameters
 length = 14
 calc_length = 5
@@ -20,12 +17,12 @@ smooth_length = 3
 # Webhook URL for Discord
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1332367135023956009/8HH_RiKnSP7R7l7mtFHOB8kJi7ATt0TKZRrh35D82zycKC7JrFVSMpgJUmHrnDQ4mQRw"
 
-# Calculate EMA
+def run():
+    st.title("Momentum ETF")
+    main()  # Call the main function here to run the app
+
 def calculate_ema(data, period):
     return data.ewm(span=period, adjust=False).mean()
-
-# Calculate Monthly Pivot Points
-from datetime import datetime
 
 def calculate_monthly_pivot(data):
     """Calculates the monthly pivot based on High, Low, and Close prices for the current month."""
@@ -79,7 +76,6 @@ def fetch_stock_data(symbol, interval, period="6mo"):
     except Exception as e:
         st.write(f"Error fetching data for {symbol} ({interval}): {e}")
         return pd.DataFrame()
-
 
 def fetch_latest_price(symbol):
     """Fetches the latest price of the stock."""
@@ -202,19 +198,18 @@ def main():
 
     # Symbols and timeframe
     symbols = [
-    "XLC",  # Communication Services
-    "XLY",  # Consumer Discretionary
-    "XLP",  # Consumer Staples
-    "XLE",  # Energy
-    "XLF",  # Financials
-    "XLV",  # Health Care
-    "XLI",  # Industrials
-    "XLB",  # Materials
-    "XLK",  # Technology
-    "SPY",  # S&P 500
-    "QQQ",  # NASDAQ-100
-]
-
+        "XLC",  # Communication Services
+        "XLY",  # Consumer Discretionary
+        "XLP",  # Consumer Staples
+        "XLE",  # Energy
+        "XLF",  # Financials
+        "XLV",  # Health Care
+        "XLI",  # Industrials
+        "XLB",  # Materials
+        "XLK",  # Technology
+        "SPY",  # S&P 500
+        "QQQ",  # NASDAQ-100
+    ]
     timeframes = ["1d", "5d"]
 
     # Data storage
@@ -267,22 +262,17 @@ def main():
     st.dataframe(df)
 
     # Add a manual button to send the table to Discord
-    # Add a manual button to send the table to Discord
     if st.button("Send Table to Discord"):
-    # Convert the DataFrame to markdown format
-     table = df_to_markdown(df)
-     message = "Manual Push of Signals and Indicators to Discord"
-     send_to_discord(message, table)
-     st.write("Table sent to Discord manually.")
-
+        table = df_to_markdown(df)
+        message = "Manual Push of Signals and Indicators to Discord"
+        send_to_discord(message, table)
+        st.write("Table sent to Discord manually.")
 
     # Save the current signals for the next comparison
     save_signals(current_signals)
 
-
-if __name__ == "__main__":
-    main()
-
-
-    # Add your Momentum ETF logic here
     st.write("This is the Momentum ETF application.")
+
+# This part allows the script to be imported as a module or run directly
+if __name__ == "__main__":
+    run()
