@@ -4,6 +4,9 @@ from io import StringIO
 from datetime import datetime
 import streamlit as st
 
+def run():
+    st.title("Flow Summary")
+
 def fetch_data_from_urls(urls):
     all_data = pd.DataFrame()  # Initialize an empty DataFrame to combine data from all URLs
     for url in urls:
@@ -141,3 +144,6 @@ if not data.empty:
                 file_name=f"{selected_symbol}_summary.csv",
                 mime="text/csv"
             )
+
+    # Add your Momentum Signals logic here
+    st.write("This is the Flow Summary application.")
