@@ -20,7 +20,7 @@ st.markdown("""
         cursor: pointer;
         text-align: center;
         height: 150px;
-        border: 1px solid #ccc; /* Add a subtle border */
+        border: 1px solid #ccc;
     }
     .icon-button:hover {
         background-color: #d1d9e6;
@@ -51,20 +51,21 @@ def main():
 
     # We'll use markdown to create clickable divs instead of buttons
     with col1:
-        if st.markdown('<div class="icon-button" onclick="runFlowSummary()"><i class="fas fa-chart-line"></i><span>Flow Summary</span></div>', unsafe_allow_html=True):
-            st.session_state['selected_app'] = 'Flow Summary'
-
+        st.markdown('<div class="icon-button" onclick="runFlowSummary()"><i class="fas fa-chart-line"></i><span>Flow Summary</span></div>', unsafe_allow_html=True)
+    
     with col2:
-        if st.markdown('<div class="icon-button" onclick="runMomentumSignals()"><i class="fas fa-tachometer-alt"></i><span>Momentum Signals</span></div>', unsafe_allow_html=True):
-            st.session_state['selected_app'] = 'Momentum Signals'
-
+        st.markdown('<div class="icon-button" onclick="runMomentumSignals()"><i class="fas fa-tachometer-alt"></i><span>Momentum Signals</span></div>', unsafe_allow_html=True)
+    
     with col3:
-        if st.markdown('<div class="icon-button" onclick="runMomentumETF()"><i class="fas fa-globe"></i><span>Momentum ETF</span></div>', unsafe_allow_html=True):
-            st.session_state['selected_app'] = 'Momentum ETF'
-
+        st.markdown('<div class="icon-button" onclick="runMomentumETF()"><i class="fas fa-globe"></i><span>Momentum ETF</span></div>', unsafe_allow_html=True)
+    
     with col4:
-        if st.markdown('<div class="icon-button" onclick="runIntradaySignals()"><i class="fas fa-clock"></i><span>Intraday Signals</span></div>', unsafe_allow_html=True):
-            st.session_state['selected_app'] = 'Intraday Signals'
+        st.markdown('<div class="icon-button" onclick="runIntradaySignals()"><i class="fas fa-clock"></i><span>Intraday Signals</span></div>', unsafe_allow_html=True)
+
+    # Check for URL hash to determine which module to run
+    if st.experimental_get_query_params().get('module'):
+        module = st.experimental_get_query_params()['module'][0]
+        st.session_state['selected_app'] = module
 
     # Display the selected module
     if st.session_state['selected_app']:
@@ -81,21 +82,26 @@ def main():
         # Add a back button to return to the main menu
         if st.button("Back to Main Menu"):
             st.session_state['selected_app'] = None
+            st.experimental_set_query_params()
 
     # JavaScript to handle onclick events since Streamlit doesn't support them directly
     st.markdown('''
     <script>
     function runFlowSummary() {
         window.location.hash = '#Flow Summary';
+        window.location.search = '?module=Flow%20Summary';
     }
     function runMomentumSignals() {
         window.location.hash = '#Momentum Signals';
+        window.location.search = '?module=Momentum%20Signals';
     }
     function runMomentumETF() {
         window.location.hash = '#Momentum ETF';
+        window.location.search = '?module=Momentum%20ETF';
     }
     function runIntradaySignals() {
         window.location.hash = '#Intraday Signals';
+        window.location.search = '?module=Intraday%20Signals';
     }
     </script>
     ''', unsafe_allow_html=True)
