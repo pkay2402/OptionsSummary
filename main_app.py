@@ -1,5 +1,5 @@
 import streamlit as st
-from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals, WeekendRule  # Added WeekendRule
+from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals, WeekendRule
 
 # Set page configuration (must be the first Streamlit command)
 st.set_page_config(page_title="Trading Tools Hub", layout="wide")
@@ -48,7 +48,7 @@ def main():
     # Create a radio button for module selection
     selected_app = st.radio(
         "Choose a module",
-        ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals", "Weekend Rule"]  # Added WeekendRule
+        ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals", "Weekend Rule"]
     )
 
     # Display the selected module's content
