@@ -31,7 +31,7 @@ def fetch_weekly_data(symbol):
 def apply_weekend_rule(data):
     """Apply Brandt's Weekend Rule to the weekly data."""
     if data is None or len(data) < 2:
-        return None, None
+        return False, False  # Return False for both setups if data is invalid
 
     # Get the last two weeks' data
     last_week = data.iloc[-1]
@@ -47,6 +47,7 @@ def apply_weekend_rule(data):
     short_setup = last_close < prev_low
 
     return long_setup, short_setup
+
 
 def run():
     """Main function to run the Weekend Rule module."""
