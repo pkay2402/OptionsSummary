@@ -80,16 +80,8 @@ def is_market_open():
 
 # Main function
 def main():
-    last_signals = {}
-    market_status_sent = False  # Flag to track if the "Market is closed" message was sent
-
     while True:
         if is_market_open():
-            if market_status_sent:  # If we've previously sent a "market closed" message
-                print("Market is now open!")
-                send_to_discord("Market has opened. Starting signal detection!")
-                market_status_sent = False
-
             # Fetch and process data only if the market is open
             print("Market is open! Fetching data...")
             for symbol in SYMBOLS:
@@ -109,11 +101,9 @@ def main():
 
             print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         else:
-            if not market_status_sent:
-                print("Market is closed!")
-                send_to_discord("Market is currently closed. Signals will resume during market hours.")
-                market_status_sent = True
-
+            # Do nothing when the market is closed
+            print("Market is closed, no signals will be sent.")
+        
         time.sleep(900)  # Sleep for 15 minutes
 
 # This part allows the script to be imported as a module or run directly
