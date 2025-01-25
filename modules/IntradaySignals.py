@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import time  # Standard time module
+import time
 from datetime import datetime, time as dt_time
 import requests
 import pytz
