@@ -186,8 +186,11 @@ def main():
     # Refresh the app every 4 hours (14400000 milliseconds)
     st_autorefresh(interval=14400000, key="data_refresh")
 
-    # Check if the market is open
-    if not is_market_open():
+    # Add a toggle to bypass market hours check
+    bypass_market_check = st.checkbox("Bypass Market Hours Check (View Data Even When Market is Closed)")
+
+    # Check if the market is open or if the user has chosen to bypass the check
+    if not is_market_open() and not bypass_market_check:
         st.write("Market is currently closed. The app will resume during market hours.")
         return
 
