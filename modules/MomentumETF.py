@@ -3,11 +3,10 @@ import numpy as np
 import yfinance as yf
 import streamlit as st
 import json
-import time
 import requests
-from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, time
 import pytz
+from streamlit_autorefresh import st_autorefresh
 
 # Parameters
 length = 14
@@ -17,20 +16,22 @@ smooth_length = 3
 # Webhook URL for Discord
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1332367135023956009/8HH_RiKnSP7R7l7mtFHOB8kJi7ATt0TKZRrh35D82zycKC7JrFVSMpgJUmHrnDQ4mQRw"
 
+# File to store last signals
+last_signals_file = "last_signals.json"
+
 def run():
+    """Main function to run the Streamlit application."""
     st.title("Momentum ETF")
-    main()  # Call the main function here to run the app
+    main()
 
 def calculate_ema(data, period):
+    """Calculate Exponential Moving Average (EMA) for a given period."""
     return data.ewm(span=period, adjust=False).mean()
 
 def calculate_monthly_pivot(data):
-    """Calculates the monthly pivot based on High, Low, and Close prices for the current month."""
+    """Calculate the monthly pivot based on High, Low, and Close prices for the current month."""
     # Flatten MultiIndex columns
     data.columns = ['_'.join(filter(None, col)) for col in data.columns]
-
-    # Debugging: Print the flattened columns
-    print("Flattened columns:", data.columns)
 
     # Extract the ticker name from the columns
     ticker = [col.split('_')[1] for col in data.columns if '_' in col][0]
@@ -64,31 +65,31 @@ def calculate_monthly_pivot(data):
     pivot = (high + low + close) / 3
     return pivot
 
+@st.cache_data
 def fetch_stock_data(symbol, interval, period="6mo"):
-    """Fetches stock data using yfinance directly."""
+    """Fetch stock data using yfinance."""
     try:
         data = yf.download(symbol, period=period, interval=interval)
         if data.empty:
-            st.write(f"No data received for {symbol} ({interval})")
+            st.warning(f"No data received for {symbol} ({interval})")
             return pd.DataFrame()
-        # Ensure all necessary columns are present
         return data[['Open', 'High', 'Low', 'Close', 'Volume']]
     except Exception as e:
-        st.write(f"Error fetching data for {symbol} ({interval}): {e}")
+        st.error(f"Error fetching data for {symbol} ({interval}): {e}")
         return pd.DataFrame()
 
 def fetch_latest_price(symbol):
-    """Fetches the latest price of the stock."""
+    """Fetch the latest price of the stock."""
     try:
         ticker = yf.Ticker(symbol)
         price = ticker.history(period="1d")['Close'].iloc[-1]
         return price
     except Exception as e:
-        st.write(f"Error fetching latest price for {symbol}: {e}")
+        st.error(f"Error fetching latest price for {symbol}: {e}")
         return None
 
 def calculate_signals(stock_data):
-    """Calculates buy/sell signals."""
+    """Calculate buy/sell signals."""
     if stock_data.empty or len(stock_data) < length + smooth_length * 2:
         return pd.Series(dtype=bool), pd.Series(dtype=bool)
 
@@ -108,7 +109,7 @@ def calculate_signals(stock_data):
     return buy_signals, sell_signals
 
 def analyze_stock(symbol, timeframes):
-    """Analyzes a stock across the specified timeframes."""
+    """Analyze a stock across the specified timeframes."""
     results = {}
     for timeframe in timeframes:
         stock_data = fetch_stock_data(symbol, timeframe)
@@ -125,15 +126,12 @@ def analyze_stock(symbol, timeframes):
     return results
 
 def calculate_indicators(data):
-    """Calculates EMA and Monthly Pivot values."""
+    """Calculate EMA and Monthly Pivot values."""
     data['EMA_21'] = calculate_ema(data['Close'], 21)
     data['EMA_50'] = calculate_ema(data['Close'], 50)
     data['EMA_200'] = calculate_ema(data['Close'], 200)
     monthly_pivot = calculate_monthly_pivot(data)
     return data, monthly_pivot
-
-# File to store last signals
-last_signals_file = "last_signals.json"
 
 def save_signals(data):
     """Save the current signals to a JSON file."""
@@ -155,15 +153,14 @@ def send_to_discord(message, table=None):
     }
 
     if table is not None:
-        # Send table as a code block (markdown format) to Discord
         payload["content"] += "\n\n```" + table + "```"
     
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
-        response.raise_for_status()  # Check if request was successful
-        st.write(f"Message sent to Discord: {message}")  # Confirm in Streamlit
+        response.raise_for_status()
+        st.success(f"Message sent to Discord: {message}")
     except requests.exceptions.RequestException as e:
-        st.write(f"Error sending to Discord: {e}")  # Display the error in Streamlit
+        st.error(f"Error sending to Discord: {e}")
 
 def df_to_markdown(df):
     """Convert a DataFrame to a markdown table format."""
@@ -171,29 +168,33 @@ def df_to_markdown(df):
 
 def is_market_open():
     """Check if the current time is within market hours (Monday to Friday, 9:30 AM to 4:00 PM EST)."""
-    tz = pytz.timezone('US/Eastern')  # Set timezone to Eastern Time
+    tz = pytz.timezone('US/Eastern')
     now = datetime.now(tz)
-    market_open = time(9, 30)  # Market opens at 9:30 AM
-    market_close = time(16, 0)  # Market closes at 4:00 PM
+    market_open = time(9, 30)
+    market_close = time(16, 0)
 
-    if now.weekday() >= 5:  # Check if it's Saturday (5) or Sunday (6)
+    if now.weekday() >= 5:  # Saturday or Sunday
         return False
 
-    if market_open <= now.time() <= market_close:  # Check if current time is within market hours
+    if market_open <= now.time() <= market_close:
         return True
 
     return False
 
 def main():
+    """Main function to run the Momentum ETF app."""
     # Refresh the app every 4 hours (14400000 milliseconds)
     st_autorefresh(interval=14400000, key="data_refresh")
 
-    # Check if the market is open
-    if not is_market_open():
+    # Add a toggle to bypass market hours check
+    bypass_market_check = st.checkbox("Bypass Market Hours Check (View Data Even When Market is Closed)")
+
+    # Check if the market is open or if the user has chosen to bypass the check
+    if not is_market_open() and not bypass_market_check:
         st.write("Market is currently closed. The app will resume during market hours.")
         return
 
-    st.write(f"App refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  # Log refresh time
+    st.write(f"App refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     st.title("ETF Summary with 1D and 5D")
 
     # Symbols and timeframe
@@ -250,7 +251,7 @@ def main():
 
         # Compare current signals with last signals
         current_signal = current_signals[symbol]
-        last_signal = last_signals.get(symbol, "Neutral")  # Default to "Neutral" if no previous data
+        last_signal = last_signals.get(symbol, "Neutral")
 
         # Detect signal change
         if current_signal != last_signal:
