@@ -1,6 +1,9 @@
 import streamlit as st
 from modules import flowSummary, MomentumSignals, MomentumETF, IntradaySignals
 
+# Set page configuration (must be the first Streamlit command)
+st.set_page_config(page_title="Trading Tools Hub", layout="wide")
+
 # Custom CSS to style buttons and improve visibility
 st.markdown("""
     <style>
@@ -39,43 +42,25 @@ st.markdown("""
 # Include Font Awesome for icons
 st.markdown('<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.1/css/all.css" integrity="sha384-vp86vTRFVJgpjF9jiIGPEEqYqlDwgyBgEF109VFjmqGmIY/Y4HV4d3Gp2irVfcrp" crossorigin="anonymous">', unsafe_allow_html=True)
 
-# Dictionary to map module names to their run functions
-MODULES = {
-    "Flow Summary": flowSummary.run,
-    "Momentum Signals": MomentumSignals.run,
-    "Momentum ETF": MomentumETF.run,
-    "Intraday Signals": IntradaySignals.run,
-}
-
 def main():
     st.title("Trading Tools Hub")
 
-    # Initialize session state for navigation
-    if "current_module" not in st.session_state:
-        st.session_state.current_module = None
-
-    # Sidebar for navigation
-    with st.sidebar:
-        st.header("Navigation")
-        for module_name in MODULES.keys():
-            if st.button(module_name):
-                st.session_state.current_module = module_name
+    # Create a radio button for module selection
+    selected_app = st.radio("Choose a module", ["Flow Summary", "Momentum Signals", "Momentum ETF", "Intraday Signals"])
 
     # Display the selected module's content
-    if st.session_state.current_module:
-        try:
-            # Run the selected module
-            MODULES[st.session_state.current_module]()
-        except Exception as e:
-            st.error(f"An error occurred while running {st.session_state.current_module}: {e}")
-            st.session_state.current_module = None  # Reset to main menu on error
+    if selected_app == "Flow Summary":
+        flowSummary.run()
+    elif selected_app == "Momentum Signals":
+        MomentumSignals.run()
+    elif selected_app == "Momentum ETF":
+        MomentumETF.run()
+    elif selected_app == "Intraday Signals":
+        IntradaySignals.run()
 
-        # Back button to return to the main menu
-        if st.button("Back to Main Menu"):
-            st.session_state.current_module = None
-    else:
-        # Main menu with module selection
-        st.write("Welcome to the Trading Tools Hub! Select a module from the sidebar to get started.")
+    # Back button to return to the main menu (clears the selection)
+    if st.button("Back to Main Menu"):
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
