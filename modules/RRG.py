@@ -25,13 +25,13 @@ def calculate_relative_strength(stock_data, benchmark_data):
     """Calculate relative strength (stock price / benchmark price)."""
     if stock_data is None or benchmark_data is None:
         return None
-    return stock_data / benchmark_data
+    return (stock_data / benchmark_data).squeeze()  # Ensure it's a Series
 
 def calculate_momentum(data, window=MOMENTUM_WINDOW):
     """Calculate momentum as the percentage change over a given window."""
     if data is None:
         return None
-    return data.pct_change(window)
+    return data.pct_change(window, fill_method=None).squeeze()  # Ensure it's a Series
 
 def calculate_rrg_data(stocks, benchmark):
     """Calculate RRG data (relative strength and momentum) for the given stocks."""
@@ -51,7 +51,7 @@ def calculate_rrg_data(stocks, benchmark):
 
         # Ensure relative_strength and momentum are valid
         if relative_strength is not None and momentum is not None:
-            # Get the latest values
+            # Extract the last value from the Series
             last_relative_strength = relative_strength.iloc[-1]
             last_momentum = momentum.iloc[-1]
 
@@ -59,8 +59,8 @@ def calculate_rrg_data(stocks, benchmark):
             if not pd.isna(last_relative_strength) and not pd.isna(last_momentum):
                 rrg_data.append({
                     "Stock": stock,
-                    "Relative Strength": last_relative_strength,
-                    "Momentum": last_momentum
+                    "Relative Strength": last_relative_strength,  # Store the numerical value
+                    "Momentum": last_momentum  # Store the numerical value
                 })
 
     return pd.DataFrame(rrg_data)
