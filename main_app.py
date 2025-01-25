@@ -63,8 +63,9 @@ def main():
         st.markdown('<div class="icon-button" onclick="runIntradaySignals()"><i class="fas fa-clock"></i><span>Intraday Signals</span></div>', unsafe_allow_html=True)
 
     # Check for URL hash to determine which module to run
-    if st.experimental_get_query_params().get('module'):
-        module = st.experimental_get_query_params()['module'][0]
+    query_params = st.query_params
+    if 'module' in query_params:
+        module = query_params['module'][0]
         st.session_state['selected_app'] = module
 
     # Display the selected module
@@ -82,7 +83,7 @@ def main():
         # Add a back button to return to the main menu
         if st.button("Back to Main Menu"):
             st.session_state['selected_app'] = None
-            st.experimental_set_query_params()
+            st.query_params.clear()
 
     # JavaScript to handle onclick events since Streamlit doesn't support them directly
     st.markdown('''
