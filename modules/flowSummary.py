@@ -45,6 +45,84 @@ def fetch_data_from_urls(urls: List[str]) -> pd.DataFrame:
             data_frames.append(df)
     return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
 
+def filter_risk_reversal(df: pd.DataFrame, exclude_symbols: List[str], strike_proximity: int = 5) -> pd.DataFrame:
+    """
+    Filter for Risk Reversal trades by grouping calls and puts with similar strike prices.
+    
+    Args:
+        df: Input DataFrame containing options data.
+        exclude_symbols: List of symbols to exclude.
+        strike_proximity: Maximum allowed difference between call and put strike prices.
+    
+    Returns:
+        DataFrame with reshaped data for Risk Reversal trades.
+    """
+    if exclude_symbols:
+        df = df[~df['Symbol'].isin(exclude_symbols)]
+
+    # Separate calls and puts
+    calls = df[df['Call/Put'] == 'C']
+    puts = df[df['Call/Put'] == 'P']
+
+    # Merge calls and puts on Symbol and Expiration
+    merged = pd.merge(
+        calls, puts,
+        on=['Symbol', 'Expiration'],
+        suffixes=('_call', '_put')
+    )
+
+    # Filter for strike price proximity and volume
+    merged = merged[
+        (abs(merged['Strike Price_call'] - merged['Strike Price_put']) <= strike_proximity) &
+        (merged['Volume_call'] >= 3000) &
+        (merged['Volume_put'] >= 3000)
+    ]
+
+    # Select relevant columns
+    columns_to_keep = [
+        'Symbol', 'Expiration',
+        'Strike Price_call', 'Volume_call', 'Last Price_call',
+        'Strike Price_put', 'Volume_put', 'Last Price_put'
+    ]
+    merged = merged[columns_to_keep]
+
+    # Drop duplicates based on Symbol, Expiration, and Strike Prices
+    merged = merged.drop_duplicates(subset=[
+        'Symbol', 'Expiration', 'Strike Price_call', 'Strike Price_put'
+    ])
+
+    # Reshape the data to group calls and puts vertically
+    reshaped_data = []
+    for _, row in merged.iterrows():
+        # Append call data
+        reshaped_data.append({
+            'Symbol': row['Symbol'],
+            'Type': 'Call',
+            'Expiration': row['Expiration'],
+            'Strike Price': row['Strike Price_call'],
+            'Volume': row['Volume_call'],
+            'Last Price': row['Last Price_call']
+        })
+        # Append put data
+        reshaped_data.append({
+            'Symbol': row['Symbol'],
+            'Type': 'Put',
+            'Expiration': row['Expiration'],
+            'Strike Price': row['Strike Price_put'],
+            'Volume': row['Volume_put'],
+            'Last Price': row['Last Price_put']
+        })
+
+    # Convert reshaped data to DataFrame
+    reshaped_df = pd.DataFrame(reshaped_data)
+
+    # Drop duplicates in the reshaped DataFrame
+    reshaped_df = reshaped_df.drop_duplicates(subset=[
+        'Symbol', 'Expiration', 'Strike Price', 'Type'
+    ])
+
+    return reshaped_df
+
 def summarize_transactions(df: pd.DataFrame, whale_filter: bool = False, exclude_symbols: List[str] = None) -> pd.DataFrame:
     """Summarize transactions from the given DataFrame."""
     if exclude_symbols:
