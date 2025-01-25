@@ -1,154 +1,13 @@
-import pandas as pd
-import requests
-from io import StringIO
-from datetime import datetime
-from typing import List, Optional
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def validate_csv_content_type(response: requests.Response) -> bool:
-    """Validate if the response content type is CSV."""
-    return 'text/csv' in response.headers.get('Content-Type', '')
-
-def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply filters to the DataFrame."""
-    df = df[df['Volume'] >= 100]
-    df['Expiration'] = pd.to_datetime(df['Expiration'])
-    df = df[df['Expiration'].dt.date >= datetime.now().date()]
-    return df
-
-def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
-    """Fetch and process data from a single URL."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-
-        if validate_csv_content_type(response):
-            csv_data = StringIO(response.text)
-            df = pd.read_csv(csv_data)
-            return apply_filters(df)
-        else:
-            logger.warning(f"Data from {url} is not in CSV format. Skipping...")
-    except Exception as e:
-        logger.error(f"Error fetching or processing data from {url}: {e}")
-    return None
-
-def fetch_data_from_urls(urls: List[str]) -> pd.DataFrame:
-    """Fetch and combine data from multiple CSV URLs into a single DataFrame."""
-    data_frames = []
-    for url in urls:
-        df = fetch_data_from_url(url)
-        if df is not None:
-            data_frames.append(df)
-    return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
-
-def filter_risk_reversal(df: pd.DataFrame, exclude_symbols: List[str], strike_proximity: int = 5) -> pd.DataFrame:
-    """
-    Filter for Risk Reversal trades by grouping calls and puts with similar strike prices.
-    
-    Args:
-        df: Input DataFrame containing options data.
-        exclude_symbols: List of symbols to exclude.
-        strike_proximity: Maximum allowed difference between call and put strike prices.
-    
-    Returns:
-        DataFrame with reshaped data for Risk Reversal trades.
-    """
-    if exclude_symbols:
-        df = df[~df['Symbol'].isin(exclude_symbols)]
-
-    # Separate calls and puts
-    calls = df[df['Call/Put'] == 'C']
-    puts = df[df['Call/Put'] == 'P']
-
-    # Merge calls and puts on Symbol and Expiration
-    merged = pd.merge(
-        calls, puts,
-        on=['Symbol', 'Expiration'],
-        suffixes=('_call', '_put')
-    )
-
-    # Filter for strike price proximity and volume
-    merged = merged[
-        (abs(merged['Strike Price_call'] - merged['Strike Price_put']) <= strike_proximity) &
-        (merged['Volume_call'] >= 3000) &
-        (merged['Volume_put'] >= 3000)
-    ]
-
-    # Select relevant columns
-    columns_to_keep = [
-        'Symbol', 'Expiration',
-        'Strike Price_call', 'Volume_call', 'Last Price_call',
-        'Strike Price_put', 'Volume_put', 'Last Price_put'
-    ]
-    merged = merged[columns_to_keep]
-
-    # Drop duplicates based on Symbol, Expiration, and Strike Prices
-    merged = merged.drop_duplicates(subset=[
-        'Symbol', 'Expiration', 'Strike Price_call', 'Strike Price_put'
-    ])
-
-    # Reshape the data to group calls and puts vertically
-    reshaped_data = []
-    for _, row in merged.iterrows():
-        # Append call data
-        reshaped_data.append({
-            'Symbol': row['Symbol'],
-            'Type': 'Call',
-            'Expiration': row['Expiration'],
-            'Strike Price': row['Strike Price_call'],
-            'Volume': row['Volume_call'],
-            'Last Price': row['Last Price_call']
-        })
-        # Append put data
-        reshaped_data.append({
-            'Symbol': row['Symbol'],
-            'Type': 'Put',
-            'Expiration': row['Expiration'],
-            'Strike Price': row['Strike Price_put'],
-            'Volume': row['Volume_put'],
-            'Last Price': row['Last Price_put']
-        })
-
-    # Convert reshaped data to DataFrame
-    reshaped_df = pd.DataFrame(reshaped_data)
-
-    # Drop duplicates in the reshaped DataFrame
-    reshaped_df = reshaped_df.drop_duplicates(subset=[
-        'Symbol', 'Expiration', 'Strike Price', 'Type'
-    ])
-
-    return reshaped_df
-
-def summarize_transactions(df: pd.DataFrame, whale_filter: bool = False, exclude_symbols: List[str] = None) -> pd.DataFrame:
-    """Summarize transactions from the given DataFrame."""
-    if exclude_symbols:
-        df = df[~df['Symbol'].isin(exclude_symbols)]
-
-    df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
-
-    if whale_filter:
-        df = df[df['Transaction Value'] > 5_000_000]
-
-    summary = (
-        df.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
-        .agg({'Volume': 'sum', 'Transaction Value': 'sum'})
-        .reset_index()
-    )
-    return summary.sort_values(by='Transaction Value', ascending=False)
-
-# Streamlit-specific code
 def run():
     """Main function to run the Streamlit application."""
     import streamlit as st
 
-    st.set_page_config(page_title="Flow Summary", layout="wide")
+    # Remove this line:
+    # st.set_page_config(page_title="Flow Summary", layout="wide")
+
     st.title("📊 Flow Summary")
 
-    # Sidebar for filters and options
+    # Rest of the code remains the same...
     with st.sidebar:
         st.header("Filters & Options")
         whale_option = st.checkbox("Show Whale Transactions Only")
@@ -241,7 +100,3 @@ def run():
             )
 
     st.write("This is the Flow Summary application.")
-
-# Run the Streamlit app when the script is executed directly
-if __name__ == "__main__":
-    run()
