@@ -90,32 +90,31 @@ def main():
                 send_to_discord("Market is currently closed. Signals will resume during market hours.")
                 market_status_sent = True
             time.sleep(900)  # Sleep for 15 minutes
-            continue
         else:
             if market_status_sent:
                 print("Market is now open!")
                 send_to_discord("Market has opened. Starting signal detection!")
                 market_status_sent = False
 
-        # Fetch and process data only if the market is open
-        print("Market is open! Fetching data...")
-        for symbol in SYMBOLS:
-            stock_data = fetch_stock_data(symbol, INTERVAL, period="1d")
-            if stock_data.empty:
-                continue
+            # Fetch and process data only if the market is open
+            print("Market is open! Fetching data...")
+            for symbol in SYMBOLS:
+                stock_data = fetch_stock_data(symbol, INTERVAL, period="1d")
+                if stock_data.empty:
+                    continue
 
-            buy_signals, sell_signals = calculate_signals(stock_data)
+                buy_signals, sell_signals = calculate_signals(stock_data)
 
-            if not buy_signals.empty and buy_signals.iloc[-1]:
-                message = f"Buy signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                send_to_discord(message)
+                if not buy_signals.empty and buy_signals.iloc[-1]:
+                    message = f"Buy signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    send_to_discord(message)
 
-            if not sell_signals.empty and sell_signals.iloc[-1]:
-                message = f"Sell signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                send_to_discord(message)
+                if not sell_signals.empty and sell_signals.iloc[-1]:
+                    message = f"Sell signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    send_to_discord(message)
 
-        print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(900)  # Run every 15 minutes
+            print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        time.sleep(900)  # Run every 15 minutes, regardless of market open status
 
 # This part allows the script to be imported as a module or run directly
 if __name__ == "__main__":
