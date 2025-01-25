@@ -45,6 +45,23 @@ def fetch_data_from_urls(urls: List[str]) -> pd.DataFrame:
             data_frames.append(df)
     return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
 
+def summarize_transactions(df: pd.DataFrame, whale_filter: bool = False, exclude_symbols: List[str] = None) -> pd.DataFrame:
+    """Summarize transactions from the given DataFrame."""
+    if exclude_symbols:
+        df = df[~df['Symbol'].isin(exclude_symbols)]
+
+    df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
+
+    if whale_filter:
+        df = df[df['Transaction Value'] > 5_000_000]
+
+    summary = (
+        df.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
+        .agg({'Volume': 'sum', 'Transaction Value': 'sum'})
+        .reset_index()
+    )
+    return summary.sort_values(by='Transaction Value', ascending=False)
+
 def run():
     """Main function to run the Streamlit application."""
     import streamlit as st
