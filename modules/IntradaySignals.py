@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import time
-from datetime import datetime, time as dt_time
+import streamlit as st
 import requests
+from datetime import datetime, time as dt_time
 import pytz
+from streamlit_autorefresh import st_autorefresh
 
 # Parameters
 SYMBOLS = ["SPY", "QQQ", "NVDA", "TSLA"]
@@ -15,28 +16,29 @@ CALC_LENGTH = 5
 SMOOTH_LENGTH = 3
 
 def run():
-    import streamlit as st
+    """Main function to run the Streamlit application."""
     st.title("Intraday Signals")
-    main()  # Call the main function here to run the app
+    main()
 
-# Calculate EMA
 def calculate_ema(data, period):
+    """Calculate Exponential Moving Average (EMA) for a given period."""
     return data.ewm(span=period, adjust=False).mean()
 
-# Fetch stock data
+@st.cache_data
 def fetch_stock_data(symbol, interval, period="1d"):
+    """Fetch stock data using yfinance."""
     try:
         data = yf.download(symbol, period=period, interval=interval)
         if data.empty:
-            print(f"No data received for {symbol} ({interval})")
+            st.warning(f"No data received for {symbol} ({interval})")
             return pd.DataFrame()
         return data[['Open', 'High', 'Low', 'Close', 'Volume']]
     except Exception as e:
-        print(f"Error fetching data for {symbol} ({interval}): {e}")
+        st.error(f"Error fetching data for {symbol} ({interval}): {e}")
         return pd.DataFrame()
 
-# Calculate buy/sell signals
 def calculate_signals(stock_data):
+    """Calculate buy/sell signals."""
     if stock_data.empty or len(stock_data) < LENGTH + SMOOTH_LENGTH * 2:
         return pd.Series(dtype=bool), pd.Series(dtype=bool)
 
@@ -55,56 +57,62 @@ def calculate_signals(stock_data):
 
     return buy_signals, sell_signals
 
-# Send alerts to Discord
 def send_to_discord(message):
+    """Send message to a Discord webhook."""
     payload = {"content": message}
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
         response.raise_for_status()
-        print(f"Message sent to Discord: {message}")
+        st.success(f"Message sent to Discord: {message}")
     except requests.exceptions.RequestException as e:
-        print(f"Error sending to Discord: {e}")
+        st.error(f"Error sending to Discord: {e}")
 
-# Check market hours
 def is_market_open():
     """Check if the current time is within market hours (Monday to Friday, 9:30 AM to 4:00 PM EST)."""
-    tz = pytz.timezone('US/Eastern')  # Set timezone to Eastern Time
+    tz = pytz.timezone('US/Eastern')
     now = datetime.now(tz)
     market_open = dt_time(9, 30)
     market_close = dt_time(16, 0)
 
-    if now.weekday() >= 5:  # Check if it's Saturday (5) or Sunday (6)
+    if now.weekday() >= 5:  # Saturday or Sunday
         return False
 
     return market_open <= now.time() <= market_close
 
-# Main function
 def main():
-    while True:
-        if is_market_open():
-            # Fetch and process data only if the market is open
-            print("Market is open! Fetching data...")
-            for symbol in SYMBOLS:
-                stock_data = fetch_stock_data(symbol, INTERVAL, period="1d")
-                if stock_data.empty:
-                    continue
+    """Main function to run the Intraday Signals app."""
+    # Refresh the app every 15 minutes (900000 milliseconds)
+    st_autorefresh(interval=900000, key="data_refresh")
 
-                buy_signals, sell_signals = calculate_signals(stock_data)
+    # Add a toggle to bypass market hours check
+    bypass_market_check = st.checkbox("Bypass Market Hours Check (View Data Even When Market is Closed)")
 
-                if not buy_signals.empty and buy_signals.iloc[-1]:
-                    message = f"Buy signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                    send_to_discord(message)
+    # Check if the market is open or if the user has chosen to bypass the check
+    if not is_market_open() and not bypass_market_check:
+        st.write("Market is currently closed. The app will resume during market hours.")
+        return
 
-                if not sell_signals.empty and sell_signals.iloc[-1]:
-                    message = f"Sell signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                    send_to_discord(message)
+    st.write(f"App refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-            print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        else:
-            # Do nothing when the market is closed
-            print("Market is closed, no signals will be sent.")
-        
-        time.sleep(900)  # Sleep for 15 minutes
+    # Fetch and process data
+    for symbol in SYMBOLS:
+        stock_data = fetch_stock_data(symbol, INTERVAL, period="1d")
+        if stock_data.empty:
+            continue
+
+        buy_signals, sell_signals = calculate_signals(stock_data)
+
+        if not buy_signals.empty and buy_signals.iloc[-1]:
+            message = f"Buy signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            st.success(message)
+            send_to_discord(message)
+
+        if not sell_signals.empty and sell_signals.iloc[-1]:
+            message = f"Sell signal detected for {symbol} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            st.error(message)
+            send_to_discord(message)
+
+    st.write("This is the Intraday Signals application.")
 
 # This part allows the script to be imported as a module or run directly
 if __name__ == "__main__":
