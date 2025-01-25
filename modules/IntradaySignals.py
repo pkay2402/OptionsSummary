@@ -84,14 +84,8 @@ def main():
     market_status_sent = False  # Flag to track if the "Market is closed" message was sent
 
     while True:
-        if not is_market_open():
-            if not market_status_sent:
-                print("Market is closed!")
-                send_to_discord("Market is currently closed. Signals will resume during market hours.")
-                market_status_sent = True
-            time.sleep(900)  # Sleep for 15 minutes
-        else:
-            if market_status_sent:
+        if is_market_open():
+            if market_status_sent:  # If we've previously sent a "market closed" message
                 print("Market is now open!")
                 send_to_discord("Market has opened. Starting signal detection!")
                 market_status_sent = False
@@ -114,7 +108,13 @@ def main():
                     send_to_discord(message)
 
             print(f"Checked signals at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(900)  # Run every 15 minutes, regardless of market open status
+        else:
+            if not market_status_sent:
+                print("Market is closed!")
+                send_to_discord("Market is currently closed. Signals will resume during market hours.")
+                market_status_sent = True
+
+        time.sleep(900)  # Sleep for 15 minutes
 
 # This part allows the script to be imported as a module or run directly
 if __name__ == "__main__":
