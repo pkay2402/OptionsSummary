@@ -49,24 +49,22 @@ def main():
     # Use columns to layout icons
     col1, col2, col3, col4 = st.columns(4)
 
-    # We'll use markdown to create clickable divs instead of buttons
+    # We'll use buttons to trigger module switching (instead of JS)
     with col1:
-        st.markdown('<div class="icon-button" onclick="runFlowSummary()"><i class="fas fa-chart-line"></i><span>Flow Summary</span></div>', unsafe_allow_html=True)
+        if st.button("Flow Summary"):
+            st.session_state['selected_app'] = 'Flow Summary'
     
     with col2:
-        st.markdown('<div class="icon-button" onclick="runMomentumSignals()"><i class="fas fa-tachometer-alt"></i><span>Momentum Signals</span></div>', unsafe_allow_html=True)
+        if st.button("Momentum Signals"):
+            st.session_state['selected_app'] = 'Momentum Signals'
     
     with col3:
-        st.markdown('<div class="icon-button" onclick="runMomentumETF()"><i class="fas fa-globe"></i><span>Momentum ETF</span></div>', unsafe_allow_html=True)
+        if st.button("Momentum ETF"):
+            st.session_state['selected_app'] = 'Momentum ETF'
     
     with col4:
-        st.markdown('<div class="icon-button" onclick="runIntradaySignals()"><i class="fas fa-clock"></i><span>Intraday Signals</span></div>', unsafe_allow_html=True)
-
-    # Check for URL hash to determine which module to run
-    query_params = st.query_params
-    if 'module' in query_params:
-        module = query_params['module'][0]
-        st.session_state['selected_app'] = module
+        if st.button("Intraday Signals"):
+            st.session_state['selected_app'] = 'Intraday Signals'
 
     # Display the selected module
     if st.session_state['selected_app']:
@@ -83,29 +81,6 @@ def main():
         # Add a back button to return to the main menu
         if st.button("Back to Main Menu"):
             st.session_state['selected_app'] = None
-            st.query_params.clear()
-
-    # JavaScript to handle onclick events since Streamlit doesn't support them directly
-    st.markdown('''
-    <script>
-    function runFlowSummary() {
-        window.location.hash = '#Flow Summary';
-        window.location.search = '?module=Flow%20Summary';
-    }
-    function runMomentumSignals() {
-        window.location.hash = '#Momentum Signals';
-        window.location.search = '?module=Momentum%20Signals';
-    }
-    function runMomentumETF() {
-        window.location.hash = '#Momentum ETF';
-        window.location.search = '?module=Momentum%20ETF';
-    }
-    function runIntradaySignals() {
-        window.location.hash = '#Intraday Signals';
-        window.location.search = '?module=Intraday%20Signals';
-    }
-    </script>
-    ''', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
