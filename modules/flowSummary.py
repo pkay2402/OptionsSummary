@@ -1,13 +1,57 @@
+import pandas as pd
+import requests
+from io import StringIO
+from datetime import datetime
+import logging
+from typing import List, Optional
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def validate_csv_content_type(response: requests.Response) -> bool:
+    """Validate if the response content type is CSV."""
+    return 'text/csv' in response.headers.get('Content-Type', '')
+
+def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply filters to the DataFrame."""
+    df = df[df['Volume'] >= 100]
+    df['Expiration'] = pd.to_datetime(df['Expiration'])
+    df = df[df['Expiration'].dt.date >= datetime.now().date()]
+    return df
+
+def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
+    """Fetch and process data from a single URL."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+
+        if validate_csv_content_type(response):
+            csv_data = StringIO(response.text)
+            df = pd.read_csv(csv_data)
+            return apply_filters(df)
+        else:
+            logger.warning(f"Data from {url} is not in CSV format. Skipping...")
+    except Exception as e:
+        logger.error(f"Error fetching or processing data from {url}: {e}")
+    return None
+
+def fetch_data_from_urls(urls: List[str]) -> pd.DataFrame:
+    """Fetch and combine data from multiple CSV URLs into a single DataFrame."""
+    data_frames = []
+    for url in urls:
+        df = fetch_data_from_url(url)
+        if df is not None:
+            data_frames.append(df)
+    return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
+
 def run():
     """Main function to run the Streamlit application."""
     import streamlit as st
 
-    # Remove this line:
-    # st.set_page_config(page_title="Flow Summary", layout="wide")
-
     st.title("📊 Flow Summary")
 
-    # Rest of the code remains the same...
+    # Sidebar for filters and options
     with st.sidebar:
         st.header("Filters & Options")
         whale_option = st.checkbox("Show Whale Transactions Only")
