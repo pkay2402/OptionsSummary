@@ -17,7 +17,7 @@ def main():
                                            "Momentum ETF", 
                                            "Intraday Signals",
                                            "Institutional Data Dashboard",
-                                           "Multi Scanner", 
+                                           "Stock Insights", 
                                            "Weekend Rule"])  # Removed "RRC"
 
     if app_selection == "Flow Summary":
@@ -30,7 +30,7 @@ def main():
         IntradaySignals_run()
     elif app_selection == "Institutional Data Dashboard":
         InstitutionalDataDashboard_run()
-    elif app_selection == "Multi Scanner":
+    elif app_selection == "Stock Insights":
         StockInsights_run()
     elif app_selection == "Weekend Rule":
         WeekendRule_run()
