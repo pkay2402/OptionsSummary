@@ -1,0 +1,1 @@
+tradingview_script_name tradingview_script_code tradingview_script_description
