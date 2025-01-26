@@ -275,6 +275,20 @@ def send_chart_to_discord_webhook(image_buffer, webhook_url):
 def run():
     st.title("Institutional Data Dashboard")
 
+    # About Section
+    st.markdown("""
+    ### About This Dashboard
+    This tool analyzes institutional trading data from FINRA to identify stocks with significant trading activity. 
+    It focuses on:
+    - **High-volume stocks**: Stocks with total trading volume over 10 million.
+    - **Buy-to-Sell Ratio**: Stocks with a high buy-to-sell ratio, indicating strong buying pressure.
+    - **Forward Performance**: Tracks the 5-day and 10-day performance of selected stocks.
+    - **User-Defined Stocks**: Allows users to analyze specific stocks over the last 20 days.
+    - **Large Trades**: Identifies trades with a buy-to-sell ratio > 5 and total volume > 2 million.
+
+    Use the filters and inputs on the sidebar to customize your analysis.
+    """)
+
     # Date input for user to select the date
     selected_date = st.date_input("Select a date", datetime.now() - timedelta(days=1))
     formatted_date = selected_date.strftime("%Y%m%d")
