@@ -108,8 +108,13 @@ def display_news_and_sentiment(symbol):
         news = stock.news
         if news:
             for item in news[:5]:  # Show top 5 news items
-                st.write(f"**{item['title']}**")
-                st.write(f"*{item['publisher']}* - {item['link']}")
+                # Safely access 'title', 'publisher', and 'link' keys
+                title = item.get('title', 'No title available')
+                publisher = item.get('publisher', 'Unknown publisher')
+                link = item.get('link', '#')
+                
+                st.write(f"**{title}**")
+                st.write(f"*{publisher}* - [Read more]({link})")
         else:
             st.warning("No news available.")
     except Exception as e:
