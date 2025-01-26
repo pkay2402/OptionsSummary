@@ -1,1 +1,2 @@
-thinkorswim_script_name thinkorswim_script_code thinkorswim_script_description 
+thinkorswim_script_name thinkorswim_script_code thinkorswim_script_description
+Daily Chart              http://tos.mx/!tpFwpLnZ                       A chart on Daily TF. When you import this chart, it comes with a bunch studies.EMAs,Relative Strength,TTM squeeze,MACD,Volume high and low etc
