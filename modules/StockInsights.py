@@ -49,9 +49,18 @@ def display_stock_overview(info):
         else:
             st.metric("Market Cap", "N/A")
     with col3:
-        st.metric("Current Price", f"${info.get('currentPrice', 'N/A'):.2f}")
-        st.metric("52-Week High", f"${info.get('fiftyTwoWeekHigh', 'N/A'):.2f}")
-        st.metric("52-Week Low", f"${info.get('fiftyTwoWeekLow', 'N/A'):.2f}")
+        # Handle missing current price
+        current_price = info.get("currentPrice")
+        if current_price is not None:
+            st.metric("Current Price", f"${current_price:.2f}")
+        else:
+            st.metric("Current Price", "N/A")
+
+        # Handle missing 52-week high and low
+        fifty_two_week_high = info.get("fiftyTwoWeekHigh")
+        fifty_two_week_low = info.get("fiftyTwoWeekLow")
+        st.metric("52-Week High", f"${fifty_two_week_high:.2f}" if fifty_two_week_high is not None else "N/A")
+        st.metric("52-Week Low", f"${fifty_two_week_low:.2f}" if fifty_two_week_low is not None else "N/A")
 
 # Function to display performance metrics
 def display_performance_metrics(data):
