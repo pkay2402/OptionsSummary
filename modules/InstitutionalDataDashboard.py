@@ -9,7 +9,7 @@ import streamlit as st
 import yfinance as yf
 
 # Discord webhook URL (replace with your actual webhook URL)
-DISCORD_WEBHOOK_URL = 'YOUR_DISCORD_WEBHOOK_URL'
+DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1332367135023956009/8HH_RiKnSP7R7l7mtFHOB8kJi7ATt0TKZRrh35D82zycKC7JrFVSMpgJUmHrnDQ4mQRw'
 
 # Function to download FINRA short sale data for a specific date
 def download_finra_short_sale_data(date):
