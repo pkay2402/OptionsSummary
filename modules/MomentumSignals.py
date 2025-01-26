@@ -127,6 +127,7 @@ def analyze_stock(symbol, timeframes):
 
 def calculate_indicators(data):
     """Calculate EMA and Monthly Pivot values."""
+    data['EMA_9'] = calculate_ema(data['Close'], 9)
     data['EMA_21'] = calculate_ema(data['Close'], 21)
     data['EMA_50'] = calculate_ema(data['Close'], 50)
     data['EMA_200'] = calculate_ema(data['Close'], 200)
@@ -229,6 +230,7 @@ def main():
             "Price": latest_price,
             "1D": analysis.get("1d", "Error"),
             "5D": analysis.get("5d", "Error"),
+            "EMA_9": stock_data['EMA_9'].iloc[-1] if not stock_data.empty else None,
             "EMA_21": stock_data['EMA_21'].iloc[-1] if not stock_data.empty else None,
             "EMA_50": stock_data['EMA_50'].iloc[-1] if not stock_data.empty else None,
             "EMA_200": stock_data['EMA_200'].iloc[-1] if not stock_data.empty else None,
