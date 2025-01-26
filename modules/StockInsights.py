@@ -2,14 +2,18 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Function to fetch stock data
+@st.cache_data
 def fetch_stock_data(symbol, period="1y"):
     """Fetch historical data for a stock using yfinance."""
     try:
         stock = yf.Ticker(symbol)
         data = stock.history(period=period)
+        if data.empty:
+            st.error(f"No data found for {symbol}. Please check the symbol and try again.")
+            return None, None
         info = stock.info
         return data, info
     except Exception as e:
@@ -38,7 +42,12 @@ def display_stock_overview(info):
         st.metric("Sector", info.get("sector", "N/A"))
     with col2:
         st.metric("Industry", info.get("industry", "N/A"))
-        st.metric("Market Cap", f"${info.get('marketCap', 'N/A'):,}")
+        # Handle missing market cap
+        market_cap = info.get("marketCap")
+        if market_cap is not None:
+            st.metric("Market Cap", f"${market_cap:,}")
+        else:
+            st.metric("Market Cap", "N/A")
     with col3:
         st.metric("Current Price", f"${info.get('currentPrice', 'N/A'):.2f}")
         st.metric("52-Week High", f"${info.get('fiftyTwoWeekHigh', 'N/A'):.2f}")
@@ -96,10 +105,11 @@ def display_combined_chart(data, info):
                 ))
 
         fig.update_layout(
-            title="Stock Price with Moving Averages and Fibonacci Levels",
+            title=f"{symbol} Stock Price with Moving Averages and Fibonacci Levels",
             xaxis_title="Date",
             yaxis_title="Price (USD)",
-            legend_title="Indicators"
+            legend_title="Indicators",
+            hovermode="x unified"
         )
         st.plotly_chart(fig)
     else:
@@ -142,14 +152,33 @@ def run():
     # User input for stock symbol
     symbol = st.text_input("Enter a stock symbol (e.g., AAPL):", "AAPL").upper()
 
+    # Add a date range selector
+    period_options = {"1 Month": "1mo", "3 Months": "3mo", "6 Months": "6mo", "1 Year": "1y", "2 Years": "2y", "5 Years": "5y"}
+    selected_period = st.selectbox("Select a time period:", list(period_options.keys()), index=3)
+    period = period_options[selected_period]
+
     if symbol:
-        # Fetch stock data
-        data, info = fetch_stock_data(symbol)
+        # Fetch stock data with a loading spinner
+        with st.spinner("Fetching stock data..."):
+            data, info = fetch_stock_data(symbol, period=period)
+
         if data is not None and info is not None:
             # Display stock insights
             display_stock_overview(info)
             display_performance_metrics(data)
             display_combined_chart(data, info)
             display_key_statistics(info)
+
+            # Add a download button for the data
+            st.download_button(
+                label="Download Data as CSV",
+                data=data.to_csv().encode("utf-8"),
+                file_name=f"{symbol}_stock_data.csv",
+                mime="text/csv"
+            )
         else:
             st.error("Invalid stock symbol or no data available.")
+
+# Run the app
+if __name__ == "__main__":
+    run()
