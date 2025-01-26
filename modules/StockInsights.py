@@ -29,7 +29,13 @@ def display_stock_overview(info):
         st.metric("Market Cap", f"${info.get('marketCap', 'N/A'):,}")
     with col3:
         st.metric("Current Price", f"${info.get('currentPrice', 'N/A'):.2f}")
-        st.metric("Daily Change", f"{info.get('regularMarketChangePercent', 'N/A'):.2f}%")
+        
+        # Handle cases where 'regularMarketChangePercent' is None or not a number
+        daily_change = info.get('regularMarketChangePercent')
+        if daily_change is not None and isinstance(daily_change, (int, float)):
+            st.metric("Daily Change", f"{daily_change:.2f}%")
+        else:
+            st.metric("Daily Change", "N/A")
 
 # Function to display performance metrics
 def display_performance_metrics(data):
