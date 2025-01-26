@@ -2,7 +2,6 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import datetime
 
 # Function to fetch stock data
 @st.cache_data
@@ -81,7 +80,7 @@ def display_performance_metrics(data):
         col4.metric("Yearly Return", f"{yearly_return:.2f}%")
 
 # Function to display the combined chart
-def display_combined_chart(data, info):
+def display_combined_chart(data, info, symbol):
     """Display a combined chart with price, moving averages, and Fibonacci levels."""
     if data is not None and len(data) > 0:
         # Calculate moving averages
@@ -175,7 +174,7 @@ def run():
             # Display stock insights
             display_stock_overview(info)
             display_performance_metrics(data)
-            display_combined_chart(data, info)
+            display_combined_chart(data, info, symbol)  # Pass symbol here
             display_key_statistics(info)
 
             # Add a download button for the data
