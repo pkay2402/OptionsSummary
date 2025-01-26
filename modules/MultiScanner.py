@@ -52,7 +52,7 @@ def volume_spike_scanner():
 
     for symbol in TOP_100_STOCKS:
         data = fetch_data(symbol)
-        if data is not None:
+        if data is not None and len(data) > 20:  # Ensure enough data points
             avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
             last_volume = data["Volume"].iloc[-1]
             if last_volume > 2 * avg_volume:
@@ -94,19 +94,22 @@ def sector_strength_scanner():
 
     for sector, etf in SECTOR_ETFS.items():
         data = fetch_data(etf, period="1mo")
-        if data is not None:
+        if data is not None and len(data) > 1:
             performance = (data["Close"].iloc[-1] - data["Close"].iloc[0]) / data["Close"].iloc[0] * 100
             sector_performance.append((sector, performance))
 
-    sector_performance_df = pd.DataFrame(sector_performance, columns=["Sector", "Performance (%)"])
-    sector_performance_df = sector_performance_df.sort_values(by="Performance (%)", ascending=False)
+    if sector_performance:
+        sector_performance_df = pd.DataFrame(sector_performance, columns=["Sector", "Performance (%)"])
+        sector_performance_df = sector_performance_df.sort_values(by="Performance (%)", ascending=False)
 
-    st.write("Sector Performance (Last 1 Month):")
-    st.write(sector_performance_df)
+        st.write("Sector Performance (Last 1 Month):")
+        st.write(sector_performance_df)
 
-    # Plot sector performance
-    fig = px.bar(sector_performance_df, x="Sector", y="Performance (%)", title="Sector Performance")
-    st.plotly_chart(fig)
+        # Plot sector performance
+        fig = px.bar(sector_performance_df, x="Sector", y="Performance (%)", title="Sector Performance")
+        st.plotly_chart(fig)
+    else:
+        st.write("No sector performance data available.")
 
 def seasonality_scanner():
     """Identify stocks with strong seasonal patterns."""
@@ -115,11 +118,13 @@ def seasonality_scanner():
 
     for symbol in TOP_100_STOCKS:
         data = fetch_data(symbol, period="1y")
-        if data is not None:
+        if data is not None and len(data) > 30:  # Ensure enough data points
             # Example: Check if the stock tends to perform well in December
-            december_returns = data[data.index.month == 12]["Close"].pct_change().mean()
-            if december_returns > 0.05:  # 5% average return in December
-                seasonal_stocks.append((symbol, "December"))
+            december_data = data[data.index.month == 12]
+            if not december_data.empty:
+                december_returns = december_data["Close"].pct_change().mean()
+                if december_returns > 0.05:  # 5% average return in December
+                    seasonal_stocks.append((symbol, "December"))
 
     if seasonal_stocks:
         st.write("Stocks with strong seasonal patterns:")
