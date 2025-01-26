@@ -107,14 +107,20 @@ def display_news_and_sentiment(symbol):
         stock = yf.Ticker(symbol)
         news = stock.news
         if news:
+            valid_news_count = 0
             for item in news[:5]:  # Show top 5 news items
-                # Safely access 'title', 'publisher', and 'link' keys
-                title = item.get('title', 'No title available')
-                publisher = item.get('publisher', 'Unknown publisher')
-                link = item.get('link', '#')
+                # Check if the news item has valid data
+                title = item.get('title')
+                publisher = item.get('publisher')
+                link = item.get('link')
                 
-                st.write(f"**{title}**")
-                st.write(f"*{publisher}* - [Read more]({link})")
+                if title and publisher and link:  # Only display if all fields are present
+                    st.write(f"**{title}**")
+                    st.write(f"*{publisher}* - [Read more]({link})")
+                    valid_news_count += 1
+
+            if valid_news_count == 0:
+                st.warning("No valid news items found.")
         else:
             st.warning("No news available.")
     except Exception as e:
