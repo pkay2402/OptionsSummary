@@ -57,6 +57,43 @@ def get_historical_closing_price(symbol, date):
         print(f"Error fetching historical data for {symbol} on {date}: {e}")
         return 'N/A'
 
+# Function to fetch the latest closing price
+def get_latest_close_price(symbol):
+    try:
+        stock = yf.Ticker(symbol)
+        latest_data = stock.history(period="1d")
+        if not latest_data.empty:
+            return latest_data['Close'].iloc[0]
+        else:
+            return 'N/A'
+    except Exception as e:
+        print(f"Error fetching latest close price for {symbol}: {e}")
+        return 'N/A'
+
+# Function to calculate forward performance (5-day and 10-day)
+def get_forward_performance(symbol, transaction_date, days_forward):
+    try:
+        # Convert transaction_date to datetime
+        transaction_date = datetime.strptime(transaction_date, "%Y%m%d")
+        
+        # Calculate end date (transaction_date + days_forward)
+        end_date = (transaction_date + timedelta(days=days_forward)).strftime("%Y-%m-%d")
+        
+        # Fetch historical data
+        stock = yf.Ticker(symbol)
+        historical_data = stock.history(start=transaction_date.strftime("%Y-%m-%d"), end=end_date)
+        
+        # Check if data is available
+        if not historical_data.empty and len(historical_data) >= 2:
+            start_price = historical_data['Close'].iloc[0]  # Closing price on transaction date
+            end_price = historical_data['Close'].iloc[-1]  # Closing price on the last available date
+            return ((end_price - start_price) / start_price) * 100  # Percentage change
+        else:
+            return 'N/A'  # Data not available
+    except Exception as e:
+        print(f"Error calculating forward performance for {symbol}: {e}")
+        return 'N/A'
+
 # Function to find stocks with total volume over 10 million
 def find_stocks_over_10_million(df, date):
     stocks_over_10_million = []
@@ -73,13 +110,25 @@ def find_stocks_over_10_million(df, date):
             buy_to_sell_ratio = bought_volume / sold_volume if sold_volume > 0 else float('inf')
 
             if buy_to_sell_ratio > 1:
-                description = get_stock_info(row['Symbol'])
-                closing_price = get_historical_closing_price(row['Symbol'], date)
+                symbol = row['Symbol']
+                description = get_stock_info(symbol)
+                closing_price = get_historical_closing_price(symbol, date)
+                latest_close = get_latest_close_price(symbol)
+
+                # Calculate forward 5-day performance
+                five_day_performance = get_forward_performance(symbol, date, days_forward=5)
+
+                # Calculate forward 10-day performance
+                ten_day_performance = get_forward_performance(symbol, date, days_forward=10)
+
                 stocks_over_10_million.append({
                     'Date': date,
-                    'Symbol': row['Symbol'],
+                    'Symbol': symbol,
                     'Description': description,
                     'ClosingPrice': closing_price,
+                    'LatestClose': latest_close,
+                    '5DayPerformance': five_day_performance,
+                    '10DayPerformance': ten_day_performance,
                     'TotalVolume': total_volume,
                     'SoldVolume': sold_volume,
                     'BoughtVolume': bought_volume,
@@ -110,12 +159,22 @@ def analyze_user_stocks(user_stocks):
 
                     description = get_stock_info(symbol)
                     closing_price = get_historical_closing_price(symbol, date)
+                    latest_close = get_latest_close_price(symbol)
+
+                    # Calculate forward 5-day performance
+                    five_day_performance = get_forward_performance(symbol, date, days_forward=5)
+
+                    # Calculate forward 10-day performance
+                    ten_day_performance = get_forward_performance(symbol, date, days_forward=10)
 
                     results.append({
                         'Date': date,
                         'Symbol': symbol,
                         'Description': description,
                         'ClosingPrice': closing_price,
+                        'LatestClose': latest_close,
+                        '5DayPerformance': five_day_performance,
+                        '10DayPerformance': ten_day_performance,
                         'TotalVolume': total_volume,
                         'SoldVolume': sold_volume,
                         'BoughtVolume': bought_volume,
@@ -139,13 +198,25 @@ def find_large_trades(df, date):
             buy_to_sell_ratio = bought_volume / sold_volume if sold_volume > 0 else float('inf')
 
             if buy_to_sell_ratio > 5:
-                description = get_stock_info(row['Symbol'])
-                closing_price = get_historical_closing_price(row['Symbol'], date)
+                symbol = row['Symbol']
+                description = get_stock_info(symbol)
+                closing_price = get_historical_closing_price(symbol, date)
+                latest_close = get_latest_close_price(symbol)
+
+                # Calculate forward 5-day performance
+                five_day_performance = get_forward_performance(symbol, date, days_forward=5)
+
+                # Calculate forward 10-day performance
+                ten_day_performance = get_forward_performance(symbol, date, days_forward=10)
+
                 large_trades.append({
                     'Date': date,
-                    'Symbol': row['Symbol'],
+                    'Symbol': symbol,
                     'Description': description,
                     'ClosingPrice': closing_price,
+                    'LatestClose': latest_close,
+                    '5DayPerformance': five_day_performance,
+                    '10DayPerformance': ten_day_performance,
                     'TotalVolume': total_volume,
                     'SoldVolume': sold_volume,
                     'BoughtVolume': bought_volume,
@@ -159,7 +230,7 @@ def create_dashboard(df):
     plt.figure(figsize=(15, 10))
 
     # Plot: Table with highlighted high Buy-to-Sell Ratios (Top 10)
-    table_data = df[['Symbol', 'Description', 'ClosingPrice', 'TotalVolume', 'BoughtVolume', 'SoldVolume', 'BuyToSellRatio']].round(2)
+    table_data = df[['Symbol', 'Description', 'ClosingPrice', 'LatestClose', '5DayPerformance', '10DayPerformance', 'TotalVolume', 'BoughtVolume', 'SoldVolume', 'BuyToSellRatio']].round(2)
 
     # Custom colormap for highlighting
     colors = [(1, 1, 1), (0, 1, 0)]  # From white to green
@@ -262,3 +333,7 @@ def run():
             st.dataframe(large_trades_df)
         else:
             st.warning("No large trades found in the last 20 days.")
+
+# Run the app
+if __name__ == "__main__":
+    run()
