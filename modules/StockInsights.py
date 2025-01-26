@@ -16,6 +16,18 @@ def fetch_stock_data(symbol, period="1y"):
         st.error(f"Error fetching data for {symbol}: {e}")
         return None, None
 
+# Function to calculate Fibonacci retracement levels
+def calculate_fibonacci_levels(high, low):
+    """Calculate Fibonacci retracement levels."""
+    diff = high - low
+    return {
+        "23.6%": high - 0.236 * diff,
+        "38.2%": high - 0.382 * diff,
+        "50%": high - 0.5 * diff,
+        "61.8%": high - 0.618 * diff,
+        "78.6%": high - 0.786 * diff,
+    }
+
 # Function to display stock overview
 def display_stock_overview(info):
     """Display basic stock information."""
@@ -29,13 +41,8 @@ def display_stock_overview(info):
         st.metric("Market Cap", f"${info.get('marketCap', 'N/A'):,}")
     with col3:
         st.metric("Current Price", f"${info.get('currentPrice', 'N/A'):.2f}")
-        
-        # Handle cases where 'regularMarketChangePercent' is None or not a number
-        daily_change = info.get('regularMarketChangePercent')
-        if daily_change is not None and isinstance(daily_change, (int, float)):
-            st.metric("Daily Change", f"{daily_change:.2f}%")
-        else:
-            st.metric("Daily Change", "N/A")
+        st.metric("52-Week High", f"${info.get('fiftyTwoWeekHigh', 'N/A'):.2f}")
+        st.metric("52-Week Low", f"${info.get('fiftyTwoWeekLow', 'N/A'):.2f}")
 
 # Function to display performance metrics
 def display_performance_metrics(data):
@@ -55,14 +62,48 @@ def display_performance_metrics(data):
         col3.metric("Monthly Return", f"{monthly_return:.2f}%")
         col4.metric("Yearly Return", f"{yearly_return:.2f}%")
 
-        # Plot historical price chart
-        st.write("#### Historical Price Chart")
+# Function to display the combined chart
+def display_combined_chart(data, info):
+    """Display a combined chart with price, moving averages, and Fibonacci levels."""
+    if data is not None and len(data) > 0:
+        # Calculate moving averages
+        data["50-Day MA"] = data["Close"].rolling(window=50).mean()
+        data["200-Day MA"] = data["Close"].rolling(window=200).mean()
+
+        # Calculate Fibonacci levels
+        high = info.get("fiftyTwoWeekHigh")
+        low = info.get("fiftyTwoWeekLow")
+        if high and low:
+            fib_levels = calculate_fibonacci_levels(high, low)
+        else:
+            fib_levels = None
+
+        # Plot the chart
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close Price"))
-        fig.update_layout(title="Stock Price Over Time", xaxis_title="Date", yaxis_title="Price (USD)")
+        fig.add_trace(go.Scatter(x=data.index, y=data["50-Day MA"], mode="lines", name="50-Day MA"))
+        fig.add_trace(go.Scatter(x=data.index, y=data["200-Day MA"], mode="lines", name="200-Day MA"))
+
+        # Add Fibonacci levels
+        if fib_levels:
+            for level, price in fib_levels.items():
+                fig.add_trace(go.Scatter(
+                    x=[data.index[0], data.index[-1]],
+                    y=[price, price],
+                    mode="lines",
+                    line=dict(dash="dash"),
+                    name=f"Fib {level}"
+                ))
+
+        fig.update_layout(
+            title="Stock Price with Moving Averages and Fibonacci Levels",
+            xaxis_title="Date",
+            yaxis_title="Price (USD)",
+            legend_title="Indicators"
+        )
         st.plotly_chart(fig)
     else:
-        st.warning("No performance data available.")
+        st.warning("No data available for the chart.")
 
 # Function to display key statistics
 def display_key_statistics(info):
@@ -76,60 +117,22 @@ def display_key_statistics(info):
         st.metric("Dividend Yield", f"{info.get('dividendYield', 'N/A') * 100:.2f}%")
         st.metric("Beta", info.get("beta", "N/A"))
     with col3:
-        st.metric("52-Week High", f"${info.get('fiftyTwoWeekHigh', 'N/A'):.2f}")
-        st.metric("52-Week Low", f"${info.get('fiftyTwoWeekLow', 'N/A'):.2f}")
-
-# Function to display technical indicators
-def display_technical_indicators(data):
-    """Display technical indicators (moving averages, RSI, etc.)."""
-    st.write("### Technical Indicators")
-    if data is not None and len(data) > 0:
-        # Calculate moving averages
-        data["50-Day MA"] = data["Close"].rolling(window=50).mean()
-        data["200-Day MA"] = data["Close"].rolling(window=200).mean()
-
-        # Plot moving averages
-        st.write("#### Moving Averages")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close Price"))
-        fig.add_trace(go.Scatter(x=data.index, y=data["50-Day MA"], mode="lines", name="50-Day MA"))
-        fig.add_trace(go.Scatter(x=data.index, y=data["200-Day MA"], mode="lines", name="200-Day MA"))
-        fig.update_layout(title="Moving Averages", xaxis_title="Date", yaxis_title="Price (USD)")
-        st.plotly_chart(fig)
-    else:
-        st.warning("No technical data available.")
-
-# Function to display news and sentiment
-def display_news_and_sentiment(symbol):
-    """Display latest news and sentiment analysis."""
-    st.write("### News and Sentiment")
-    try:
-        stock = yf.Ticker(symbol)
-        news = stock.news
-        if news:
-            valid_news_count = 0
-            for item in news[:5]:  # Show top 5 news items
-                # Check if the news item has valid data
-                title = item.get('title')
-                publisher = item.get('publisher')
-                link = item.get('link')
-                
-                if title and publisher and link:  # Only display if all fields are present
-                    st.write(f"**{title}**")
-                    st.write(f"*{publisher}* - [Read more]({link})")
-                    valid_news_count += 1
-
-            if valid_news_count == 0:
-                st.warning("No valid news items found.")
-        else:
-            st.warning("No news available.")
-    except Exception as e:
-        st.error(f"Error fetching news: {e}")
+        st.metric("Volume", f"{info.get('volume', 'N/A'):,}")
+        st.metric("Avg. Volume", f"{info.get('averageVolume', 'N/A'):,}")
 
 # Main function to run the Stock Insights module
 def run():
     """Main function to run the Stock Insights module."""
     st.title("Stock Insights")
+
+    # Reduce font size for a cleaner look
+    st.markdown("""
+        <style>
+        .stMetric {
+            font-size: 14px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     # User input for stock symbol
     symbol = st.text_input("Enter a stock symbol (e.g., AAPL):", "AAPL").upper()
@@ -141,8 +144,7 @@ def run():
             # Display stock insights
             display_stock_overview(info)
             display_performance_metrics(data)
+            display_combined_chart(data, info)
             display_key_statistics(info)
-            display_technical_indicators(data)
-            display_news_and_sentiment(symbol)
         else:
             st.error("Invalid stock symbol or no data available.")
