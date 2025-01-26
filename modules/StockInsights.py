@@ -114,7 +114,12 @@ def display_key_statistics(info):
         st.metric("P/E Ratio", info.get("trailingPE", "N/A"))
         st.metric("EPS", info.get("trailingEps", "N/A"))
     with col2:
-        st.metric("Dividend Yield", f"{info.get('dividendYield', 'N/A') * 100:.2f}%")
+        # Handle cases where 'dividendYield' is None or not a number
+        dividend_yield = info.get("dividendYield")
+        if dividend_yield is not None and isinstance(dividend_yield, (int, float)):
+            st.metric("Dividend Yield", f"{dividend_yield * 100:.2f}%")
+        else:
+            st.metric("Dividend Yield", "N/A")
         st.metric("Beta", info.get("beta", "N/A"))
     with col3:
         st.metric("Volume", f"{info.get('volume', 'N/A'):,}")
