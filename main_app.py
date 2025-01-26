@@ -3,7 +3,9 @@ from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
 from modules.IntradaySignals import run as IntradaySignals_run
-from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run  # Add this line
+from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
+from modules.MultiScanner import run as MultiScanner_run
+from modules.WeekendRule import run as WeekendRule_run
 import streamlit as st
 
 def main():
@@ -14,7 +16,9 @@ def main():
                                            "Momentum Signals", 
                                            "Momentum ETF", 
                                            "Intraday Signals",
-                                           "Institutional Data Dashboard"])  # Add this option
+                                           "Institutional Data Dashboard",
+                                           "Multi Scanner", 
+                                           "Weekend Rule"])  # Removed "RRC"
 
     if app_selection == "Flow Summary":
         flowSummary_run()
@@ -24,8 +28,12 @@ def main():
         MomentumETF_run()
     elif app_selection == "Intraday Signals":
         IntradaySignals_run()
-    elif app_selection == "Institutional Data Dashboard":  # Add this condition
+    elif app_selection == "Institutional Data Dashboard":
         InstitutionalDataDashboard_run()
+    elif app_selection == "Multi Scanner":
+        MultiScanner_run()
+    elif app_selection == "Weekend Rule":
+        WeekendRule_run()
 
 if __name__ == "__main__":
     main()
