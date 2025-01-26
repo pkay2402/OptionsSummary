@@ -4,7 +4,7 @@ from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
 from modules.IntradaySignals import run as IntradaySignals_run
 from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
-from modules.MultiScanner import run as MultiScanner_run
+from modules.StockInsights import run as StockInsights_run
 from modules.WeekendRule import run as WeekendRule_run
 import streamlit as st
 
@@ -31,7 +31,7 @@ def main():
     elif app_selection == "Institutional Data Dashboard":
         InstitutionalDataDashboard_run()
     elif app_selection == "Multi Scanner":
-        MultiScanner_run()
+        StockInsights_run()
     elif app_selection == "Weekend Rule":
         WeekendRule_run()
 
