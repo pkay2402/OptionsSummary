@@ -1,0 +1,1 @@
+thinkorswim_scan_name thinkorswim_scan_link thinkorswim_scan_description
