@@ -7,3 +7,6 @@ pandas
 numpy
 tabulate
 streamlit-extras
+matplotlib
+seaborn
+nest_asyncio
