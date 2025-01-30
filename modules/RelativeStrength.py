@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 def fetch_stock_data(symbol, start_date, end_date):
     try:
         data = yf.download(symbol, start=start_date, end=end_date)
+        print(f"Data for {symbol}: {data.columns}")  # Debug: Check what columns are available
         return data
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {e}")
@@ -14,14 +15,14 @@ def fetch_stock_data(symbol, start_date, end_date):
 
 # Function to calculate Relative Strength (RS)
 def calculate_relative_strength(stock_data, benchmark_data):
-    # Ensure necessary columns exist
+    if stock_data is None or benchmark_data is None:
+        raise ValueError("Stock or benchmark data not available.")
     if 'Close' not in stock_data.columns or 'Close' not in benchmark_data.columns:
         raise KeyError("Missing 'Close' column in stock or benchmark data.")
-
+    
     # Calculate Relative Strength
     rs = stock_data['Close'] / benchmark_data['Close']
     return rs
-
 
 # Function to plot Relative Strength
 def plot_relative_strength(stock, benchmark, rs_series):
@@ -51,14 +52,23 @@ if st.button("Calculate Relative Strength"):
         benchmark_data = fetch_stock_data(benchmark_symbol, start_date, end_date)
 
         if stock_data is not None and benchmark_data is not None:
+            # Debug: Print shapes before merging
+            print("Stock Data shape:", stock_data.shape)
+            print("Benchmark Data shape:", benchmark_data.shape)
+            
             # Align data by date
             combined_data = pd.merge(stock_data['Close'], benchmark_data['Close'], left_index=True, right_index=True, suffixes=("_stock", "_benchmark"))
+            print("Combined Data shape:", combined_data.shape)
 
             # Calculate Relative Strength
-            rs_series = calculate_relative_strength(combined_data, combined_data)
-
-            # Plot Relative Strength
-            plot_relative_strength(stock_symbol.upper(), benchmark_symbol.upper(), rs_series)
+            try:
+                rs_series = calculate_relative_strength(combined_data, combined_data)
+                if not rs_series.dropna().empty:
+                    plot_relative_strength(stock_symbol.upper(), benchmark_symbol.upper(), rs_series)
+                else:
+                    st.error("No valid data points for Relative Strength calculation.")
+            except (ValueError, KeyError) as e:
+                st.error(f"Error in calculating Relative Strength: {e}")
         else:
             st.error("Failed to fetch data for one or both symbols. Please try again.")
     else:
