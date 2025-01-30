@@ -66,17 +66,19 @@ if st.button("Calculate Relative Strength"):
 
                 # Calculate Relative Strength
                 try:
-                    # Pass the combined data with the correct column names
-                    rs_series = calculate_relative_strength(combined_data[['Close_stock']], combined_data[['Close_benchmark']]) 
-                    if not rs_series.dropna().empty:
-                        plot_relative_strength(stock_symbol.upper(), benchmark_symbol.upper(), rs_series)
-                    else:
-                        st.error("No valid data points for Relative Strength calculation.")
-                except (ValueError, KeyError) as e:
-                    st.error(f"Error in calculating Relative Strength: {e}")
+                rs_series = calculate_relative_strength(
+                combined_data.rename(columns={'Close_stock': 'Close'}),  # Rename column to 'Close'
+                combined_data.rename(columns={'Close_benchmark': 'Close'}) # Rename column to 'Close'
+                )
+            if not rs_series.dropna().empty:
+                plot_relative_strength(stock_symbol.upper(), benchmark_symbol.upper(), rs_series)
             else:
-                st.error("One or both data sets are missing the 'Close' column.")
-        else:
-            st.error("Failed to fetch data for one or both symbols. Please try again.")
-    else:
-        st.error("Please enter valid stock and benchmark symbols.")
+                 st.error("No valid data points for Relative Strength calculation.")
+                 except (ValueError, KeyError) as e:
+                 st.error(f"Error in calculating Relative Strength: {e}")
+             else:
+                 st.error("One or both data sets are missing the 'Close' column.")
+             else:
+                 st.error("Failed to fetch data for one or both symbols. Please try again.")
+             else:
+                st.error("Please enter valid stock and benchmark symbols.")
