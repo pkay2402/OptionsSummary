@@ -14,8 +14,14 @@ def fetch_stock_data(symbol, start_date, end_date):
 
 # Function to calculate Relative Strength (RS)
 def calculate_relative_strength(stock_data, benchmark_data):
+    # Ensure necessary columns exist
+    if 'Close' not in stock_data.columns or 'Close' not in benchmark_data.columns:
+        raise KeyError("Missing 'Close' column in stock or benchmark data.")
+
+    # Calculate Relative Strength
     rs = stock_data['Close'] / benchmark_data['Close']
     return rs
+
 
 # Function to plot Relative Strength
 def plot_relative_strength(stock, benchmark, rs_series):
