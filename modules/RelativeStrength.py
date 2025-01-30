@@ -1,0 +1,59 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Function to fetch stock data
+def fetch_stock_data(symbol, start_date, end_date):
+    try:
+        data = yf.download(symbol, start=start_date, end=end_date)
+        return data
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {e}")
+        return None
+
+# Function to calculate Relative Strength (RS)
+def calculate_relative_strength(stock_data, benchmark_data):
+    rs = stock_data['Close'] / benchmark_data['Close']
+    return rs
+
+# Function to plot Relative Strength
+def plot_relative_strength(stock, benchmark, rs_series):
+    plt.figure(figsize=(12, 6))
+    plt.plot(rs_series, label=f"{stock} / {benchmark}", color="blue")
+    plt.title(f"Relative Strength: {stock} vs {benchmark}")
+    plt.xlabel("Date")
+    plt.ylabel("Relative Strength")
+    plt.legend()
+    plt.grid(alpha=0.5)
+    st.pyplot(plt)
+
+# Streamlit app
+st.title("Relative Strength Indicator")
+st.write("This app calculates and displays the relative strength (RS) of a stock compared to a benchmark index or ETF.")
+
+# User inputs
+stock_symbol = st.text_input("Enter the stock symbol (e.g., TSLA):", "TSLA")
+benchmark_symbol = st.text_input("Enter the benchmark symbol (e.g., SPY):", "SPY")
+start_date = st.date_input("Start Date:", pd.to_datetime("2023-01-01"))
+end_date = st.date_input("End Date:", pd.to_datetime("2025-01-01"))
+
+if st.button("Calculate Relative Strength"):
+    if stock_symbol and benchmark_symbol:
+        # Fetch data
+        stock_data = fetch_stock_data(stock_symbol, start_date, end_date)
+        benchmark_data = fetch_stock_data(benchmark_symbol, start_date, end_date)
+
+        if stock_data is not None and benchmark_data is not None:
+            # Align data by date
+            combined_data = pd.merge(stock_data['Close'], benchmark_data['Close'], left_index=True, right_index=True, suffixes=("_stock", "_benchmark"))
+
+            # Calculate Relative Strength
+            rs_series = calculate_relative_strength(combined_data, combined_data)
+
+            # Plot Relative Strength
+            plot_relative_strength(stock_symbol.upper(), benchmark_symbol.upper(), rs_series)
+        else:
+            st.error("Failed to fetch data for one or both symbols. Please try again.")
+    else:
+        st.error("Please enter valid stock and benchmark symbols.")
