@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 import requests
 import datetime
-from newsapi import NewsApiClient
 
 # Month dictionary
 MONTHS = {
@@ -36,12 +35,6 @@ def calculate_seasonality(data, month_number):
     monthly_avg_return = daily_avg_returns.mean()
     volatility = monthly_data["Daily Return"].std()
     return daily_avg_returns, monthly_avg_return, volatility
-
-# Fetch stock news sentiment
-def fetch_stock_news(symbol):
-    newsapi = NewsApiClient(api_key="YOUR_NEWSAPI_KEY")
-    articles = newsapi.get_everything(q=symbol, language="en", sort_by="relevancy")
-    return articles["articles"][:5]  # Return top 5 news articles
 
 # Send data to Discord webhook
 def send_to_discord(webhook_url, message):
@@ -78,17 +71,12 @@ def main():
             csv_data = daily_avg_returns.to_csv().encode("utf-8")
             st.download_button("Download Data as CSV", csv_data, "seasonality.csv", "text/csv")
             
-            # Fetch & Display News
-            news = fetch_stock_news(stock)
-            st.subheader("Recent News Headlines")
-            for article in news:
-                st.write(f"[{article['title']}]({article['url']})")
-            
-            # Send to Discord
+            # Send to Discord Button
             if webhook_url:
-                discord_message = f"Stock: {stock}\nMonth: {month_name}\nAvg Return: {monthly_avg_return:.2%}\nVolatility: {volatility:.2%}"
-                send_to_discord(webhook_url, discord_message)
-                st.success("Sent to Discord!")
+                if st.button("Send to Discord"):
+                    discord_message = f"Stock: {stock}\nMonth: {month_name}\nAvg Return: {monthly_avg_return:.2%}\nVolatility: {volatility:.2%}"
+                    send_to_discord(webhook_url, discord_message)
+                    st.success("Sent to Discord!")
         else:
             st.error("Failed to fetch stock data. Please check the stock symbol and try again.")
 
