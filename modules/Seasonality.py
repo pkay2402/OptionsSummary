@@ -57,7 +57,7 @@ def main():
     month_name = st.selectbox("Select a month:", list(MONTHS.keys()))
     start_date = st.date_input("Select Start Date", datetime.date(2011, 1, 1))
     end_date = st.date_input("Select End Date", datetime.date(2025, 1, 1))
-    webhook_url = st.text_input("https://discord.com/api/webhooks/1332242383458406401/6KXAsHFsvTKgDZyDimQ_ncrBx9vePgsOYxSRjga0mK-Zg2m404r65zzqdyL1bKCQRwVO")
+    webhook_url = "https://discord.com/api/webhooks/1332242383458406401/6KXAsHFsvTKgDZyDimQ_ncrBx9vePgsOYxSRjga0mK-Zg2m404r65zzqdyL1bKCQRwVO"
     
     if stock and month_name and start_date < end_date:
         month_number = get_month_number(month_name)
