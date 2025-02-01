@@ -6,13 +6,16 @@ import requests
 import datetime
 from newsapi import NewsApiClient
 
+# Month dictionary
+MONTHS = {
+    "January": 1, "February": 2, "March": 3, "April": 4,
+    "May": 5, "June": 6, "July": 7, "August": 8,
+    "September": 9, "October": 10, "November": 11, "December": 12
+}
+
 # Function to convert month name to number
 def get_month_number(month_name):
-    return {
-        "January": 1, "February": 2, "March": 3, "April": 4,
-        "May": 5, "June": 6, "July": 7, "August": 8,
-        "September": 9, "October": 10, "November": 11, "December": 12
-    }[month_name]
+    return MONTHS[month_name]
 
 # Fetch historical stock data from Yahoo Finance
 def fetch_stock_data(symbol, start_date, end_date):
@@ -50,7 +53,7 @@ def main():
     st.title("Stock Seasonality & Analysis Tool")
     
     stock = st.text_input("Enter the stock symbol (e.g., TSLA):").strip()
-    month_name = st.selectbox("Select a month:", list(get_month_number.keys()))
+    month_name = st.selectbox("Select a month:", list(MONTHS.keys()))
     start_date = st.date_input("Select Start Date", datetime.date(2011, 1, 1))
     end_date = st.date_input("Select End Date", datetime.date(2025, 1, 1))
     webhook_url = st.text_input("Enter Discord Webhook URL (Optional):")
