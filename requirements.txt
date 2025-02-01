@@ -10,3 +10,4 @@ streamlit-extras
 matplotlib
 seaborn
 nest_asyncio
+newsapi-python
