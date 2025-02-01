@@ -12,5 +12,3 @@ seaborn
 nest_asyncio
 newsapi-python
 kaleido
-tweepy
-os
