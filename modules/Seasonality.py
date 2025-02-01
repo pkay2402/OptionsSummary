@@ -5,8 +5,6 @@ import plotly.express as px
 import requests
 import datetime
 import io
-import tweepy
-import os
 
 # Month dictionary
 MONTHS = {
@@ -51,31 +49,6 @@ def send_to_discord(webhook_url, message, fig):
     files = {"file": ("chart.png", buf, "image/png")}
     requests.post(webhook_url, files=files)
 
-# Post analysis to Twitter
-def post_to_twitter(message, fig):
-    try:
-        # Load API credentials from environment variables
-        TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-        TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-        TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-        TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
-
-        # Authenticate Twitter API
-        auth = tweepy.OAuth1UserHandler(TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET)
-        api = tweepy.API(auth)
-
-        # Save the figure to an image file
-        buf = io.BytesIO()
-        fig.write_image(buf, format="png")
-        buf.seek(0)
-        
-        # Upload image and post tweet
-        media = api.media_upload(filename="chart.png", file=buf)
-        api.update_status(status=message, media_ids=[media.media_id])
-        st.success("Posted to Twitter!")
-    except Exception as e:
-        st.error(f"Failed to post to Twitter: {e}")
-
 # Streamlit App
 def main():
     st.title("Stock Seasonality & Analysis Tool")
@@ -112,12 +85,6 @@ def main():
                     discord_message = f"Stock: {stock}\nMonth: {month_name}\nAvg Return: {monthly_avg_return:.2%}\nVolatility: {volatility:.2%}"
                     send_to_discord(webhook_url, discord_message, fig)
                     st.success("Sent to Discord!")
-
-            # Post to Twitter Button
-            if st.button("Post to Twitter"):
-                tweet_message = f"{stock.upper()} Seasonality Analysis\nMonth: {month_name}\nAvg Return: {monthly_avg_return:.2%}\nVolatility: {volatility:.2%} #StockMarket"
-                post_to_twitter(tweet_message, fig)
-
         else:
             st.error("Failed to fetch stock data. Please check the stock symbol and try again.")
 
