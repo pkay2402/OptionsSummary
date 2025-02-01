@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import datetime
+import io
 
 # Month dictionary
 MONTHS = {
@@ -36,10 +37,17 @@ def calculate_seasonality(data, month_number):
     volatility = monthly_data["Daily Return"].std()
     return daily_avg_returns, monthly_avg_return, volatility
 
-# Send data to Discord webhook
-def send_to_discord(webhook_url, message):
+# Send data and chart to Discord webhook
+def send_to_discord(webhook_url, message, fig):
     payload = {"content": message}
     requests.post(webhook_url, json=payload)
+    
+    buf = io.BytesIO()
+    fig.write_image(buf, format="png")
+    buf.seek(0)
+    
+    files = {"file": ("chart.png", buf, "image/png")}
+    requests.post(webhook_url, files=files)
 
 # Streamlit App
 def main():
@@ -75,7 +83,7 @@ def main():
             if webhook_url:
                 if st.button("Send to Discord"):
                     discord_message = f"Stock: {stock}\nMonth: {month_name}\nAvg Return: {monthly_avg_return:.2%}\nVolatility: {volatility:.2%}"
-                    send_to_discord(webhook_url, discord_message)
+                    send_to_discord(webhook_url, discord_message, fig)
                     st.success("Sent to Discord!")
         else:
             st.error("Failed to fetch stock data. Please check the stock symbol and try again.")
