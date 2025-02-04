@@ -124,7 +124,7 @@ def find_stocks_over_10_million(df, date):
                 stocks_over_10_million.append({
                     'Date': date,
                     'Symbol': symbol,
-                    'Description': description,
+                    'BuyToSellRatio': buy_to_sell_ratio,
                     'ClosingPrice': closing_price,
                     'LatestClose': latest_close,
                     '5DayPerformance': five_day_performance,
@@ -132,7 +132,7 @@ def find_stocks_over_10_million(df, date):
                     'TotalVolume': total_volume,
                     'SoldVolume': sold_volume,
                     'BoughtVolume': bought_volume,
-                    'BuyToSellRatio': buy_to_sell_ratio
+                    'Description': description
                 })
 
     # Sort by BuyToSellRatio in descending order and take top 10
