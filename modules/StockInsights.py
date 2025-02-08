@@ -1,192 +1,316 @@
+import streamlit as st
 import pandas as pd
 import yfinance as yf
-import streamlit as st
 import plotly.graph_objects as go
+import numpy as np
+from math import ceil
 
-# Function to fetch stock data
-@st.cache_data
-def fetch_stock_data(symbol, period="1y"):
-    """Fetch historical data for a stock using yfinance."""
+# Set page configuration for responsiveness
+st.set_page_config(layout="wide")
+
+# Initialize session state for chart display
+if 'chart_symbol' not in st.session_state:
+    st.session_state['chart_symbol'] = None
+
+def calculate_rsi(data, periods=14):
+    delta = data['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def get_rsi_status(rsi):
+    if rsi > 70:
+        return "Overbought"
+    elif rsi > 50:
+        return "Strong"
+    elif rsi > 30:
+        return "Weak"
+    else:
+        return "Oversold"
+
+def calculate_support_resistance(hist, n=20):
+    # Get recent highs and lows
+    highs = hist['High'].nlargest(n)
+    lows = hist['Low'].nsmallest(n)
+    
+    # Calculate price clusters for support and resistance
+    price_clusters = pd.concat([highs, lows]).round(2)
+    price_clusters = price_clusters.value_counts().sort_index()
+    
+    # Find significant levels (where multiple price touches occurred)
+    significant_levels = price_clusters[price_clusters >= 2].index.values
+    
+    if len(significant_levels) >= 2:
+        current_price = hist['Close'].iloc[-1]
+        
+        # Find nearest support (below current price)
+        supports = significant_levels[significant_levels < current_price]
+        support = supports[-1] if len(supports) > 0 else significant_levels[0]
+        
+        # Find nearest resistance (above current price)
+        resistances = significant_levels[significant_levels > current_price]
+        resistance = resistances[0] if len(resistances) > 0 else significant_levels[-1]
+        
+        return round(support, 2), round(resistance, 2)
+    else:
+        # Fallback to simple support/resistance based on recent price action
+        return round(hist['Low'].tail(n).mean(), 2), round(hist['High'].tail(n).mean(), 2)
+
+def calculate_relative_strength(symbol_hist, spy_hist, lookback=20):
+    # Ensure we're comparing the same timeframe
+    common_dates = symbol_hist.index.intersection(spy_hist.index)
+    if len(common_dates) < 2:
+        return 0, "N/A"
+    
+    # Calculate percentage changes
+    symbol_change = symbol_hist['Close'].loc[common_dates].pct_change(periods=lookback).iloc[-1]
+    spy_change = spy_hist['Close'].loc[common_dates].pct_change(periods=lookback).iloc[-1]
+    
+    # Calculate relative strength
+    if spy_change != 0:
+        rs = ((1 + symbol_change) / (1 + spy_change) - 1) * 100
+        rs_status = "Strong" if rs > 0 else "Weak"
+        return round(rs, 2), rs_status
+    return 0, "N/A"
+
+def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
     try:
         stock = yf.Ticker(symbol)
-        data = stock.history(period=period)
-        if data.empty:
-            st.error(f"No data found for {symbol}. Please check the symbol and try again.")
-            return None, None
-        info = stock.info
-        return data, info
+        hist = stock.history(period=period, interval=interval)
+        if hist.empty:
+            raise ValueError(f"No data available for {symbol}")
+        
+        # Calculate VWAP
+        hist['Cumulative_Volume'] = hist['Volume'].cumsum()
+        hist['Cumulative_PV'] = (hist['Close'] * hist['Volume']).cumsum()
+        hist['VWAP'] = hist['Cumulative_PV'] / hist['Cumulative_Volume']
+        
+        # Calculate RSI
+        hist['RSI'] = calculate_rsi(hist)
+        current_rsi = round(hist['RSI'].iloc[-1], 2)
+        rsi_status = get_rsi_status(current_rsi)
+        
+        # Calculate 21 EMA
+        hist['EMA21'] = hist['Close'].ewm(span=21, adjust=False).mean()
+        
+        # Calculate Relative Strength vs SPY
+        rs_value, rs_status = calculate_relative_strength(hist, spy_hist) if spy_hist is not None else (0, "N/A")
+        
+        today_data = hist.iloc[-1]
+        open_price = round(today_data["Open"], 2)
+        high_price = round(hist["High"].iloc[-1], 2)
+        low_price = round(hist["Low"].iloc[-1], 2)
+        current_price = round(today_data["Close"], 2)
+        vwap = round(hist['VWAP'].iloc[-1], 2)
+        ema_21 = round(hist['EMA21'].iloc[-1], 2)
+
+        # Daily Pivot Calculation
+        daily_pivot = round((high_price + low_price + current_price) / 3, 2)
+
+        # EMAs for KeyMAs Logic
+        ema_9 = round(hist["Close"].ewm(span=9, adjust=False).mean().iloc[-1], 2)
+        ema_50 = round(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1], 2)
+
+        # KeyMAs Logic
+        if current_price > ema_9 and current_price > ema_21 and current_price > ema_50:
+            key_mas = "Bullish"
+        elif current_price < ema_9 and current_price < ema_21 and current_price < ema_50:
+            key_mas = "Bearish"
+        else:
+            key_mas = "Mixed"
+
+        # Determine Price_Vwap
+        if current_price > vwap and current_price > open_price:
+            direction = "Bullish"
+        elif current_price < vwap and current_price < open_price:
+            direction = "Bearish"
+        else:
+            direction = "Neutral"
+
+        return pd.DataFrame({
+            "Symbol": [symbol],
+            "Current Price": [current_price],
+            "VWAP": [vwap],
+            "EMA21": [ema_21],
+            #"RS vs SPY": [rs_value],
+            "Rel Strength SPY": [rs_status],
+            "Daily Pivot": [daily_pivot],
+            "Price_Vwap": [direction],
+            "KeyMAs": [key_mas],
+            #"RSI": [current_rsi]
+            "RSI_Status": [rsi_status]
+        }), hist.round(2)
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {e}")
-        return None, None
+        return pd.DataFrame(), pd.DataFrame()
 
-# Function to calculate Fibonacci retracement levels
-def calculate_fibonacci_levels(high, low):
-    """Calculate Fibonacci retracement levels."""
-    diff = high - low
-    return {
-        "23.6%": high - 0.236 * diff,
-        "38.2%": high - 0.382 * diff,
-        "50%": high - 0.5 * diff,
-        "61.8%": high - 0.618 * diff,
-        "78.6%": high - 0.786 * diff,
-    }
+def plot_candlestick(data, symbol):
+    fig = go.Figure()
+    
+    # Add candlestick
+    fig.add_trace(go.Candlestick(
+        x=data.index,
+        open=data['Open'],
+        high=data['High'],
+        low=data['Low'],
+        close=data['Close'],
+        name=symbol
+    ))
+    
+    # Add VWAP
+    fig.add_trace(go.Scatter(
+        x=data.index,
+        y=data['VWAP'],
+        name='VWAP',
+        line=dict(color='purple', width=2)
+    ))
+    
+    # Add 21 EMA
+    fig.add_trace(go.Scatter(
+        x=data.index,
+        y=data['EMA21'],
+        name='21 EMA',
+        line=dict(color='orange', width=2)
+    ))
 
-# Function to display stock overview
-def display_stock_overview(info):
-    """Display basic stock information."""
-    st.write("### Stock Overview")
-    col1, col2, col3 = st.columns(3)
+    fig.update_layout(
+        title=f'{symbol} Candlestick Chart with VWAP and 21 EMA',
+        yaxis_title='Price',
+        template='plotly_white',
+        height=600,
+        xaxis_rangeslider_visible=False
+    )
+    
+    # Format y-axis to show 2 decimal places
+    fig.update_layout(yaxis_tickformat='.2f')
+    
+    return fig
+
+# Streamlit UI
+st.title("📊 Live Market Dashboard")
+
+# Settings at the top
+st.header("⚙️ Settings")
+with st.container():
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
     with col1:
-        st.metric("Company", info.get("longName", "N/A"))
-        st.metric("Sector", info.get("sector", "N/A"))
+        stock_list = st.text_area("Enter Stock Symbols (comma separated)", "^SPX, SPY, QQQ, UVXY, AAPL, GOOGL, META, NVDA, TSLA, AMZN, COIN").upper()
+        symbols = [s.strip() for s in stock_list.split(",")]
+
     with col2:
-        st.metric("Industry", info.get("industry", "N/A"))
-        # Handle missing market cap
-        market_cap = info.get("marketCap")
-        if market_cap is not None:
-            st.metric("Market Cap", f"${market_cap:,}")
-        else:
-            st.metric("Market Cap", "N/A")
-    with col3:
-        # Handle missing current price
-        current_price = info.get("currentPrice")
-        if current_price is not None:
-            st.metric("Current Price", f"${current_price:.2f}")
-        else:
-            st.metric("Current Price", "N/A")
-
-        # Handle missing 52-week high and low
-        fifty_two_week_high = info.get("fiftyTwoWeekHigh")
-        fifty_two_week_low = info.get("fiftyTwoWeekLow")
-        st.metric("52-Week High", f"${fifty_two_week_high:.2f}" if fifty_two_week_high is not None else "N/A")
-        st.metric("52-Week Low", f"${fifty_two_week_low:.2f}" if fifty_two_week_low is not None else "N/A")
-
-# Function to display performance metrics
-def display_performance_metrics(data):
-    """Display performance metrics (daily, weekly, monthly, yearly)."""
-    st.write("### Performance Metrics")
-    if data is not None and len(data) > 0:
-        # Calculate performance
-        daily_return = (data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2] * 100
-        weekly_return = (data["Close"].iloc[-1] - data["Close"].iloc[-5]) / data["Close"].iloc[-5] * 100
-        monthly_return = (data["Close"].iloc[-1] - data["Close"].iloc[-22]) / data["Close"].iloc[-22] * 100
-        yearly_return = (data["Close"].iloc[-1] - data["Close"].iloc[0]) / data["Close"].iloc[0] * 100
-
-        # Display metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Daily Return", f"{daily_return:.2f}%")
-        col2.metric("Weekly Return", f"{weekly_return:.2f}%")
-        col3.metric("Monthly Return", f"{monthly_return:.2f}%")
-        col4.metric("Yearly Return", f"{yearly_return:.2f}%")
-
-# Function to display the combined chart
-def display_combined_chart(data, info, symbol):
-    """Display a combined chart with price, moving averages, and Fibonacci levels."""
-    if data is not None and len(data) > 0:
-        # Calculate moving averages
-        data["50-Day MA"] = data["Close"].rolling(window=50).mean()
-        data["200-Day MA"] = data["Close"].rolling(window=200).mean()
-
-        # Calculate Fibonacci levels
-        high = info.get("fiftyTwoWeekHigh")
-        low = info.get("fiftyTwoWeekLow")
-        if high and low:
-            fib_levels = calculate_fibonacci_levels(high, low)
-        else:
-            fib_levels = None
-
-        # Plot the chart
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Close Price"))
-        fig.add_trace(go.Scatter(x=data.index, y=data["50-Day MA"], mode="lines", name="50-Day MA"))
-        fig.add_trace(go.Scatter(x=data.index, y=data["200-Day MA"], mode="lines", name="200-Day MA"))
-
-        # Add Fibonacci levels
-        if fib_levels:
-            for level, price in fib_levels.items():
-                fig.add_trace(go.Scatter(
-                    x=[data.index[0], data.index[-1]],
-                    y=[price, price],
-                    mode="lines",
-                    line=dict(dash="dash"),
-                    name=f"Fib {level}"
-                ))
-
-        fig.update_layout(
-            title=f"{symbol} Stock Price with Moving Averages and Fibonacci Levels",
-            xaxis_title="Date",
-            yaxis_title="Price (USD)",
-            legend_title="Indicators",
-            hovermode="x unified"
-        )
-        st.plotly_chart(fig)
-    else:
-        st.warning("No data available for the chart.")
-
-# Function to display key statistics
-def display_key_statistics(info):
-    """Display key statistics about the stock."""
-    st.write("### Key Statistics")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("P/E Ratio", info.get("trailingPE", "N/A"))
-        st.metric("EPS", info.get("trailingEps", "N/A"))
-    with col2:
-        # Handle cases where 'dividendYield' is None or not a number
-        dividend_yield = info.get("dividendYield")
-        if dividend_yield is not None and isinstance(dividend_yield, (int, float)):
-            st.metric("Dividend Yield", f"{dividend_yield * 100:.2f}%")
-        else:
-            st.metric("Dividend Yield", "N/A")
-        st.metric("Beta", info.get("beta", "N/A"))
-    with col3:
-        st.metric("Volume", f"{info.get('volume', 'N/A'):,}")
-        st.metric("Avg. Volume", f"{info.get('averageVolume', 'N/A'):,}")
-
-# Main function to run the Stock Insights module
-def run():
-    """Main function to run the Stock Insights module."""
-    st.title("Stock Insights")
-
-    # Reduce font size for a cleaner look
-    st.markdown("""
-        <style>
-        .stMetric {
-            font-size: 14px;
+        time_frames = {
+            "1 Day": "1d",
+            "5 Days": "5d",
+            "1 Month": "1mo",
+            "3 Months": "3mo",
+            "6 Months": "6mo",
+            "1 Year": "1y",
+            "2 Years": "2y",
+            "5 Years": "5y"
         }
-        </style>
-    """, unsafe_allow_html=True)
+        selected_timeframe = st.selectbox("Choose Time Frame", list(time_frames.keys()), index=0)
+        period = time_frames[selected_timeframe]
 
-    # User input for stock symbol
-    symbol = st.text_input("Enter a stock symbol (e.g., AAPL):", "AAPL").upper()
+    with col3:
+        intervals = ["1m", "5m", "15m", "30m", "1h", "1d"]
+        selected_interval = st.selectbox("Choose Interval", intervals, index=1)
+        auto_refresh = st.checkbox("Auto Refresh every 5 mins")
 
-    # Add a date range selector
-    period_options = {"1 Month": "1mo", "3 Months": "3mo", "6 Months": "6mo", "1 Year": "1y", "2 Years": "2y", "5 Years": "5y"}
-    selected_period = st.selectbox("Select a time period:", list(period_options.keys()), index=3)
-    period = period_options[selected_period]
+# Main content area
+st.subheader(f"📈 Stock Data for {selected_timeframe} ({selected_interval} interval)")
+with st.container():
+    main_col1, main_col2 = st.columns([2, 1])
 
-    if symbol:
-        # Fetch stock data with a loading spinner
-        with st.spinner("Fetching stock data..."):
-            data, info = fetch_stock_data(symbol, period=period)
+with main_col1:
+    # Fetch SPY data first for relative strength calculations
+    spy_data, spy_hist = fetch_stock_data("SPY", period=period, interval=selected_interval)
+    stock_histories = {"SPY": spy_hist}  # Initialize with SPY data
+    all_data = pd.DataFrame()  # Start with empty DataFrame
+    
+    # Calculate number of columns needed for buttons (3 buttons per row)
+    num_symbols = len(symbols)
+    num_cols = 3
+    num_rows = ceil(num_symbols / num_cols)
+    
+    # Create button grid
+    for i in range(num_rows):
+        cols = st.columns(num_cols)
+        for j in range(num_cols):
+            idx = i * num_cols + j
+            if idx < num_symbols:
+                symbol = symbols[idx]
+                if symbol == "SPY":
+                    data = spy_data  # Use already fetched SPY data
+                    history = spy_hist
+                else:
+                    data, history = fetch_stock_data(symbol, period=period, interval=selected_interval, spy_hist=spy_hist)
+                
+                if not data.empty:
+                    all_data = pd.concat([all_data, data], ignore_index=True)
+                    stock_histories[symbol] = history
+                    if cols[j].button(f'📈 {symbol}', key=f'btn_{symbol}'):
+                        st.session_state['chart_symbol'] = symbol
 
-        if data is not None and info is not None:
-            # Display stock insights
-            display_stock_overview(info)
-            display_performance_metrics(data)
-            display_combined_chart(data, info, symbol)  # Pass symbol here
-            display_key_statistics(info)
+    # Add SPY data to the display
+    if "SPY" not in all_data["Symbol"].values:
+        all_data = pd.concat([spy_data, all_data], ignore_index=True)
+    stock_histories["SPY"] = spy_hist
 
-            # Add a download button for the data
-            st.download_button(
-                label="Download Data as CSV",
-                data=data.to_csv().encode("utf-8"),
-                file_name=f"{symbol}_stock_data.csv",
-                mime="text/csv"
-            )
-        else:
-            st.error("Invalid stock symbol or no data available.")
+    # Style and display the DataFrame with color coding
+    def color_columns(val):
+        if isinstance(val, str):
+            if val in ["Bullish", "Strong"]:
+                return 'background-color: #90EE90; color: black'  # Light green
+            elif val in ["Bearish", "Weak"]:
+                return 'background-color: #FF7F7F; color: black'  # Light red
+            elif val in ["Neutral", "Mixed"]:
+                return 'background-color: #D3D3D3; color: black'  # Light gray
+            elif val == "Overbought":
+                return 'background-color: #FFB6C1; color: black'  # Light pink
+            elif val == "Oversold":
+                return 'background-color: #87CEEB; color: black'  # Light blue
+        return ''
 
-# Run the app
-if __name__ == "__main__":
-    run()
+    styled_df = all_data.style.format({
+        'Current Price': '{:.2f}',
+        'VWAP': '{:.2f}',
+        'Support': '{:.2f}',
+        'Resistance': '{:.2f}',
+        #'RS vs SPY': '{:.2f}',
+        'Daily Pivot': '{:.2f}'
+        #'RSI': '{:.2f}'
+    }).applymap(color_columns, subset=['Price_Vwap', 'KeyMAs', 'RSI_Status', 'Rel Strength SPY'])
+    
+    st.dataframe(styled_df, use_container_width=True)
+
+with main_col2:
+    # Display chart based on session state
+    if st.session_state['chart_symbol'] and st.session_state['chart_symbol'] in stock_histories:
+        symbol = st.session_state['chart_symbol']
+        st.plotly_chart(plot_candlestick(stock_histories[symbol], symbol), use_container_width=True)
+
+# Manual Refresh Button
+if st.button("🔄 Refresh Data"):
+    st.rerun()
+
+# Auto-refresh logic
+if auto_refresh:
+    st.info("Auto-refresh active. Data will update every 5 minutes.")
+    import time
+    time.sleep(300)
+    st.rerun()
+
+# Styling
+st.markdown("""
+<style>
+.stApp {
+    max-width: 100%;
+}
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+</style>
+""", unsafe_allow_html=True)
