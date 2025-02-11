@@ -5,9 +5,8 @@ import numpy as np
 from scipy import stats
 import plotly.graph_objects as go
 import requests
-import datetime
 import io
-from datetime import datetime
+from datetime import datetime, date
 
 # Month dictionary
 MONTHS = {
@@ -154,8 +153,8 @@ def main():
         stock = st.text_input("Enter the stock symbol (e.g., TSLA):").strip()
         month_name = st.selectbox("Select a month:", list(MONTHS.keys()))
     with col2:
-        start_date = st.date_input("Select Start Date", datetime.date(2011, 1, 1))
-        end_date = st.date_input("Select End Date", datetime.date.today())
+        start_date = st.date_input("Select Start Date", date(2011, 1, 1))
+        end_date = st.date_input("Select End Date", date.today())
     
     webhook_url = st.text_input("Discord Webhook URL (optional):", type="password")
     
