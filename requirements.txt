@@ -12,3 +12,4 @@ seaborn
 nest_asyncio
 newsapi-python
 kaleido
+scipy
