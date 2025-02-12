@@ -185,6 +185,7 @@ def plot_candlestick(data, symbol):
     
     return fig
 
+def run():
 # Streamlit UI
 st.title("📊 Live Market Dashboard")
 
@@ -352,3 +353,6 @@ div[data-testid="stHorizontalBlock"] {
 }
 </style>
 """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    run()
