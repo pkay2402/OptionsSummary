@@ -10,7 +10,7 @@ from modules.TechnicalScriptsEducation import display_technical_scripts_educatio
 from modules.GexAnalysis import run as GexAnalysis_run
 from modules.finra_dashboard import run as finra_dashboard_run
 from modules.TosScan import run as TosScan_run
-from modules.Stock_analysis import run as Stock_analysis_run
+from modules.StockAnalysis import run as StockAnalysis_run
 import streamlit as st
 
 def main():
@@ -55,7 +55,7 @@ def main():
     elif app_selection == "TOS Scanner":
         TosScan_run()
     elif app_selection == "Stock Analysis":
-        Stock_analysis_run()
+        StockAnalysis_run()
 
     # Buy Me a Coffee Section
     st.sidebar.markdown("---")  # Add a separator
