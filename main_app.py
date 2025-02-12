@@ -4,8 +4,8 @@ from modules.MomentumETF import run as MomentumETF_run
 #from modules.IntradaySignals import run as IntradaySignals_run
 #from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
 #from modules.StockInsights import run as StockInsights_run
-from modules.WeekendRule import run as WeekendRule_run
-from modules.TechnicalScriptsEducation import display_technical_scripts_education
+#from modules.WeekendRule import run as WeekendRule_run
+#from modules.TechnicalScriptsEducation import display_technical_scripts_education
 # New module imports
 from modules.GexAnalysis import run as GexAnalysis_run
 from modules.finra_dashboard import run as finra_dashboard_run
@@ -23,8 +23,8 @@ def main():
                                        #"Intraday Signals",
                                        #"Institutional Data Dashboard",
                                        #"Stock Insights", 
-                                       "Weekend Rule",
-                                       "Technical Scripts and Education",
+                                       #"Weekend Rule",
+                                       #"Technical Scripts and Education",
                                        "GEX Analysis",          # New option
                                        "FINRA Dashboard",       # New option
                                        "TOS Scanner",          # New option
