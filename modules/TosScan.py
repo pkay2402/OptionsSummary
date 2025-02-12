@@ -11,7 +11,6 @@ from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
-#from streamlit_extras.buy_me_a_coffee import button
 
 # Initialize session state at the very beginning
 def init_session_state():
@@ -524,11 +523,6 @@ def render_stock_section(keyword, days_lookback):
             st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
 def run():
-    #st.set_page_config(
-        #page_title="Thinkorswim Alerts Analyzer",
-        #page_icon="📊",
-        #layout="wide"
-    #)
 
     
     # Add sidebar for settings
@@ -547,7 +541,6 @@ def run():
             refresh_interval = st.slider("Refresh Interval (minutes)", 1, 30, 10)
         
         st.markdown("---")
-        #button(username="tosalerts33", floating=False, width=221)
 
     # Market data
     col1, col2, col3 = st.columns([2, 2, 1])
