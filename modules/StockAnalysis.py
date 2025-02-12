@@ -186,11 +186,9 @@ def plot_candlestick(data, symbol):
     return fig
 
 def run():
-# Streamlit UI
- st.title("📊 Live Market Dashboard")
 
 # Settings at the top
-st.header("⚙️ Settings")
+ st.header("⚙️ Settings")
 with st.container():
     col1, col2, col3 = st.columns([2, 1, 1])
     
