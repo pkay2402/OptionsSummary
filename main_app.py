@@ -43,10 +43,10 @@ def main():
         #InstitutionalDataDashboard_run()
     #elif app_selection == "Stock Insights":
         #StockInsights_run()
-    elif app_selection == "Weekend Rule":
-        WeekendRule_run()
-    elif app_selection == "Technical Scripts and Education":
-        display_technical_scripts_education()
+    #elif app_selection == "Weekend Rule":
+        #WeekendRule_run()
+    #elif app_selection == "Technical Scripts and Education":
+        #display_technical_scripts_education()
     # New module routing
     elif app_selection == "GEX Analysis":
         GexAnalysis_run()
