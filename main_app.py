@@ -6,22 +6,30 @@ from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard
 from modules.StockInsights import run as StockInsights_run
 from modules.WeekendRule import run as WeekendRule_run
 from modules.TechnicalScriptsEducation import display_technical_scripts_education
+# New module imports
+from modules.GexAnalysis import run as GexAnalysis_run
+from modules.finra_dashboard import run as finra_dashboard_run
+from modules.TosScan import run as TosScan_run
+from modules.Stock_analysis import run as Stock_analysis_run
 import streamlit as st
 
 def main():
     st.title("Trading Tools Hub")
-
-    # Add "Technical Scripts and Education" to the sidebar options
+    
     app_selection = st.sidebar.selectbox("Choose the app:", 
-                                          ["Flow Summary", 
-                                           "Momentum Signals", 
-                                           "Momentum ETF", 
-                                           "Intraday Signals",
-                                           "Institutional Data Dashboard",
-                                           "Stock Insights", 
-                                           "Weekend Rule",
-                                           "Technical Scripts and Education"])
-
+                                      ["Flow Summary", 
+                                       "Momentum Signals", 
+                                       "Momentum ETF", 
+                                       "Intraday Signals",
+                                       "Institutional Data Dashboard",
+                                       "Stock Insights", 
+                                       "Weekend Rule",
+                                       "Technical Scripts and Education",
+                                       "GEX Analysis",          # New option
+                                       "FINRA Dashboard",       # New option
+                                       "TOS Scanner",          # New option
+                                       "Stock Analysis"])      # New option
+    
     # Route to the selected app
     if app_selection == "Flow Summary":
         flowSummary_run()
@@ -39,6 +47,15 @@ def main():
         WeekendRule_run()
     elif app_selection == "Technical Scripts and Education":
         display_technical_scripts_education()
+    # New module routing
+    elif app_selection == "GEX Analysis":
+        GexAnalysis_run()
+    elif app_selection == "FINRA Dashboard":
+        finra_dashboard_run()
+    elif app_selection == "TOS Scanner":
+        TosScan_run()
+    elif app_selection == "Stock Analysis":
+        Stock_analysis_run()
 
     # Buy Me a Coffee Section
     st.sidebar.markdown("---")  # Add a separator
