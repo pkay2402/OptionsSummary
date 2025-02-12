@@ -57,23 +57,5 @@ def main():
     elif app_selection == "Stock Analysis":
         StockAnalysis_run()
 
-    # Buy Me a Coffee Section
-    st.sidebar.markdown("---")  # Add a separator
-    st.sidebar.header("Support Me")
-    st.sidebar.markdown(
-        """
-        If you find this app helpful, consider supporting me by buying me a coffee!
-        """,
-        unsafe_allow_html=True,
-    )
-    st.sidebar.markdown(
-        """
-        <a href="https://www.buymeacoffee.com/yourusername" target="_blank">
-            <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 40px !important; width: 145px !important;">
-        </a>
-        """,
-        unsafe_allow_html=True,
-    )
-
 if __name__ == "__main__":
     main()
