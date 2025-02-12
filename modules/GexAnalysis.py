@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
+def run():
 # Set page config
 st.set_page_config(
     page_title="Options GEX Analysis",
@@ -236,3 +237,6 @@ if st.sidebar.button("Analyze"):
             
     except Exception as e:
         st.error(f"Error analyzing {ticker_symbol}: {str(e)}")
+
+if __name__ == "__main__":
+    run()
