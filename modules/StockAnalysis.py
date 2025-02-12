@@ -351,4 +351,4 @@ div[data-testid="stHorizontalBlock"] {
 }
 </style>
 """, unsafe_allow_html=True)
-    run()
+run()
