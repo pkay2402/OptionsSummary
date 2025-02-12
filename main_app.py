@@ -1,8 +1,8 @@
 from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
-from modules.IntradaySignals import run as IntradaySignals_run
-from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
+#from modules.IntradaySignals import run as IntradaySignals_run
+#from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
 #from modules.StockInsights import run as StockInsights_run
 from modules.WeekendRule import run as WeekendRule_run
 from modules.TechnicalScriptsEducation import display_technical_scripts_education
@@ -20,8 +20,8 @@ def main():
                                       ["Flow Summary", 
                                        "Momentum Signals", 
                                        "Momentum ETF", 
-                                       "Intraday Signals",
-                                       "Institutional Data Dashboard",
+                                       #"Intraday Signals",
+                                       #"Institutional Data Dashboard",
                                        #"Stock Insights", 
                                        "Weekend Rule",
                                        "Technical Scripts and Education",
@@ -37,10 +37,10 @@ def main():
         MomentumSignals_run()
     elif app_selection == "Momentum ETF":
         MomentumETF_run()
-    elif app_selection == "Intraday Signals":
-        IntradaySignals_run()
-    elif app_selection == "Institutional Data Dashboard":
-        InstitutionalDataDashboard_run()
+    #elif app_selection == "Intraday Signals":
+        #IntradaySignals_run()
+    #elif app_selection == "Institutional Data Dashboard":
+        #InstitutionalDataDashboard_run()
     #elif app_selection == "Stock Insights":
         #StockInsights_run()
     elif app_selection == "Weekend Rule":
