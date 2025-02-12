@@ -524,11 +524,11 @@ def render_stock_section(keyword, days_lookback):
             st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
 def run():
-    st.set_page_config(
-        page_title="Thinkorswim Alerts Analyzer",
-        page_icon="📊",
-        layout="wide"
-    )
+    #st.set_page_config(
+        #page_title="Thinkorswim Alerts Analyzer",
+        #page_icon="📊",
+        #layout="wide"
+    #)
 
     
     # Add sidebar for settings
