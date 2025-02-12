@@ -5,21 +5,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
-def run():
-# Set page config
-st.set_page_config(
-    page_title="Options GEX Analysis",
-    page_icon="📈",
-    layout="wide"
-)
-
-# Title and description
-st.title("Options Gamma Exposure (GEX) Analysis")
-st.markdown("""
-This application analyzes and visualizes the Gamma Exposure (GEX) for stock options.
-GEX helps understand potential price magnetism and resistance levels based on options market positioning.
-""")
-
 def calculate_gamma(S, K, T, r, sigma, option_type='call'):
     if T <= 0.001:
         T = 0.001
@@ -173,70 +158,77 @@ def plot_gex(gex_data, current_price, ticker_symbol):
     plt.tight_layout()
     return fig
 
-# Sidebar controls
-st.sidebar.header("Analysis Parameters")
+def run():
+    # Title and description
+    st.title("Options Gamma Exposure (GEX) Analysis")
+    st.markdown("""
+    This application analyzes and visualizes the Gamma Exposure (GEX) for stock options.
+    GEX helps understand potential price magnetism and resistance levels based on options market positioning.
+    """)
 
-# Ticker input with default popular tickers
-popular_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA']
-ticker_input = st.sidebar.text_input("Enter Ticker Symbol:", value='SPY')
-ticker_symbol = ticker_input.upper()
+    # Sidebar controls
+    st.sidebar.header("Analysis Parameters")
 
-if st.sidebar.button("Analyze"):
-    try:
-        # Initialize ticker
-        ticker = yf.Ticker(ticker_symbol)
-        
-        # Date range selection for expiration
-        st.sidebar.subheader("Expiration Selection")
-        min_days = st.sidebar.slider("Minimum Days to Expiration", 1, 30, 1)
-        max_days = st.sidebar.slider("Maximum Days to Expiration", min_days, 60, 30)
-        
-        # Find best expiration
-        best_exp, exp_data = find_best_expiration(ticker, min_days, max_days)
-        
-        if not best_exp:
-            st.error("No suitable expiration dates found")
-        else:
-            # Display expiration data
-            st.subheader("Available Expirations")
-            st.dataframe(exp_data)
+    # Ticker input with default popular tickers
+    popular_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA']
+    ticker_input = st.sidebar.text_input("Enter Ticker Symbol:", value='SPY')
+    ticker_symbol = ticker_input.upper()
+
+    if st.sidebar.button("Analyze"):
+        try:
+            # Initialize ticker
+            ticker = yf.Ticker(ticker_symbol)
             
-            # Let user select expiration
-            selected_exp = st.selectbox(
-                "Select Expiration Date",
-                exp_data['date'].tolist(),
-                index=exp_data['date'].tolist().index(best_exp) if best_exp in exp_data['date'].tolist() else 0
-            )
+            # Date range selection for expiration
+            st.sidebar.subheader("Expiration Selection")
+            min_days = st.sidebar.slider("Minimum Days to Expiration", 1, 30, 1)
+            max_days = st.sidebar.slider("Maximum Days to Expiration", min_days, 60, 30)
             
-            # Additional parameters
-            col1, col2 = st.columns(2)
-            with col1:
-                price_range = st.slider("Price Range (%)", 5, 30, 15)
-            with col2:
-                gex_threshold = st.slider("GEX Threshold", 0.1, 20.0, 5.0)
+            # Find best expiration
+            best_exp, exp_data = find_best_expiration(ticker, min_days, max_days)
             
-            # Fetch and plot GEX data
-            gex_data, current_price = fetch_gex_data(
-                ticker_symbol,
-                selected_exp,
-                price_range,
-                gex_threshold
-            )
-            
-            if not gex_data.empty and current_price:
-                # Display current price and statistics
-                st.metric("Current Price", f"${current_price:.2f}")
+            if not best_exp:
+                st.error("No suitable expiration dates found")
+            else:
+                # Display expiration data
+                st.subheader("Available Expirations")
+                st.dataframe(exp_data)
                 
-                # Show GEX plot
-                fig = plot_gex(gex_data, current_price, ticker_symbol)
-                st.pyplot(fig)
+                # Let user select expiration
+                selected_exp = st.selectbox(
+                    "Select Expiration Date",
+                    exp_data['date'].tolist(),
+                    index=exp_data['date'].tolist().index(best_exp) if best_exp in exp_data['date'].tolist() else 0
+                )
                 
-                # Display raw data in expandable section
-                with st.expander("View Raw GEX Data"):
-                    st.dataframe(gex_data)
-            
-    except Exception as e:
-        st.error(f"Error analyzing {ticker_symbol}: {str(e)}")
+                # Additional parameters
+                col1, col2 = st.columns(2)
+                with col1:
+                    price_range = st.slider("Price Range (%)", 5, 30, 15)
+                with col2:
+                    gex_threshold = st.slider("GEX Threshold", 0.1, 20.0, 5.0)
+                
+                # Fetch and plot GEX data
+                gex_data, current_price = fetch_gex_data(
+                    ticker_symbol,
+                    selected_exp,
+                    price_range,
+                    gex_threshold
+                )
+                
+                if not gex_data.empty and current_price:
+                    # Display current price and statistics
+                    st.metric("Current Price", f"${current_price:.2f}")
+                    
+                    # Show GEX plot
+                    fig = plot_gex(gex_data, current_price, ticker_symbol)
+                    st.pyplot(fig)
+                    
+                    # Display raw data in expandable section
+                    with st.expander("View Raw GEX Data"):
+                        st.dataframe(gex_data)
+        except Exception as e:
+            st.error(f"Error analyzing {ticker_symbol}: {str(e)}")
 
 if __name__ == "__main__":
     run()
