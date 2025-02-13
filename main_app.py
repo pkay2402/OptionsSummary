@@ -59,7 +59,7 @@ def main():
     elif app_selection == "Stock Analysis":
         StockAnalysis_run()
     elif app_selection == "Seasonality Analysis":
-    SeasonalityAnalysis_run()
+        SeasonalityAnalysis_run()
 
 if __name__ == "__main__":
     main()
