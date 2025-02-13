@@ -1,3 +1,5 @@
+# modules/SeasonalityAnalysis.py
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -15,11 +17,9 @@ MONTHS = {
     "September": 9, "October": 10, "November": 11, "December": 12
 }
 
-# Function to convert month name to number
 def get_month_number(month_name):
     return MONTHS[month_name]
 
-# Fetch historical stock data from Yahoo Finance
 def fetch_stock_data(symbol, start_date, end_date):
     try:
         data = yf.download(symbol, start=start_date, end=end_date)
@@ -33,11 +33,9 @@ def fetch_stock_data(symbol, start_date, end_date):
         return None
 
 def calculate_seasonality(data, month_number, current_year):
-    # Separate current year and historical data
     historical_data = data[data.index.year < current_year].copy()
     current_data = data[data.index.year == current_year].copy()
     
-    # Calculate historical seasonality
     historical_monthly = historical_data[historical_data["Month"] == month_number].copy()
     daily_avg_returns = historical_monthly.groupby("Day")["Daily Return"].agg([
         "mean",
@@ -45,7 +43,6 @@ def calculate_seasonality(data, month_number, current_year):
         "count"
     ])
     
-    # Calculate confidence intervals (95%)
     confidence_level = 1.96
     daily_avg_returns["ci_lower"] = daily_avg_returns["mean"] - confidence_level * (
         daily_avg_returns["std"] / np.sqrt(daily_avg_returns["count"])
@@ -54,11 +51,9 @@ def calculate_seasonality(data, month_number, current_year):
         daily_avg_returns["std"] / np.sqrt(daily_avg_returns["count"])
     )
     
-    # Get current year's data for the month
     current_monthly = current_data[current_data["Month"] == month_number].copy()
     current_returns = current_monthly.groupby("Day")["Daily Return"].mean()
     
-    # Calculate statistical significance
     monthly_returns = historical_monthly.groupby("Year")["Daily Return"].mean()
     t_stat, p_value = stats.ttest_1samp(monthly_returns, 0)
     
@@ -112,7 +107,6 @@ def plot_seasonality_with_current(seasonality_results, stock, month_name):
             marker=dict(size=8)
         ))
     
-    # Add zero line for reference
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     
     fig.update_layout(
@@ -131,20 +125,23 @@ def plot_seasonality_with_current(seasonality_results, stock, month_name):
     
     return fig
 
-# Send data and chart to Discord webhook
 def send_to_discord(webhook_url, message, fig):
-    payload = {"content": message}
-    requests.post(webhook_url, json=payload)
-    
-    buf = io.BytesIO()
-    fig.write_image(buf, format="png")
-    buf.seek(0)
-    
-    files = {"file": ("chart.png", buf, "image/png")}
-    requests.post(webhook_url, files=files)
+    try:
+        payload = {"content": message}
+        requests.post(webhook_url, json=payload)
+        
+        buf = io.BytesIO()
+        fig.write_image(buf, format="png")
+        buf.seek(0)
+        
+        files = {"file": ("chart.png", buf, "image/png")}
+        requests.post(webhook_url, files=files)
+        return True
+    except Exception as e:
+        st.error(f"Error sending to Discord: {e}")
+        return False
 
-# Streamlit App
-def main():
+def run():
     st.title("Stock Seasonality & Analysis Tool")
     
     # Input parameters
@@ -188,10 +185,12 @@ def main():
             
             # Data Export Option
             csv_data = seasonality_results["historical_daily_returns"].to_csv().encode("utf-8")
-            st.download_button("Download Historical Data as CSV", 
-                             csv_data, 
-                             "seasonality.csv", 
-                             "text/csv")
+            st.download_button(
+                "Download Historical Data as CSV", 
+                csv_data, 
+                "seasonality.csv", 
+                "text/csv"
+            )
             
             # Send to Discord Button
             if webhook_url:
@@ -203,10 +202,10 @@ def main():
                     Current Year Return: {seasonality_results['current_month_return']:.2%}
                     Statistical Significance: p-value = {seasonality_results['p_value']:.3f}
                     """
-                    send_to_discord(webhook_url, discord_message, fig)
-                    st.success("Sent to Discord!")
+                    if send_to_discord(webhook_url, discord_message, fig):
+                        st.success("Sent to Discord!")
         else:
             st.error("Failed to fetch stock data. Please check the stock symbol and try again.")
 
 if __name__ == "__main__":
-    main()
+    run()
