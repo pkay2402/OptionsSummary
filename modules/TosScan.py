@@ -29,6 +29,12 @@ def run():
     # Initialize session state first
     init_session_state()
 
+# 3. Modify how you access the session state. Instead of:
+if keyword in st.session_state['cached_data']:
+
+# Use:
+if keyword in st.session_state.cached_data:
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -211,8 +217,8 @@ def parse_email_body(msg):
 def extract_stock_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
     """Extract stock symbols from email alerts with proper date filtering."""
     # Check if this data is already in cache
-    if keyword in st.session_state['cached_data']:
-        return st.session_state['cached_data'][keyword]
+    if keyword in st.session_state.cached_data:
+        return st.session_state.cached_data[keyword]
 
     try:
         mail = connect_to_email()
@@ -270,12 +276,12 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
             df = df.sort_values(by=['Date', 'Ticker']).drop_duplicates(subset=['Ticker', 'Signal', 'Date'], keep='last')
             
             # Cache the data for this keyword
-            st.session_state['cached_data'][keyword] = df
+            st.session_state.cached_data[keyword] = df
             return df
 
         # Cache empty DataFrame if no data found
-        st.session_state['cached_data'][keyword] = pd.DataFrame(columns=['Ticker', 'Date', 'Signal'])
-        return st.session_state['cached_data'][keyword]
+        st.session_state.cached_data[keyword] = pd.DataFrame(columns=['Ticker', 'Date', 'Signal'])
+        return st.session_state.cached_data[keyword]
 
     except Exception as e:
         logger.error(f"Error in extract_stock_symbols_from_email: {e}")
