@@ -12,6 +12,7 @@ from modules.finra_dashboard import run as finra_dashboard_run
 from modules.TosScan import run as TosScan_run
 from modules.StockAnalysis import run as StockAnalysis_run
 from modules.Seasonality import run as Seasonality_run
+from modules.SP500Performance import run as SP500Performance_run
 import streamlit as st
 
 def main():
@@ -30,7 +31,8 @@ def main():
                                        "FINRA Dashboard",       # New option
                                        "TOS Scanner",          # New option
                                        "Stock Analysis",
-                                       "Seasonality"])      # New option
+                                       "Seasonality",
+                                       "S&P 500 Performance"])      # New option
     
     # Route to the selected app
     if app_selection == "Flow Summary":
@@ -60,6 +62,8 @@ def main():
         StockAnalysis_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
+    elif app_selection == "S&P 500 Performance":
+        SP500Performance_run()
 
 if __name__ == "__main__":
     main()
