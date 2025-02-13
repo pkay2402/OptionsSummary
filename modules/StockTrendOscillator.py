@@ -170,9 +170,9 @@ def create_chart(df, symbol):
 
     return fig
 
-def run():
-    """Main function to run in the Streamlit app"""
-    st.title('Multi-Stock Trend Oscillator Dashboard')
+def show_trend_oscillator():
+    """Main function to show the trend oscillator in the Streamlit app"""
+    st.header('Multi-Stock Trend Oscillator Dashboard')
     
     # Create a grid of stock buttons
     cols = st.columns(5)
