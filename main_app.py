@@ -1,23 +1,21 @@
+import streamlit as st
+
+# This MUST be the first Streamlit command
+st.set_page_config(layout="wide", page_title="Trading Tools Hub")
+
 from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
-#from modules.IntradaySignals import run as IntradaySignals_run
-#from modules.InstitutionalDataDashboard import run as InstitutionalDataDashboard_run
-#from modules.StockInsights import run as StockInsights_run
-#from modules.WeekendRule import run as WeekendRule_run
-#from modules.TechnicalScriptsEducation import display_technical_scripts_education
-# New module imports
 from modules.GexAnalysis import run as GexAnalysis_run
 from modules.finra_dashboard import run as finra_dashboard_run
 from modules.TosScan import run as TosScan_run
 from modules.StockAnalysis import run as StockAnalysis_run
 from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
-from modules.StockTrendOscillator import run as StockTrendOscillator_run
-import streamlit as st
+from modules.StockTrendOscillator import show_trend_oscillator  # Changed to new function name
 
 def add_buymeacoffee():
-    st.sidebar.markdown("---")  # Add a separator
+    st.sidebar.markdown("---")
     st.sidebar.markdown("""
         <div style="text-align: center;">
             <p>If you find these tools helpful, consider supporting the project:</p>
@@ -45,39 +43,23 @@ def main():
                                       ["Stock Trend Oscillator",
                                        "Flow Summary", 
                                        "Momentum Signals", 
-                                       "Momentum ETF", 
-                                       #"Intraday Signals",
-                                       #"Institutional Data Dashboard",
-                                       #"Stock Insights", 
-                                       #"Weekend Rule",
-                                       #"Technical Scripts and Education",
-                                       "GEX Analysis",          # New option
-                                       "FINRA Dashboard",       # New option
-                                       "TOS Scanner",          # New option
+                                       "Momentum ETF",
+                                       "GEX Analysis",
+                                       "FINRA Dashboard",
+                                       "TOS Scanner",
                                        "Stock Analysis",
                                        "Seasonality",
-                                       "S&P 500 Performance"])      # New option
+                                       "S&P 500 Performance"])
     
     # Route to the selected app
     if app_selection == "Stock Trend Oscillator":
-        StockTrendOscillator_run()
+        show_trend_oscillator()  # Using the new function name
     elif app_selection == "Flow Summary":
         flowSummary_run()
     elif app_selection == "Momentum Signals":
         MomentumSignals_run()
     elif app_selection == "Momentum ETF":
         MomentumETF_run()
-    #elif app_selection == "Intraday Signals":
-        #IntradaySignals_run()
-    #elif app_selection == "Institutional Data Dashboard":
-        #InstitutionalDataDashboard_run()
-    #elif app_selection == "Stock Insights":
-        #StockInsights_run()
-    #elif app_selection == "Weekend Rule":
-        #WeekendRule_run()
-    #elif app_selection == "Technical Scripts and Education":
-        #display_technical_scripts_education()
-    # New module routing
     elif app_selection == "GEX Analysis":
         GexAnalysis_run()
     elif app_selection == "FINRA Dashboard":
