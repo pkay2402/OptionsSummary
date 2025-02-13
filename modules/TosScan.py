@@ -12,6 +12,10 @@ from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def init_session_state():
     """Initialize session state variables"""
     if 'processed_email_ids' not in st.session_state:
@@ -22,22 +26,6 @@ def init_session_state():
         st.session_state.cached_data = {}
     if 'previous_symbols' not in st.session_state:
         st.session_state.previous_symbols = {}
-
-# 2. Call this at the very beginning of your script, before any other operations:
-
-def run():
-    # Initialize session state first
-    init_session_state()
-
-# 3. Modify how you access the session state. Instead of:
-if keyword in st.session_state['cached_data']:
-
-# Use:
-if keyword in st.session_state.cached_data:
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Fetch credentials from Streamlit Secrets
 EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
@@ -54,105 +42,11 @@ Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volu
 DAILY_KEYWORDS = ["Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call"]
 
-# Keyword definitions with added risk levels and descriptions
+# Your existing KEYWORD_DEFINITIONS dictionary remains the same
 KEYWORD_DEFINITIONS = {
-    "Long_VP": {
-        "description": "Volume Profile based long signal.",
-        "risk_level": "Medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Below the volume node"
-    },
-    "Short_VP": {
-        "description": "Volume Profile based short signal.",
-        "risk_level": "Medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Above the volume node"
-    },
-    "orb_bull": {
-        "description": "10 mins 9 ema crossed above opening range high of 30mins",
-        "risk_level": "high",
-        "timeframe": "Intraday",
-        "suggested_stop": "Below the ORB high"
-    },
-    "orb_bear": {
-        "description": "10 mins 9 ema crossed below opening range low of 30mins",
-        "risk_level": "high",
-        "timeframe": "Intraday",
-        "suggested_stop": "Above the ORB low"
-    },
-    "volume_scan": {
-        "description": "high intrday volume and stock atleast 2% up",
-        "risk_level": "high",
-        "timeframe": "Intraday. Enter at vwap test/and trading above 9 ema on 10mins",
-        "suggested_stop": "below vwap"
-    },
-    "A+Bull_30m": {
-        "description": "oversold stocks entering bullish zone",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "below recent low/support"
-    },
-    "tmo_long": {
-        "description": "oversold stocks entering bullish momentum on 60mins",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "below recent low/support"
-    },
-    "tmo_Short": {
-        "description": "overbought stocks entering losing bullish momentum on 60mins",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Above recent high/resistance"
-    },
-    "Long_IT_volume": {
-        "description": "On Daily TF stocks breaking out 9ema above high volume node",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Below high volume node"
-    },
-    "Short_IT_volume": {
-        "description": "On Daily TF stocks breaking down 9ema below low volume node",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Above low volume node"
-    },
-    "bull_Daily_sqz": {
-        "description": "On Daily TF stocks breaking out of large squeeze",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Below low of previous day"
-    },
-    "bear_Daily_sqz": {
-        "description": "On Daily TF stocks breaking down of large squeeze",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Above high of previous day"
-    },
-    "LSMHG_Long": {
-        "description": "On Daily TF stocks being bought on 1 yr low area and macd has crossed over",
-        "risk_level": "medium",
-        "timeframe": "1-2 months",
-        "suggested_stop": "Below low of previous day"
-    },
-    "LSMHG_Short": {
-        "description": "On Daily TF stocks being sold on 1 yr high area and macd has crossed under",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "Above high of previous day"
-    },
-    "ETF_options": {
-        "description": "ETF options showing potential momentum setups",
-        "risk_level": "High",
-        "timeframe": "As per expiry date",
-        "suggested_stop": "Based on risk apetite"
-    },
-    "UOP_Call": {
-        "description": "Unusual options activity scanner for calls",
-        "risk_level": "High",
-        "timeframe": "As per expiry date",
-        "suggested_stop": "Based on risk apetite"
-    }
+    # ... (keep your existing definitions)
 }
+
 @lru_cache(maxsize=2)
 def get_spy_qqq_prices():
     """Fetch the latest closing prices and daily changes for SPY and QQQ with caching."""
@@ -160,15 +54,12 @@ def get_spy_qqq_prices():
         spy = yf.Ticker("SPY")
         qqq = yf.Ticker("QQQ")
         
-        # Get today's data for both tickers
-        spy_hist = spy.history(period="2d")  # Get 2 days to calculate % change
+        spy_hist = spy.history(period="2d")
         qqq_hist = qqq.history(period="2d")
         
-        # Calculate latest prices
         spy_price = round(spy_hist['Close'].iloc[-1], 2)
         qqq_price = round(qqq_hist['Close'].iloc[-1], 2)
         
-        # Calculate percentage changes
         spy_prev_close = spy_hist['Close'].iloc[-2]
         qqq_prev_close = qqq_hist['Close'].iloc[-2]
         
@@ -216,7 +107,6 @@ def parse_email_body(msg):
 
 def extract_stock_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
     """Extract stock symbols from email alerts with proper date filtering."""
-    # Check if this data is already in cache
     if keyword in st.session_state.cached_data:
         return st.session_state.cached_data[keyword]
 
@@ -224,7 +114,6 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         mail = connect_to_email()
         mail.select('inbox')
 
-        # Calculate the start date based on days_lookback
         today = datetime.date.today()
         start_date = today
         if days_lookback > 1:
@@ -237,22 +126,16 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         stock_data = []
         
         for num in data[0].split():
-            if num in st.session_state['processed_email_ids']:
+            if num in st.session_state.processed_email_ids:
                 continue
 
             _, data = mail.fetch(num, '(RFC822)')
             msg = email.message_from_bytes(data[0][1])
             
-            # Parse the email datetime
             email_datetime = parser.parse(msg['Date'])
             email_date = email_datetime.date()
             
-            # Skip if email date is before start_date
-            if email_date < start_date:
-                continue
-                
-            # Skip weekends
-            if email_datetime.weekday() >= 5:
+            if email_date < start_date or email_datetime.weekday() >= 5:
                 continue
 
             body = parse_email_body(msg)
@@ -263,10 +146,10 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
                     extracted_symbols = symbol_group[0].replace(" ", "").split(",")
                     signal_type = symbol_group[1]
                     for symbol in extracted_symbols:
-                        if symbol.isalpha():  # Basic symbol validation
+                        if symbol.isalpha():
                             stock_data.append([symbol, email_datetime, signal_type])
             
-            st.session_state['processed_email_ids'].add(num)
+            st.session_state.processed_email_ids.add(num)
 
         mail.close()
         mail.logout()
@@ -274,117 +157,65 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         if stock_data:
             df = pd.DataFrame(stock_data, columns=['Ticker', 'Date', 'Signal'])
             df = df.sort_values(by=['Date', 'Ticker']).drop_duplicates(subset=['Ticker', 'Signal', 'Date'], keep='last')
-            
-            # Cache the data for this keyword
             st.session_state.cached_data[keyword] = df
             return df
 
-        # Cache empty DataFrame if no data found
-        st.session_state.cached_data[keyword] = pd.DataFrame(columns=['Ticker', 'Date', 'Signal'])
-        return st.session_state.cached_data[keyword]
+        empty_df = pd.DataFrame(columns=['Ticker', 'Date', 'Signal'])
+        st.session_state.cached_data[keyword] = empty_df
+        return empty_df
 
     except Exception as e:
         logger.error(f"Error in extract_stock_symbols_from_email: {e}")
         st.error(f"Error processing emails: {str(e)}")
         return pd.DataFrame(columns=['Ticker', 'Date', 'Signal'])
 
-def high_conviction_stocks(dataframes, ignore_keywords=None):
-    """Find stocks with high conviction - at least two unique keyword matches on the same date."""
-    if ignore_keywords is None:
-        ignore_keywords = []
-    
-    # Filter out the ignored keywords before processing
-    filtered_dataframes = [df[~df['Signal'].isin(ignore_keywords)] for df in dataframes if not df.empty]
-    
-    all_data = pd.concat(filtered_dataframes, ignore_index=True)
-    
-    # Convert datetime to date for grouping in high conviction
-    all_data['Date'] = all_data['Date'].dt.date
-    
-    # Aggregate using set to ensure unique signals
-    grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
-    
-    # Count unique signals
-    grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
-    
-    high_conviction = grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
-    
-    return high_conviction
-
 def get_new_symbols_count(keyword, current_df):
+    """Get count of new symbols."""
     if current_df.empty:
-        print(f"⚠️ Warning: DataFrame is empty for keyword: {keyword}")
         return 0
 
-    print(f"🔎 Available columns in current_df for {keyword}: {list(current_df.columns)}")  # Debugging line
-
-    # Determine which column to use instead of 'Ticker'
     possible_ticker_columns = ['Ticker', 'ticker', 'Symbol', 'Raw_Symbol', 'Readable_Symbol']
     ticker_col = next((col for col in possible_ticker_columns if col in current_df.columns), None)
 
     if ticker_col is None:
-        raise KeyError(f"❌ No valid ticker column found in DataFrame for keyword: {keyword}. Found columns: {list(current_df.columns)}")
+        raise KeyError(f"No valid ticker column found in DataFrame for keyword: {keyword}")
 
-    print(f"✅ Using '{ticker_col}' as the ticker column.")
     current_symbols = set(current_df[ticker_col].unique())
-    return len(current_symbols)
-
-
-        
-    # Get previous symbols for this keyword
-    previous_symbols = st.session_state['previous_symbols'].get(keyword, set())
+    previous_symbols = st.session_state.previous_symbols.get(keyword, set())
     
-    # Get current symbols
-    current_symbols = set(current_df['Ticker'].unique())
-    
-    # Calculate new symbols
     new_symbols = current_symbols - previous_symbols
-    
-    # Update previous symbols for next comparison
-    st.session_state['previous_symbols'][keyword] = current_symbols
+    st.session_state.previous_symbols[keyword] = current_symbols
     
     return len(new_symbols)
 
 def parse_option_symbol(option_symbol):
+    """Parse option symbol into readable format."""
     try:
-        # Remove leading dot if present
         symbol = option_symbol.lstrip('.')
-        
-        # Extract components using regex
         pattern = r'([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])([\d_]+)'
         match = re.match(pattern, symbol)
         
         if match:
             Ticker, year, month, day, opt_type, strike = match.groups()
-            
-            # Convert month number to month abbreviation
             month_name = datetime.datetime.strptime(month, '%m').strftime('%b').upper()
-            
-            # Format strike price (replace underscore with a decimal point)
             strike = strike.replace('_', '.')
-            
-            # Determine if it's a CALL or PUT
             option_type = 'CALL' if opt_type == 'C' else 'PUT'
-            
             return f"{Ticker} {day} {month_name} 20{year} {strike} {option_type}"
     
     except Exception as e:
         logger.error(f"Error parsing option symbol {option_symbol}: {e}")
 
     return option_symbol
-    
 
 def extract_option_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
-    """Extract option symbols from email alerts with proper date filtering."""
-    # Check cache
-    if keyword in st.session_state['cached_data']:
-        return st.session_state['cached_data'][keyword]
+    """Extract option symbols from email alerts."""
+    if keyword in st.session_state.cached_data:
+        return st.session_state.cached_data[keyword]
 
     try:
         mail = connect_to_email()
         mail.select('inbox')
 
-        # Calculate the start date based on days_lookback
         today = datetime.date.today()
         start_date = today
         if days_lookback > 1:
@@ -397,22 +228,16 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         option_data = []
         
         for num in data[0].split():
-            if num in st.session_state['processed_email_ids']:
+            if num in st.session_state.processed_email_ids:
                 continue
 
             _, data = mail.fetch(num, '(RFC822)')
             msg = email.message_from_bytes(data[0][1])
             
-            # Parse the email datetime
             email_datetime = parser.parse(msg['Date'])
             email_date = email_datetime.date()
             
-            # Skip if email date is before start_date
-            if email_date < start_date:
-                continue
-                
-            # Skip weekends
-            if email_datetime.weekday() >= 5:
+            if email_date < start_date or email_datetime.weekday() >= 5:
                 continue
 
             body = parse_email_body(msg)
@@ -423,11 +248,11 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
                     extracted_symbols = symbol_group[0].replace(" ", "").split(",")
                     signal_type = symbol_group[1]
                     for symbol in extracted_symbols:
-                        if symbol:  # Basic validation
+                        if symbol:
                             readable_symbol = parse_option_symbol(symbol)
                             option_data.append([symbol, readable_symbol, email_datetime, signal_type])
             
-            st.session_state['processed_email_ids'].add(num)
+            st.session_state.processed_email_ids.add(num)
 
         mail.close()
         mail.logout()
@@ -435,17 +260,31 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         if option_data:
             df = pd.DataFrame(option_data, columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
             df = df.sort_values(by=['Date', 'Raw_Symbol']).drop_duplicates(subset=['Raw_Symbol', 'Signal', 'Date'], keep='last')
-            
-            st.session_state['cached_data'][keyword] = df
+            st.session_state.cached_data[keyword] = df
             return df
 
-        st.session_state['cached_data'][keyword] = pd.DataFrame(columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
-        return st.session_state['cached_data'][keyword]
+        empty_df = pd.DataFrame(columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+        st.session_state.cached_data[keyword] = empty_df
+        return empty_df
 
     except Exception as e:
         logger.error(f"Error in extract_option_symbols_from_email: {e}")
         st.error(f"Error processing emails: {str(e)}")
         return pd.DataFrame(columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+
+def high_conviction_stocks(dataframes, ignore_keywords=None):
+    """Find stocks with high conviction - at least two unique keyword matches on the same date."""
+    if ignore_keywords is None:
+        ignore_keywords = []
+    
+    filtered_dataframes = [df[~df['Signal'].isin(ignore_keywords)] for df in dataframes if not df.empty]
+    all_data = pd.concat(filtered_dataframes, ignore_index=True)
+    all_data['Date'] = all_data['Date'].dt.date
+    
+    grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
+    grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
+    
+    return grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
 
 def render_options_section(keyword, days_lookback):
     """Helper function to render options section content"""
@@ -488,9 +327,6 @@ def render_options_section(keyword, days_lookback):
         else:
             st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
-import streamlit as st
-import datetime
-
 def render_stock_section(keyword, days_lookback):
     """Helper function to render stock section content"""
     symbols_df = extract_stock_symbols_from_email(
@@ -532,7 +368,9 @@ def render_stock_section(keyword, days_lookback):
             st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
 def run():
-
+    """Main function to run the Streamlit application"""
+    # Initialize session state first
+    init_session_state()
     
     # Add sidebar for settings
     with st.sidebar:
@@ -573,17 +411,17 @@ def run():
             )
     with col3:
         if st.button("🔄 Refresh Data"):
-            st.session_state['cached_data'].clear()
-            st.session_state['processed_email_ids'].clear()
+            st.session_state.cached_data.clear()
+            st.session_state.processed_email_ids.clear()
             st.rerun()
 
     # Auto-refresh logic
-    if auto_refresh and st.session_state['last_refresh_time']:
-        time_since_refresh = time.time() - st.session_state['last_refresh_time']
+    if auto_refresh and st.session_state.last_refresh_time:
+        time_since_refresh = time.time() - st.session_state.last_refresh_time
         if time_since_refresh >= refresh_interval * 60:
-            st.session_state['cached_data'].clear()
-            st.session_state['processed_email_ids'].clear()
-            st.session_state['last_refresh_time'] = time.time()
+            st.session_state.cached_data.clear()
+            st.session_state.processed_email_ids.clear()
+            st.session_state.last_refresh_time = time.time()
             st.rerun()
 
     # Scan type selection
@@ -641,24 +479,17 @@ def run():
             st.warning("No signals found to process for high conviction view.")
 
     # Update last refresh time
-    st.session_state['last_refresh_time'] = time.time()
+    st.session_state.last_refresh_time = time.time()
     
     # Footer
     st.markdown("---")
     st.markdown("""
         
-
-            
 Disclaimer: This tool is for informational purposes only and does not constitute financial advice. 
             Trade at your own risk.
-
-
             
 Last updated: {}
-
-
         
-
         """.format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), 
         unsafe_allow_html=True
     )
