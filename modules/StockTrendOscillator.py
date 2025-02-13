@@ -171,8 +171,7 @@ def create_chart(df, symbol):
     return fig
 
 def run():
-    """Main function to run the Streamlit app"""
-    st.set_page_config(layout="wide")
+    """Main function to run in the Streamlit app"""
     st.title('Multi-Stock Trend Oscillator Dashboard')
     
     # Create a grid of stock buttons
@@ -191,46 +190,44 @@ def run():
     
     if selected_stock:
         try:
-            # Fetch data
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=60)  # Fetch more data to account for non-trading days
-            
-            # Fetch 1-hour data
-            stock = yf.Ticker(selected_stock)
-            df = stock.history(start=start_date, end=end_date, interval='1h')
-            
-            # Filter for market hours (9:30 AM to 4:00 PM ET)
-            df.index = df.index.tz_localize(None)
-            df = df.between_time('09:30', '16:00')
-            
-            # Remove weekends
-            df = df[df.index.dayofweek < 5]
-            
-            # Keep only last 30 days of trading data
-            df = df.last('30D')
-            
-            if df.empty:
-                st.error('No data found for the specified stock.')
-                return
-            
-            # Create and display chart
-            fig = create_chart(df, selected_stock)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display current indicator values
-            trend_osc, ema = calculate_trend_oscillator(df)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Current Trend Oscillator", f"{trend_osc.iloc[-1]:.2f}")
-            with col2:
-                st.metric("Current Signal Line", f"{ema.iloc[-1]:.2f}")
-            with col3:
-                trend = "Bullish" if trend_osc.iloc[-1] > ema.iloc[-1] else "Bearish"
-                st.metric("Current Trend", trend)
-            
+            with st.spinner('Fetching and analyzing data...'):
+                # Fetch data
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=60)  # Fetch more data to account for non-trading days
+                
+                # Fetch 1-hour data
+                stock = yf.Ticker(selected_stock)
+                df = stock.history(start=start_date, end=end_date, interval='1h')
+                
+                # Filter for market hours (9:30 AM to 4:00 PM ET)
+                df.index = df.index.tz_localize(None)
+                df = df.between_time('09:30', '16:00')
+                
+                # Remove weekends
+                df = df[df.index.dayofweek < 5]
+                
+                # Keep only last 30 days of trading data
+                df = df.last('30D')
+                
+                if df.empty:
+                    st.error('No data found for the specified stock.')
+                    return
+                
+                # Create and display chart
+                fig = create_chart(df, selected_stock)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display current indicator values
+                trend_osc, ema = calculate_trend_oscillator(df)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Current Trend Oscillator", f"{trend_osc.iloc[-1]:.2f}")
+                with col2:
+                    st.metric("Current Signal Line", f"{ema.iloc[-1]:.2f}")
+                with col3:
+                    trend = "Bullish" if trend_osc.iloc[-1] > ema.iloc[-1] else "Bearish"
+                    st.metric("Current Trend", trend)
+                
         except Exception as e:
             st.error(f'Error occurred: {str(e)}')
-
-if __name__ == "__main__":
-    run()
