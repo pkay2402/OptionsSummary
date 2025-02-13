@@ -17,7 +17,7 @@ STOCK_LIST = {
     'TSLA': 'Tesla',
     'AMD': 'AMD',
     'NFLX': 'Netflix',
-    'SPY': 'SP500'
+    'DIS': 'Disney'
 }
 
 def calculate_wilders_ma(data, periods):
@@ -53,7 +53,7 @@ def calculate_trend_oscillator(df, l1=20, l2=50):
     
     return pd.Series(trend_osc), pd.Series(ema)
 
-def create_chart(df, symbol):
+def create_chart(df, symbol, timeframe='1H', oscillator_timeframe='4H'):
     """Create interactive chart with trend oscillator"""
     # Calculate indicators
     trend_osc, ema = calculate_trend_oscillator(df)
@@ -177,6 +177,99 @@ def create_chart(df, symbol):
 
     # Update layout
     fig.update_layout(
+        title=f'{symbol} - {timeframe} Chart with {oscillator_timeframe} Trend Oscillator',
+        yaxis_title='Price',
+        yaxis2_title='Trend Oscillator',
+        xaxis_rangeslider_visible=False,
+        height=800,
+        template='plotly_dark',
+        xaxis={
+            'rangebreaks': [
+                dict(bounds=["sat", "mon"]),  # hide weekends
+                dict(bounds=[16, 9.5], pattern="hour") if timeframe == '1H' else None,  # hide non-trading hours only for 1H
+            ] if timeframe == '1H' else [dict(bounds=["sat", "mon"])]  # Only weekend breaks for 4H
+        }
+    )
+    
+    # Update y-axes
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_yaxes(title_text="Trend Oscillator", row=2, col=1)
+
+    return fig
+
+    # Add Trend Oscillator and EMA to subplot
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=trend_osc,
+            name='Trend Oscillator',
+            line=dict(color='green', width=2),
+            connectgaps=True
+        ),
+        row=2, col=1
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=ema,
+            name='Signal Line',
+            line=dict(color='red', width=2),
+            connectgaps=True
+        ),
+        row=2, col=1
+    )
+
+    # Add horizontal lines for overbought/oversold levels
+    for level in [30, 50, 65]:
+        fig.add_hline(
+            y=level,
+            line_dash="dash",
+            line_color="white",
+            opacity=0.5,
+            row=2, col=1
+        )
+
+    # Add buy/sell signals
+    buy_signals = ((trend_osc > ema) & (trend_osc.shift(1) <= ema.shift(1)))
+    sell_signals = ((trend_osc < ema) & (trend_osc.shift(1) >= ema.shift(1)))
+    
+    # Plot buy signals
+    fig.add_trace(
+        go.Scatter(
+            x=df.index[buy_signals],
+            y=trend_osc[buy_signals],
+            mode='markers',
+            marker=dict(
+                symbol='triangle-up',
+                size=12,
+                color='green',
+                line=dict(width=2)
+            ),
+            name='Buy Signal'
+        ),
+        row=2, col=1
+    )
+    
+    # Plot sell signals
+    fig.add_trace(
+        go.Scatter(
+            x=df.index[sell_signals],
+            y=trend_osc[sell_signals],
+            mode='markers',
+            marker=dict(
+                symbol='triangle-down',
+                size=12,
+                color='red',
+                line=dict(width=2)
+            ),
+            name='Sell Signal'
+        ),
+        row=2, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
         title=f'{symbol} - 1H Chart with 4H Trend Oscillator',
         yaxis_title='Price',
         yaxis2_title='Trend Oscillator',
@@ -210,38 +303,52 @@ def show_trend_oscillator():
         if cols[col_idx].button(f'{symbol}\n{name}', use_container_width=True):
             selected_stock = symbol
     
-    # Additional stock input
-    custom_stock = st.text_input('Enter another stock symbol:', '')
+    # Additional stock input and timeframe selection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        custom_stock = st.text_input('Enter another stock symbol:', '')
+    with col2:
+        timeframe = st.selectbox('Select Timeframe:', ['1H', '4H'])
+    
     if custom_stock:
         selected_stock = custom_stock.upper()
     
     if selected_stock:
         try:
             with st.spinner('Fetching and analyzing data...'):
-                # Fetch data
+                # Adjust data fetch period based on timeframe
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=60)  # Fetch more data to account for non-trading days
+                if timeframe == '1H':
+                    start_date = end_date - timedelta(days=60)
+                    interval = '1h'
+                    oscillator_timeframe = '4H'
+                else:  # 4H
+                    start_date = end_date - timedelta(days=120)  # Fetch more data for 4H
+                    interval = '4h'
+                    oscillator_timeframe = '1d'
                 
-                # Fetch 1-hour data
+                # Fetch data
                 stock = yf.Ticker(selected_stock)
-                df = stock.history(start=start_date, end=end_date, interval='1h')
+                df = stock.history(start=start_date, end=end_date, interval=interval)
                 
                 # Filter for market hours (9:30 AM to 4:00 PM ET)
                 df.index = df.index.tz_localize(None)
-                df = df.between_time('09:30', '16:00')
+                if timeframe == '1H':
+                    df = df.between_time('09:30', '16:00')
                 
                 # Remove weekends
                 df = df[df.index.dayofweek < 5]
                 
-                # Keep only last 30 days of trading data
-                df = df.last('30D')
+                # Keep only last period of trading data
+                days_to_keep = 30 if timeframe == '1H' else 60
+                df = df.last(f'{days_to_keep}D')
                 
                 if df.empty:
                     st.error('No data found for the specified stock.')
                     return
                 
                 # Create and display chart
-                fig = create_chart(df, selected_stock)
+                fig = create_chart(df, selected_stock, timeframe, oscillator_timeframe)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Display current indicator values
