@@ -58,6 +58,10 @@ def create_chart(df, symbol):
     # Calculate indicators
     trend_osc, ema = calculate_trend_oscillator(df)
     
+    # Calculate 21 and 50 EMAs for price
+    df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    
     # Create figure with secondary y-axis
     fig = make_subplots(rows=2, cols=1, 
                        shared_xaxes=True,
@@ -73,6 +77,29 @@ def create_chart(df, symbol):
             low=df['Low'],
             close=df['Close'],
             name='Price'
+        ),
+        row=1, col=1
+    )
+    
+    # Add EMAs to price chart
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df['EMA21'],
+            name='EMA21',
+            line=dict(color='yellow', width=1),
+            connectgaps=True
+        ),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df['EMA50'],
+            name='EMA50',
+            line=dict(color='purple', width=1),
+            connectgaps=True
         ),
         row=1, col=1
     )
