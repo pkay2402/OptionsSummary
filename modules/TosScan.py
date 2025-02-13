@@ -12,19 +12,22 @@ from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-# Initialize session state at the very beginning
 def init_session_state():
+    """Initialize session state variables"""
     if 'processed_email_ids' not in st.session_state:
-        st.session_state['processed_email_ids'] = set()
+        st.session_state.processed_email_ids = set()
     if 'last_refresh_time' not in st.session_state:
-        st.session_state['last_refresh_time'] = time.time()
+        st.session_state.last_refresh_time = time.time()
     if 'cached_data' not in st.session_state:
-        st.session_state['cached_data'] = {}
+        st.session_state.cached_data = {}
     if 'previous_symbols' not in st.session_state:
-        st.session_state['previous_symbols'] = {}
+        st.session_state.previous_symbols = {}
 
-# Call initialization immediately
-init_session_state()
+# 2. Call this at the very beginning of your script, before any other operations:
+
+def run():
+    # Initialize session state first
+    init_session_state()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
