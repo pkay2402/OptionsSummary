@@ -13,6 +13,7 @@ from modules.TosScan import run as TosScan_run
 from modules.StockAnalysis import run as StockAnalysis_run
 from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
+from modules.StockTrendOscillator import run as StockTrendOscillator_run
 import streamlit as st
 
 def add_buymeacoffee():
@@ -41,7 +42,8 @@ def main():
     """, unsafe_allow_html=True)
     
     app_selection = st.sidebar.selectbox("Choose the app:", 
-                                      ["Flow Summary", 
+                                      ["Stock Trend Oscillator",
+                                       "Flow Summary", 
                                        "Momentum Signals", 
                                        "Momentum ETF", 
                                        #"Intraday Signals",
@@ -57,7 +59,9 @@ def main():
                                        "S&P 500 Performance"])      # New option
     
     # Route to the selected app
-    if app_selection == "Flow Summary":
+    if app_selection == "Stock Trend Oscillator":
+        StockTrendOscillator_run()
+    elif app_selection == "Flow Summary":
         flowSummary_run()
     elif app_selection == "Momentum Signals":
         MomentumSignals_run()
