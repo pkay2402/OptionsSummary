@@ -11,7 +11,7 @@ from modules.GexAnalysis import run as GexAnalysis_run
 from modules.finra_dashboard import run as finra_dashboard_run
 from modules.TosScan import run as TosScan_run
 from modules.StockAnalysis import run as StockAnalysis_run
-from modules.SeasonalityAnalysis import run as SeasonalityAnalysis_run
+from modules.Seasonality import run as Seasonality_run
 import streamlit as st
 
 def main():
@@ -30,7 +30,7 @@ def main():
                                        "FINRA Dashboard",       # New option
                                        "TOS Scanner",          # New option
                                        "Stock Analysis",
-                                       "Seasonality Analysis"])      # New option
+                                       "Seasonality"])      # New option
     
     # Route to the selected app
     if app_selection == "Flow Summary":
@@ -58,8 +58,8 @@ def main():
         TosScan_run()
     elif app_selection == "Stock Analysis":
         StockAnalysis_run()
-    elif app_selection == "Seasonality Analysis":
-        SeasonalityAnalysis_run()
+    elif app_selection == "Seasonality":
+        Seasonality_run()
 
 if __name__ == "__main__":
     main()
