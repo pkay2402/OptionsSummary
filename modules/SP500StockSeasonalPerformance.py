@@ -1,3 +1,5 @@
+# modules/SP500Performance.py
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -46,12 +48,10 @@ def calculate_monthly_return(data: pd.DataFrame, month_number: int) -> Optional[
         return None
 
     try:
-        # Filter for the specified month
         monthly_data = data[data["Month"] == month_number].copy()
         if len(monthly_data) < 2:
             return None
 
-        # Group by year to calculate returns for each instance of the month
         monthly_returns = []
         for year in monthly_data["Year"].unique():
             year_data = monthly_data[monthly_data["Year"] == year]
@@ -62,10 +62,7 @@ def calculate_monthly_return(data: pd.DataFrame, month_number: int) -> Optional[
                     monthly_return = (end_price - start_price) / start_price
                     monthly_returns.append(monthly_return)
 
-        # Calculate average monthly return across all years
-        if monthly_returns:
-            return sum(monthly_returns) / len(monthly_returns)
-        return None
+        return sum(monthly_returns) / len(monthly_returns) if monthly_returns else None
 
     except (IndexError, ValueError, TypeError) as e:
         st.warning(f"Error calculating return: {e}")
@@ -81,12 +78,10 @@ def find_high_performing_stocks(
     top_stocks = get_top_200_stocks()
     high_performers = []
     
-    # Add progress bar
     progress_bar = st.progress(0)
     total_stocks = len(top_stocks)
     
     for idx, stock in enumerate(top_stocks):
-        # Update progress
         progress = (idx + 1) / total_stocks
         progress_bar.progress(progress)
         
@@ -96,22 +91,19 @@ def find_high_performing_stocks(
             if avg_return is not None and avg_return > 0.03:  # 3% threshold
                 high_performers.append((stock, avg_return))
     
-    progress_bar.empty()  # Clear progress bar when done
+    progress_bar.empty()
     return sorted(high_performers, key=lambda x: x[1], reverse=True)
 
-def main():
-    """Main Streamlit application."""
-    st.set_page_config(page_title="Stock Seasonality & Analysis Tool", layout="wide")
+def run():
+    """Main function for the S&P 500 monthly performance analysis."""
     st.title("S&P 500 Stocks Monthly Average Performance")
     
-    # Add description
     st.markdown("""
     This tool analyzes the top 200 S&P 500 stocks to find those that historically 
     perform well in specific months. It identifies stocks with average monthly 
     returns greater than 3%.
     """)
     
-    # Create three columns for input controls
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -146,7 +138,6 @@ def main():
                 st.success(f"Found {len(high_performers)} stocks with >3% average return in {month_name}")
                 st.dataframe(df, use_container_width=True)
                 
-                # Add download button
                 csv = df.to_csv(index=False)
                 st.download_button(
                     label="Download Results as CSV",
@@ -158,4 +149,4 @@ def main():
                 st.warning(f"No stocks found with >3% average return in {month_name}.")
 
 if __name__ == "__main__":
-    main()
+    run()
