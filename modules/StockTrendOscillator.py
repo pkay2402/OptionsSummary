@@ -32,10 +32,10 @@ TIMEFRAME_CONFIGS = {
     },
     'Daily': {
         'interval': '1d',
-        'trend_interval': '4D',
+        'trend_interval': '5D',
         'start_days': 120,
         'display_days': 60,
-        'title_suffix': '1D Chart with 4D Trend Oscillator'
+        'title_suffix': '1D Chart with 5D Trend Oscillator'
     }
 }
 
