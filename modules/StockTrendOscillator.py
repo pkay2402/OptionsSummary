@@ -203,10 +203,12 @@ def create_chart(df, symbol, timeframe_config):
         height=800,
         template='plotly_dark',
         xaxis={
-            'rangebreaks': [
-                dict(bounds=["sat", "mon"]),  # hide weekends
-                dict(bounds=[16, 9.5], pattern="hour") if timeframe_config['interval'] == '1h' else None  # hide non-trading hours only for hourly data
-            ]
+            'rangebreaks': ([
+                dict(bounds=["sat", "mon"], pattern="day of week"),  # hide weekends
+                dict(bounds=[16, 9.5], pattern="hour")  # hide non-trading hours
+            ] if timeframe_config['interval'] == '1h' else [
+                dict(bounds=["sat", "mon"], pattern="day of week")  # only hide weekends for daily
+            ])
         }
     )
     
