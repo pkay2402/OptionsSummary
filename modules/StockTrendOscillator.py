@@ -59,13 +59,20 @@ def calculate_trend_oscillator(df, l1=20, l2=50):
     price_change = df['Close'] - df['Close'].shift(1)
     abs_price_change = abs(price_change)
     
-    # Calculate Wilder's Moving Averages
+    # Calculate Wilder's Moving Averages with adjusted periods for daily data
     a1 = calculate_wilders_ma(price_change, l1)
     a2 = calculate_wilders_ma(abs_price_change, l1)
     
-    # Calculate trend oscillator
+    # Calculate trend oscillator with improved scaling
     a3 = np.where(a2 != 0, a1 / a2, 0)
     trend_osc = 50 * (a3 + 1)
+    
+    # Normalize values to ensure they stay within 0-100 range
+    trend_osc = 100 * (trend_osc - trend_osc.rolling(window=l1*2).min()) / \
+                (trend_osc.rolling(window=l1*2).max() - trend_osc.rolling(window=l1*2).min())
+    
+    # Fill NaN values with 50 (neutral)
+    trend_osc = trend_osc.fillna(50)
     
     # Calculate EMA of trend oscillator
     ema = pd.Series(trend_osc).ewm(span=l2, adjust=False).mean()
