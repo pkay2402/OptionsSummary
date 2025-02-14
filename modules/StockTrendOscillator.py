@@ -17,33 +17,14 @@ STOCK_LIST = {
     'TSLA': 'Tesla',
     'AMD': 'AMD',
     'NFLX': 'Netflix',
-    'SPY': 'SP500',
-    'QQQ': 'NQ100'
-}
-
-# Timeframe configurations
-TIMEFRAME_CONFIGS = {
-    'Hourly': {
-        'interval': '1h',
-        'trend_interval': '4H',
-        'start_days': 60,
-        'display_days': 30,
-        'title_suffix': '1H Chart with 4H Trend Oscillator'
-    },
-    'Daily': {
-        'interval': '1d',  # yfinance uses '1d' for daily data
-        'trend_interval': '4D',
-        'start_days': 120,
-        'display_days': 60,
-        'title_suffix': '1D Chart with 4D Trend Oscillator'
-    }
+    'SPY': 'SP500'
 }
 
 def calculate_wilders_ma(data, periods):
     """Calculate Wilder's Moving Average"""
     return data.ewm(alpha=1/periods, adjust=False).mean()
 
-def get_higher_timeframe_data(df, interval):
+def get_higher_timeframe_data(df, interval='4H'):
     """Resample data to higher timeframe"""
     resampled = df['Close'].resample(interval).agg({
         'Open': 'first',
@@ -59,29 +40,20 @@ def calculate_trend_oscillator(df, l1=20, l2=50):
     price_change = df['Close'] - df['Close'].shift(1)
     abs_price_change = abs(price_change)
     
-    # Calculate Wilder's Moving Averages with adjusted periods for daily data
+    # Calculate Wilder's Moving Averages
     a1 = calculate_wilders_ma(price_change, l1)
     a2 = calculate_wilders_ma(abs_price_change, l1)
     
-    # Calculate trend oscillator with improved scaling
+    # Calculate trend oscillator
     a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc = pd.Series(50 * (a3 + 1))
-    
-    # Normalize values to ensure they stay within 0-100 range
-    rolling_min = trend_osc.rolling(window=l1*2, min_periods=1).min()
-    rolling_max = trend_osc.rolling(window=l1*2, min_periods=1).max()
-    
-    trend_osc = 100 * (trend_osc - rolling_min) / (rolling_max - rolling_min).replace(0, 1)
-    
-    # Fill NaN values with 50 (neutral)
-    trend_osc = trend_osc.fillna(50)
+    trend_osc = 50 * (a3 + 1)
     
     # Calculate EMA of trend oscillator
-    ema = trend_osc.ewm(span=l2, adjust=False).mean()
+    ema = pd.Series(trend_osc).ewm(span=l2, adjust=False).mean()
     
-    return trend_osc, ema
+    return pd.Series(trend_osc), pd.Series(ema)
 
-def create_chart(df, symbol, timeframe_config):
+def create_chart(df, symbol):
     """Create interactive chart with trend oscillator"""
     # Calculate indicators
     trend_osc, ema = calculate_trend_oscillator(df)
@@ -205,19 +177,17 @@ def create_chart(df, symbol, timeframe_config):
 
     # Update layout
     fig.update_layout(
-        title=f'{symbol} - {timeframe_config["title_suffix"]}',
+        title=f'{symbol} - 1H Chart with 4H Trend Oscillator',
         yaxis_title='Price',
         yaxis2_title='Trend Oscillator',
         xaxis_rangeslider_visible=False,
         height=800,
         template='plotly_dark',
         xaxis={
-            'rangebreaks': ([
-                dict(bounds=["sat", "mon"], pattern="day of week"),  # hide weekends
-                dict(bounds=[16, 9.5], pattern="hour")  # hide non-trading hours
-            ] if timeframe_config['interval'] == '1h' else [
-                dict(bounds=["sat", "mon"], pattern="day of week")  # only hide weekends for daily
-            ])
+            'rangebreaks': [
+                dict(bounds=["sat", "mon"]),  # hide weekends
+                dict(bounds=[16, 9.5], pattern="hour"),  # hide non-trading hours
+            ]
         }
     )
     
@@ -230,13 +200,6 @@ def create_chart(df, symbol, timeframe_config):
 def show_trend_oscillator():
     """Main function to show the trend oscillator in the Streamlit app"""
     st.header('Multi-Stock Trend Oscillator Dashboard')
-    
-    # Timeframe selection
-    selected_timeframe = st.radio(
-        "Select Timeframe",
-        options=list(TIMEFRAME_CONFIGS.keys()),
-        horizontal=True
-    )
     
     # Create a grid of stock buttons
     cols = st.columns(5)
@@ -255,37 +218,30 @@ def show_trend_oscillator():
     if selected_stock:
         try:
             with st.spinner('Fetching and analyzing data...'):
-                # Get timeframe configuration
-                config = TIMEFRAME_CONFIGS[selected_timeframe]
-                
                 # Fetch data
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=config['start_days'])
+                start_date = end_date - timedelta(days=60)  # Fetch more data to account for non-trading days
                 
-                # Fetch data with selected interval
+                # Fetch 1-hour data
                 stock = yf.Ticker(selected_stock)
-                df = stock.history(start=start_date, end=end_date, interval=config['interval'])
+                df = stock.history(start=start_date, end=end_date, interval='1h')
                 
-                # Handle data based on timeframe
-                if config['interval'] == '1h':
-                    # For hourly data, filter for market hours
-                    df.index = df.index.tz_localize(None)
-                    df = df.between_time('09:30', '16:00')
-                    # Remove weekends
-                    df = df[df.index.dayofweek < 5]
-                else:
-                    # For daily data, just ensure index is timezone-naive
-                    df.index = df.index.tz_localize(None)
+                # Filter for market hours (9:30 AM to 4:00 PM ET)
+                df.index = df.index.tz_localize(None)
+                df = df.between_time('09:30', '16:00')
                 
-                # Keep only specified days of trading data
-                df = df.last(f"{config['display_days']}D")
+                # Remove weekends
+                df = df[df.index.dayofweek < 5]
+                
+                # Keep only last 30 days of trading data
+                df = df.last('30D')
                 
                 if df.empty:
                     st.error('No data found for the specified stock.')
                     return
                 
                 # Create and display chart
-                fig = create_chart(df, selected_stock, config)
+                fig = create_chart(df, selected_stock)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Display current indicator values
