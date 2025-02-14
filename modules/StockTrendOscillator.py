@@ -65,19 +65,21 @@ def calculate_trend_oscillator(df, l1=20, l2=50):
     
     # Calculate trend oscillator with improved scaling
     a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc = 50 * (a3 + 1)
+    trend_osc = pd.Series(50 * (a3 + 1))
     
     # Normalize values to ensure they stay within 0-100 range
-    trend_osc = 100 * (trend_osc - trend_osc.rolling(window=l1*2).min()) / \
-                (trend_osc.rolling(window=l1*2).max() - trend_osc.rolling(window=l1*2).min())
+    rolling_min = trend_osc.rolling(window=l1*2, min_periods=1).min()
+    rolling_max = trend_osc.rolling(window=l1*2, min_periods=1).max()
+    
+    trend_osc = 100 * (trend_osc - rolling_min) / (rolling_max - rolling_min).replace(0, 1)
     
     # Fill NaN values with 50 (neutral)
     trend_osc = trend_osc.fillna(50)
     
     # Calculate EMA of trend oscillator
-    ema = pd.Series(trend_osc).ewm(span=l2, adjust=False).mean()
+    ema = trend_osc.ewm(span=l2, adjust=False).mean()
     
-    return pd.Series(trend_osc), pd.Series(ema)
+    return trend_osc, ema
 
 def create_chart(df, symbol, timeframe_config):
     """Create interactive chart with trend oscillator"""
