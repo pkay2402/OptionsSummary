@@ -31,11 +31,11 @@ TIMEFRAME_CONFIGS = {
         'title_suffix': '1H Chart with 4H Trend Oscillator'
     },
     'Daily': {
-        'interval': '1d',
-        'trend_interval': '5D',
+        'interval': '1d',  # yfinance uses '1d' for daily data
+        'trend_interval': '4D',
         'start_days': 120,
         'display_days': 60,
-        'title_suffix': '1D Chart with 5D Trend Oscillator'
+        'title_suffix': '1D Chart with 4D Trend Oscillator'
     }
 }
 
@@ -205,7 +205,7 @@ def create_chart(df, symbol, timeframe_config):
         xaxis={
             'rangebreaks': [
                 dict(bounds=["sat", "mon"]),  # hide weekends
-                dict(bounds=[16, 9.5], pattern="hour"),  # hide non-trading hours
+                dict(bounds=[16, 9.5], pattern="hour") if timeframe_config['interval'] == '1h' else None  # hide non-trading hours only for hourly data
             ]
         }
     )
@@ -255,13 +255,16 @@ def show_trend_oscillator():
                 stock = yf.Ticker(selected_stock)
                 df = stock.history(start=start_date, end=end_date, interval=config['interval'])
                 
-                # Filter for market hours (9:30 AM to 4:00 PM ET)
-                df.index = df.index.tz_localize(None)
-                if config['interval'] == '1h':  # Only apply time filter for hourly data
+                # Handle data based on timeframe
+                if config['interval'] == '1h':
+                    # For hourly data, filter for market hours
+                    df.index = df.index.tz_localize(None)
                     df = df.between_time('09:30', '16:00')
-                
-                # Remove weekends
-                df = df[df.index.dayofweek < 5]
+                    # Remove weekends
+                    df = df[df.index.dayofweek < 5]
+                else:
+                    # For daily data, just ensure index is timezone-naive
+                    df.index = df.index.tz_localize(None)
                 
                 # Keep only specified days of trading data
                 df = df.last(f"{config['display_days']}D")
