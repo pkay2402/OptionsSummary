@@ -128,7 +128,7 @@ def find_patterns(lookback_days=5, min_volume=1000000, pattern_type="accumulatio
                         key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), 
                         reverse=True)
     
-    return pd.DataFrame(results[:20])
+    return pd.DataFrame(results[:40])
 
 def run():
     st.title("FINRA Short Sale Analysis")
