@@ -17,14 +17,33 @@ STOCK_LIST = {
     'TSLA': 'Tesla',
     'AMD': 'AMD',
     'NFLX': 'Netflix',
-    'SPY': 'SP500'
+    'SPY': 'SP500',
+    'QQQ': 'NQ100'
+}
+
+# Timeframe configurations
+TIMEFRAME_CONFIGS = {
+    'Hourly': {
+        'interval': '1h',
+        'trend_interval': '4H',
+        'start_days': 60,
+        'display_days': 30,
+        'title_suffix': '1H Chart with 4H Trend Oscillator'
+    },
+    'Daily': {
+        'interval': '1d',
+        'trend_interval': '4D',
+        'start_days': 120,
+        'display_days': 60,
+        'title_suffix': '1D Chart with 4D Trend Oscillator'
+    }
 }
 
 def calculate_wilders_ma(data, periods):
     """Calculate Wilder's Moving Average"""
     return data.ewm(alpha=1/periods, adjust=False).mean()
 
-def get_higher_timeframe_data(df, interval='4H'):
+def get_higher_timeframe_data(df, interval):
     """Resample data to higher timeframe"""
     resampled = df['Close'].resample(interval).agg({
         'Open': 'first',
@@ -53,7 +72,7 @@ def calculate_trend_oscillator(df, l1=20, l2=50):
     
     return pd.Series(trend_osc), pd.Series(ema)
 
-def create_chart(df, symbol):
+def create_chart(df, symbol, timeframe_config):
     """Create interactive chart with trend oscillator"""
     # Calculate indicators
     trend_osc, ema = calculate_trend_oscillator(df)
@@ -177,7 +196,7 @@ def create_chart(df, symbol):
 
     # Update layout
     fig.update_layout(
-        title=f'{symbol} - 1H Chart with 4H Trend Oscillator',
+        title=f'{symbol} - {timeframe_config["title_suffix"]}',
         yaxis_title='Price',
         yaxis2_title='Trend Oscillator',
         xaxis_rangeslider_visible=False,
@@ -201,6 +220,13 @@ def show_trend_oscillator():
     """Main function to show the trend oscillator in the Streamlit app"""
     st.header('Multi-Stock Trend Oscillator Dashboard')
     
+    # Timeframe selection
+    selected_timeframe = st.radio(
+        "Select Timeframe",
+        options=list(TIMEFRAME_CONFIGS.keys()),
+        horizontal=True
+    )
+    
     # Create a grid of stock buttons
     cols = st.columns(5)
     selected_stock = None
@@ -218,30 +244,34 @@ def show_trend_oscillator():
     if selected_stock:
         try:
             with st.spinner('Fetching and analyzing data...'):
+                # Get timeframe configuration
+                config = TIMEFRAME_CONFIGS[selected_timeframe]
+                
                 # Fetch data
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=60)  # Fetch more data to account for non-trading days
+                start_date = end_date - timedelta(days=config['start_days'])
                 
-                # Fetch 1-hour data
+                # Fetch data with selected interval
                 stock = yf.Ticker(selected_stock)
-                df = stock.history(start=start_date, end=end_date, interval='1h')
+                df = stock.history(start=start_date, end=end_date, interval=config['interval'])
                 
                 # Filter for market hours (9:30 AM to 4:00 PM ET)
                 df.index = df.index.tz_localize(None)
-                df = df.between_time('09:30', '16:00')
+                if config['interval'] == '1h':  # Only apply time filter for hourly data
+                    df = df.between_time('09:30', '16:00')
                 
                 # Remove weekends
                 df = df[df.index.dayofweek < 5]
                 
-                # Keep only last 30 days of trading data
-                df = df.last('30D')
+                # Keep only specified days of trading data
+                df = df.last(f"{config['display_days']}D")
                 
                 if df.empty:
                     st.error('No data found for the specified stock.')
                     return
                 
                 # Create and display chart
-                fig = create_chart(df, selected_stock)
+                fig = create_chart(df, selected_stock, config)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Display current indicator values
