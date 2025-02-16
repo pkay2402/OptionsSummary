@@ -197,8 +197,15 @@ def run():
             st.metric("Swing Lows", len(down_swings))
             
         # Current trend analysis
-        current_trend = "Upward" if data['Close'].iloc[-1] > data['Close'].iloc[-5] else "Downward"
-        last_swing = "High" if data['Gann_Swing'].iloc[-1] == 'Up' else "Low" if data['Gann_Swing'].iloc[-1] == 'Down' else "None"
+        # Calculate trend using last 5 days of data
+        last_5_days = data['Close'].tail(5)
+        current_trend = "Upward" if last_5_days.iloc[-1] > last_5_days.iloc[0] else "Downward"
+        
+        # Get last swing that isn't neutral
+        non_neutral_swings = data[data['Gann_Swing'] != 'Neutral']['Gann_Swing']
+        last_swing = "None"
+        if not non_neutral_swings.empty:
+            last_swing = "High" if non_neutral_swings.iloc[-1] == 'Up' else "Low"
         
         st.markdown("### Chart Interpretation")
         st.markdown("""
