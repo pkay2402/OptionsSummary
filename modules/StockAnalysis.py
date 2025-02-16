@@ -247,7 +247,7 @@ def plot_candlestick(data, symbol, show_trend_oscillator=False):
 def run():
     """Main application function"""
     # Page configuration for better spacing
-    st.set_page_config(layout="wide", page_title="Stock Analysis Dashboard")
+    #st.set_page_config(layout="wide", page_title="Stock Analysis Dashboard")
     
     # Custom CSS for better spacing and styling
     st.markdown("""
