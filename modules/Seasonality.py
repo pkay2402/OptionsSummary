@@ -143,6 +143,16 @@ def send_to_discord(webhook_url, message, fig):
 
 def run():
     st.title("Stock Seasonality & Analysis Tool")
+
+    st.write("""
+This tool analyzes historical stock price patterns to identify seasonal trends and statistical significance.
+
+Key Features:
+- Calculates monthly return patterns using historical data
+- Compares current year's performance against historical averages
+- Provides confidence intervals and statistical significance tests
+- Visualizes daily returns with interactive charts
+""")
     
     # Input parameters
     col1, col2 = st.columns(2)
