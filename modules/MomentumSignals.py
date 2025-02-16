@@ -244,16 +244,16 @@ def main():
 
         row = {
             "Symbol": symbol,
-            "Price": latest_price,
+            "Price": round(latest_price, 2) if latest_price is not None else None,
             "1D": analysis.get("1d", "Error"),
             "5D": analysis.get("5d", "Error"),
-            "EMA_9": stock_data['EMA_9'].iloc[-1] if not stock_data.empty else None,
-            "EMA_21": stock_data['EMA_21'].iloc[-1] if not stock_data.empty else None,
-            "EMA_50": stock_data['EMA_50'].iloc[-1] if not stock_data.empty else None,
-            "EMA_200": stock_data['EMA_200'].iloc[-1] if not stock_data.empty else None,
-            "Daily_Pivot": daily_pivot,
-            "Weekly_Pivot": weekly_pivot,
-            "Monthly_Pivot": monthly_pivot
+            "EMA_9": round(stock_data['EMA_9'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_21": round(stock_data['EMA_21'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_50": round(stock_data['EMA_50'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_200": round(stock_data['EMA_200'].iloc[-1], 2) if not stock_data.empty else None,
+            "Daily_Pivot": round(daily_pivot, 2) if daily_pivot is not None else None,
+            "Weekly_Pivot": round(weekly_pivot, 2) if weekly_pivot is not None else None,
+            "Monthly_Pivot": round(monthly_pivot, 2) if monthly_pivot is not None else None
         }
         rows.append(row)
 
@@ -270,8 +270,20 @@ def main():
 
     # Display the current signals in the Streamlit app
     df = pd.DataFrame(rows)
+    
+    # Define the styling function
+    def highlight_signals(row):
+        if row['1D'] == 'B' and row['5D'] == 'B':
+            return ['background-color: rgba(0, 100, 0, 0.3)'] * len(row)  # Dark green for buy signals
+        elif row['1D'] == 'S' and row['5D'] == 'S':
+            return ['background-color: rgba(255, 0, 0, 0.3)'] * len(row)  # Red for sell signals
+        return [''] * len(row)
+    
+    # Apply the styling
+    styled_df = df.style.apply(highlight_signals, axis=1)
+    
     st.write("Current Signals and Indicators")
-    st.dataframe(df)
+    st.dataframe(styled_df)
 
     # Add a manual button to send the table to Discord
     if st.button("Send Table to Discord"):
