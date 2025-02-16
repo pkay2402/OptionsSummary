@@ -1,3 +1,11 @@
+"""
+A stock analysis dashboard that combines price action with a custom trend oscillator.
+Key features:
+- Pre-selected major stocks (AAPL, MSFT, GOOGL, etc.) and custom symbol input
+- Interactive candlestick charts with 21 and 50 EMAs
+- Custom trend oscillator with signal line and buy/sell indicators
+- Real-time metrics showing current trend status
+"""
 import streamlit as st
 import yfinance as yf
 import pandas as pd
