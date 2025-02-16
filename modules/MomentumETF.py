@@ -27,6 +27,7 @@ def run():
     - Tracks price movements across multiple timeframes
     - Calculates EMAs and pivot points
     - Generates buy/sell signals
+    - Provides automated Discord notifications
     """)
     main()
 
@@ -212,8 +213,9 @@ def main():
         return
 
     st.write(f"App refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    st.title("ETF Summary with 1D and 5D")
+    st.title("Sector Summary with 1D and 5D")
 
+    # Symbols and timeframe
     # Symbols and timeframe
     symbols = [
         "XLC",  # Communication Services
@@ -253,16 +255,16 @@ def main():
 
         row = {
             "Symbol": symbol,
-            "Price": latest_price,
+            "Price": round(latest_price, 2) if latest_price is not None else None,
             "1D": analysis.get("1d", "Error"),
             "5D": analysis.get("5d", "Error"),
-            "EMA_9": stock_data['EMA_9'].iloc[-1] if not stock_data.empty else None,
-            "EMA_21": stock_data['EMA_21'].iloc[-1] if not stock_data.empty else None,
-            "EMA_50": stock_data['EMA_50'].iloc[-1] if not stock_data.empty else None,
-            "EMA_200": stock_data['EMA_200'].iloc[-1] if not stock_data.empty else None,
-            "Daily_Pivot": daily_pivot,
-            "Weekly_Pivot": weekly_pivot,
-            "Monthly_Pivot": monthly_pivot
+            "EMA_9": round(stock_data['EMA_9'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_21": round(stock_data['EMA_21'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_50": round(stock_data['EMA_50'].iloc[-1], 2) if not stock_data.empty else None,
+            "EMA_200": round(stock_data['EMA_200'].iloc[-1], 2) if not stock_data.empty else None,
+            "Daily_Pivot": round(daily_pivot, 2) if daily_pivot is not None else None,
+            "Weekly_Pivot": round(weekly_pivot, 2) if weekly_pivot is not None else None,
+            "Monthly_Pivot": round(monthly_pivot, 2) if monthly_pivot is not None else None
         }
         rows.append(row)
 
@@ -277,7 +279,6 @@ def main():
         if current_signal != last_signal:
             trend_changes.append(f"Signal change for {symbol}: {last_signal} -> {current_signal}")
 
-    
     # Display the current signals in the Streamlit app
     df = pd.DataFrame(rows)
     
