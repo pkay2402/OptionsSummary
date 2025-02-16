@@ -13,6 +13,7 @@ from modules.StockAnalysis import run as StockAnalysis_run
 from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator  # Changed to new function name
+from modules.GannSwing import run as GannSwing_run
 
 def add_buymeacoffee():
     st.sidebar.markdown("---")
@@ -48,6 +49,7 @@ def main():
                                        "FINRA Dashboard",
                                        "TOS Scanner",
                                        "Stock Analysis",
+                                       "Gann Swing Analysis",
                                        "Seasonality",
                                        "S&P 500 Performance"])
     
@@ -68,6 +70,8 @@ def main():
         TosScan_run()
     elif app_selection == "Stock Analysis":
         StockAnalysis_run()
+    elif app_selection == "Gann Swing Analysis":
+    GannSwing_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
     elif app_selection == "S&P 500 Performance":
