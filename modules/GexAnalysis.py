@@ -240,7 +240,7 @@ def run():
                     risk_free_rate
                 )
                 
-                if not gex_data.empty and current_price:
+        if not gex_data.empty and current_price:
         # Display current price and statistics
         st.metric("Current Price", f"${current_price:.2f}")
         
