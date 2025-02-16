@@ -184,10 +184,11 @@ def run():
         st.pyplot(fig_price)
         st.pyplot(fig_swing)
         
-        # Display statistics and analysis
+        # Display analysis
         st.subheader("Analysis Summary")
         
-        # Key metrics
+        # Display swing point statistics
+        st.markdown("### Swing Point Statistics")
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Total Swing Points", len(up_swings) + len(down_swings))
@@ -195,46 +196,43 @@ def run():
             st.metric("Swing Highs", len(up_swings))
         with col3:
             st.metric("Swing Lows", len(down_swings))
-            
-        # Current trend analysis
-        # Calculate trend using last 5 days of data
-        last_5_days = data['Close'].tail(5)
-        current_trend = "Upward" if last_5_days.iloc[-1] > last_5_days.iloc[0] else "Downward"
         
-        # Get last swing that isn't neutral
-        non_neutral_swings = data[data['Gann_Swing'] != 'Neutral']['Gann_Swing']
-        last_swing = "None"
-        if not non_neutral_swings.empty:
-            last_swing = "High" if non_neutral_swings.iloc[-1] == 'Up' else "Low"
-        
-        st.markdown("### Chart Interpretation")
+        # Add interpretation guide
+        st.markdown("### How to Read This Chart")
         st.markdown("""
-        **What am I looking at?**
-        - The main chart shows price movement with important swing points marked
-        - Green triangles (▲) show potential resistance levels
-        - Red triangles (▼) show potential support levels
-        - Dotted lines show time cycles where reversals often occur
+        This Gann Swing Analysis helps identify potential trading opportunities through key price movements:
         
-        **Current Market Position:**
+        **Chart Elements:**
+        - **Blue Line:** Price movement
+        - **Green Triangles (▲):** Swing highs - potential resistance levels
+        - **Red Triangles (▼):** Swing lows - potential support levels
+        - **Dotted Lines:** Gann time cycles for potential reversals
+        - **Dashed Lines:** Trend channels (Green for highs, Red for lows)
         """)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"""
-            - Current Trend: **{current_trend}**
-            - Last Swing Point: **{last_swing}**
-            - Latest Price: **${data['Close'].iloc[-1]:.2f}**
-            """)
-        
-        with col2:
-            # Calculate recent support/resistance
-            recent_high = up_swings['Swing_Prices'].iloc[-1] if not up_swings.empty else "N/A"
-            recent_low = down_swings['Swing_Prices'].iloc[-1] if not down_swings.empty else "N/A"
-            
-            st.markdown(f"""
-            - Recent Resistance: **${recent_high if isinstance(recent_high, str) else f'{recent_high:.2f}'}**
-            - Recent Support: **${recent_low if isinstance(recent_low, str) else f'{recent_low:.2f}'}**
-            """)
+        st.markdown("""
+        **Trading Applications:**
+        1. **Support & Resistance:**
+           - Red triangles often indicate potential buying zones
+           - Green triangles often indicate potential selling zones
+           
+        2. **Trend Analysis:**
+           - Rising trend channels suggest bullish momentum
+           - Falling trend channels suggest bearish momentum
+           - Channel width indicates volatility
+           
+        3. **Time Cycles:**
+           - Vertical dotted lines show Gann time cycles
+           - Watch for potential reversals near these lines
+           - More significant moves often occur at cycle intersections
+           
+        4. **Swing Chart (Bottom):**
+           - Shows pure price movement without noise
+           - Green lines indicate upward swings
+           - Red lines indicate downward swings
+           
+        **Note:** This analysis should be used alongside other technical and fundamental indicators for making trading decisions.
+        """)
         
         st.markdown("""
         **How to Use This Information:**
