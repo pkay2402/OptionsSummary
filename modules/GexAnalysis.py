@@ -242,7 +242,7 @@ def run():
                 
         if not gex_data.empty and current_price:
         # Display current price and statistics
-        st.metric("Current Price", f"${current_price:.2f}")
+         st.metric("Current Price", f"${current_price:.2f}")
         
         # Show GEX plot
         fig = plot_gex(gex_data, current_price, st.session_state['ticker'], 
@@ -304,7 +304,7 @@ def run():
         # Display raw data in expandable section
         with st.expander("View Raw GEX Data"):
             st.dataframe(gex_data)
-        else:
+    else:
             st.warning("No expirations found within the selected date range")
 
 if __name__ == "__main__":
