@@ -277,7 +277,7 @@ def main():
         if current_signal != last_signal:
             trend_changes.append(f"Signal change for {symbol}: {last_signal} -> {current_signal}")
 
-    # Display the current signals in the Streamlit app
+    
     # Display the current signals in the Streamlit app
     df = pd.DataFrame(rows)
     
