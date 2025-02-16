@@ -71,7 +71,7 @@ def main():
     elif app_selection == "Stock Analysis":
         StockAnalysis_run()
     elif app_selection == "Gann Swing Analysis":
-    GannSwing_run()
+        GannSwing_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
     elif app_selection == "S&P 500 Performance":
