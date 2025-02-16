@@ -65,7 +65,7 @@ def plot_trend_lines(ax, data, up_swings, down_swings):
 
 def add_gann_time_factors(ax, data):
     """Add Gann time factor lines with improved visibility"""
-    colors = ['#1f77b4', '#4B0082', '#2ca02c']  # Different colors for each cycle
+    colors = ['#800080', '#FFA500', '#4B0082']  # Purple, Orange, Indigo for better visibility
     cycles = [20, 40, 80]
     
     start_date = data.index[0]
@@ -184,19 +184,66 @@ def run():
         st.pyplot(fig_price)
         st.pyplot(fig_swing)
         
-        # Display statistics
-        st.subheader("Swing Statistics")
+        # Display statistics and analysis
+        st.subheader("Analysis Summary")
+        
+        # Key metrics
         col1, col2, col3 = st.columns(3)
-        
         with col1:
-            st.metric("Total Swing Points", 
-                     len(up_swings) + len(down_swings))
-        
+            st.metric("Total Swing Points", len(up_swings) + len(down_swings))
         with col2:
             st.metric("Swing Highs", len(up_swings))
-        
         with col3:
             st.metric("Swing Lows", len(down_swings))
+            
+        # Current trend analysis
+        current_trend = "Upward" if data['Close'].iloc[-1] > data['Close'].iloc[-5] else "Downward"
+        last_swing = "High" if data['Gann_Swing'].iloc[-1] == 'Up' else "Low" if data['Gann_Swing'].iloc[-1] == 'Down' else "None"
+        
+        st.markdown("### Chart Interpretation")
+        st.markdown("""
+        **What am I looking at?**
+        - The main chart shows price movement with important swing points marked
+        - Green triangles (▲) show potential resistance levels
+        - Red triangles (▼) show potential support levels
+        - Dotted lines show time cycles where reversals often occur
+        
+        **Current Market Position:**
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""
+            - Current Trend: **{current_trend}**
+            - Last Swing Point: **{last_swing}**
+            - Latest Price: **${data['Close'].iloc[-1]:.2f}**
+            """)
+        
+        with col2:
+            # Calculate recent support/resistance
+            recent_high = up_swings['Swing_Prices'].iloc[-1] if not up_swings.empty else "N/A"
+            recent_low = down_swings['Swing_Prices'].iloc[-1] if not down_swings.empty else "N/A"
+            
+            st.markdown(f"""
+            - Recent Resistance: **${recent_high if isinstance(recent_high, str) else f'{recent_high:.2f}'}**
+            - Recent Support: **${recent_low if isinstance(recent_low, str) else f'{recent_low:.2f}'}**
+            """)
+        
+        st.markdown("""
+        **How to Use This Information:**
+        1. **Trend Direction**: Follow the dashed lines - rising lines suggest upward trend, falling lines suggest downward trend
+        2. **Support/Resistance**: Red triangles often act as support (buying opportunities), green triangles as resistance (selling opportunities)
+        3. **Time Cycles**: Watch for potential reversals when price approaches vertical time cycle lines
+        4. **Swing Chart**: The bottom chart shows pure price movement - helps identify overall trend direction
+        
+        **Trading Considerations:**
+        - Consider buying near support levels (red triangles) during upward trends
+        - Consider selling near resistance levels (green triangles) during downward trends
+        - Pay attention to where price interacts with trend lines
+        - Watch for reversals near time cycle lines
+        
+        *Note: This analysis is based on technical indicators and should be used alongside other forms of analysis for making trading decisions.*
+        """)
             
     except Exception as e:
         st.error(f"Error: {str(e)}")
