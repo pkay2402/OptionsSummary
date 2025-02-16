@@ -1,11 +1,3 @@
-"""
-A stock analysis dashboard that combines price action with a custom trend oscillator.
-Key features:
-- Pre-selected major stocks (AAPL, MSFT, GOOGL, etc.) and custom symbol input
-- Interactive candlestick charts with 21 and 50 EMAs
-- Custom trend oscillator with signal line and buy/sell indicators
-- Real-time metrics showing current trend status
-"""
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -25,7 +17,8 @@ STOCK_LIST = {
     'TSLA': 'Tesla',
     'AMD': 'AMD',
     'NFLX': 'Netflix',
-    'SPY': 'SP500'
+    'SPY': 'SP500',
+    'QQQ': 'NQ100'
 }
 
 def calculate_wilders_ma(data, periods):
@@ -208,6 +201,15 @@ def create_chart(df, symbol):
 def show_trend_oscillator():
     """Main function to show the trend oscillator in the Streamlit app"""
     st.header('Multi-Stock Trend Oscillator Dashboard')
+
+    st.write("""
+    A Streamlit-based interactive stock analysis dashboard that combines price action with a custom trend oscillator.
+    
+    Key features:
+    - Pre-selected major stocks (AAPL, MSFT, GOOGL, etc.) and custom symbol input
+    - Interactive candlestick charts with 21 and 50 EMAs
+    - Custom trend oscillator with signal line and buy/sell indicators
+    """)
     
     # Create a grid of stock buttons
     cols = st.columns(5)
