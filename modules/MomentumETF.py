@@ -278,9 +278,22 @@ def main():
             trend_changes.append(f"Signal change for {symbol}: {last_signal} -> {current_signal}")
 
     # Display the current signals in the Streamlit app
+    # Display the current signals in the Streamlit app
     df = pd.DataFrame(rows)
+    
+    # Define the styling function
+    def highlight_signals(row):
+        if row['1D'] == 'B' and row['5D'] == 'B':
+            return ['background-color: rgba(0, 100, 0, 0.3)'] * len(row)  # Dark green for buy signals
+        elif row['1D'] == 'S' and row['5D'] == 'S':
+            return ['background-color: rgba(255, 0, 0, 0.3)'] * len(row)  # Red for sell signals
+        return [''] * len(row)
+    
+    # Apply the styling
+    styled_df = df.style.apply(highlight_signals, axis=1)
+    
     st.write("Current Signals and Indicators")
-    st.dataframe(df)
+    st.dataframe(styled_df)
 
     # Add a manual button to send the table to Discord
     if st.button("Send Table to Discord"):
