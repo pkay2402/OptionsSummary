@@ -21,48 +21,60 @@ last_signals_file = "last_signals.json"
 
 def run():
     """Main function to run the Streamlit application."""
-    st.title("Momentum ETF")
+    st.title("Momentum ETF Signals")
+    st.write("""
+    Real-time stock momentum analysis tool that:
+    - Tracks price movements across multiple timeframes
+    - Calculates EMAs and pivot points
+    - Generates buy/sell signals
+    """)
     main()
 
 def calculate_ema(data, period):
     """Calculate Exponential Moving Average (EMA) for a given period."""
     return data.ewm(span=period, adjust=False).mean()
 
-def calculate_monthly_pivot(data):
-    """Calculate the monthly pivot based on High, Low, and Close prices for the current month."""
-    # Flatten MultiIndex columns
-    data.columns = ['_'.join(filter(None, col)) for col in data.columns]
-
+def calculate_pivots(data, timeframe='D'):
+    """Calculate pivots (Daily, Weekly, Monthly) based on High, Low, and Close prices."""
+    # Flatten MultiIndex columns if they exist
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = ['_'.join(filter(None, col)) for col in data.columns]
+    
     # Extract the ticker name from the columns
-    ticker = [col.split('_')[1] for col in data.columns if '_' in col][0]
-
-    # Select relevant columns for the specific ticker
-    high_col = f'High_{ticker}'
-    low_col = f'Low_{ticker}'
-    close_col = f'Close_{ticker}'
-
-    # Ensure the columns exist before proceeding
+    ticker = [col.split('_')[1] for col in data.columns if '_' in col][0] if '_' in data.columns[0] else ''
+    
+    # Select relevant columns
+    high_col = f'High_{ticker}' if ticker and f'High_{ticker}' in data.columns else 'High'
+    low_col = f'Low_{ticker}' if ticker and f'Low_{ticker}' in data.columns else 'Low'
+    close_col = f'Close_{ticker}' if ticker and f'Close_{ticker}' in data.columns else 'Close'
+    
+    # Ensure columns exist
     if not all(col in data.columns for col in [high_col, low_col, close_col]):
-        raise KeyError(f"One or more required columns {high_col}, {low_col}, {close_col} are missing!")
-
-    # Select and rename columns for processing
+        raise KeyError(f"Required columns missing!")
+    
+    # Select and rename columns
     data = data[[high_col, low_col, close_col]]
     data = data.rename(columns={high_col: 'High', low_col: 'Low', close_col: 'Close'})
-
-    # Filter the data for the current month
-    current_month = datetime.now().month
-    current_year = datetime.now().year
-    data = data[(data.index.month == current_month) & (data.index.year == current_year)]
-
-    # Check if there's any data for the current month
+    
+    now = datetime.now()
+    
+    if timeframe == 'D':
+        # Daily pivot - uses previous day's data
+        data = data.iloc[-2:-1] if len(data) > 1 else data.iloc[-1:]
+    elif timeframe == 'W':
+        # Weekly pivot - current week's data
+        data = data[data.index.isocalendar().week == now.isocalendar().week]
+    else:  # Monthly
+        data = data[(data.index.month == now.month) & (data.index.year == now.year)]
+    
     if data.empty:
-        raise ValueError("No data available for the current month.")
-
-    # Calculate the pivot for the current month
+        return None
+        
     high = data['High'].max()
     low = data['Low'].min()
     close = data['Close'].iloc[-1]
     pivot = (high + low + close) / 3
+    
     return pivot
 
 @st.cache_data
@@ -126,13 +138,17 @@ def analyze_stock(symbol, timeframes):
     return results
 
 def calculate_indicators(data):
-    """Calculate EMA and Monthly Pivot values."""
+    """Calculate EMAs and Pivot values."""
     data['EMA_9'] = calculate_ema(data['Close'], 9)
     data['EMA_21'] = calculate_ema(data['Close'], 21)
     data['EMA_50'] = calculate_ema(data['Close'], 50)
     data['EMA_200'] = calculate_ema(data['Close'], 200)
-    monthly_pivot = calculate_monthly_pivot(data)
-    return data, monthly_pivot
+    
+    daily_pivot = calculate_pivots(data, 'D')
+    weekly_pivot = calculate_pivots(data, 'W')
+    monthly_pivot = calculate_pivots(data, 'M')
+    
+    return data, daily_pivot, weekly_pivot, monthly_pivot
 
 def save_signals(data):
     """Save the current signals to a JSON file."""
@@ -183,7 +199,7 @@ def is_market_open():
     return False
 
 def main():
-    """Main function to run the Momentum ETF app."""
+    """Main function to run the Momentum Signals app."""
     # Refresh the app every 4 hours (14400000 milliseconds)
     st_autorefresh(interval=14400000, key="data_refresh")
 
@@ -228,8 +244,8 @@ def main():
         if stock_data.empty:
             continue
 
-        # Calculate indicators
-        stock_data, monthly_pivot = calculate_indicators(stock_data)
+        # Calculate indicators and pivots
+        stock_data, daily_pivot, weekly_pivot, monthly_pivot = calculate_indicators(stock_data)
 
         # Get the latest price and signals
         latest_price = fetch_latest_price(symbol)
@@ -244,6 +260,8 @@ def main():
             "EMA_21": stock_data['EMA_21'].iloc[-1] if not stock_data.empty else None,
             "EMA_50": stock_data['EMA_50'].iloc[-1] if not stock_data.empty else None,
             "EMA_200": stock_data['EMA_200'].iloc[-1] if not stock_data.empty else None,
+            "Daily_Pivot": daily_pivot,
+            "Weekly_Pivot": weekly_pivot,
             "Monthly_Pivot": monthly_pivot
         }
         rows.append(row)
@@ -274,8 +292,5 @@ def main():
     # Save the current signals for the next comparison
     save_signals(current_signals)
 
-    st.write("This is the Momentum ETF application.")
-
-# This part allows the script to be imported as a module or run directly
 if __name__ == "__main__":
     run()
