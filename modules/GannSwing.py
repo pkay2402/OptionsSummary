@@ -65,7 +65,7 @@ def plot_trend_lines(ax, data, up_swings, down_swings):
 
 def add_gann_time_factors(ax, data):
     """Add Gann time factor lines with improved visibility"""
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Different colors for each cycle
+    colors = ['#1f77b4', '#4B0082', '#2ca02c']  # Different colors for each cycle
     cycles = [20, 40, 80]
     
     start_date = data.index[0]
