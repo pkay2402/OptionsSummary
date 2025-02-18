@@ -136,11 +136,6 @@ def run():
     tab1, tab2, tab3 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns"])
     
     with tab1:
-        st.write("""
-        Analyze individual stocks using FINRA short sale data. This tool calculates buy/sell ratios 
-        and tracks significant volume days over your chosen lookback period. Use this to identify 
-        potential accumulation or distribution patterns for specific stocks.
-        """)
         col1, col2 = st.columns(2)
         with col1:
             symbol = st.text_input("Enter Symbol", "SPY").strip().upper()
@@ -183,12 +178,6 @@ def run():
     
     with tab2:
         st.subheader("Top 20 Stocks Showing Accumulation")
-        st.write("""
-        Discover stocks showing consistent accumulation patterns over multiple days.
-        - High buy/sell ratios indicate potential institutional buying
-        - Green highlighting shows stocks with increasing volume
-        - Results are sorted by pattern strength and volume trends
-        """)
         col1, col2 = st.columns(2)
         with col1:
             acc_min_volume = st.number_input("Minimum Daily Volume (Accumulation)", 
@@ -213,12 +202,6 @@ def run():
     
     with tab3:
         st.subheader("Top 20 Stocks Showing Distribution")
-        st.write("""
-        Find stocks showing potential distribution patterns in recent trading.
-        - Low buy/sell ratios may indicate institutional selling
-        - Red highlighting shows concerning volume increases during distribution
-        - List is sorted by pattern strength and total trading volume
-        """)
         col1, col2 = st.columns(2)
         with col1:
             dist_min_volume = st.number_input("Minimum Daily Volume (Distribution)", 
