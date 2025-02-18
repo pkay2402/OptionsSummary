@@ -39,7 +39,7 @@ RETRY_DELAY = 2  # seconds
 
 # Define keywords for different scan types
 Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short"]
+DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call"]
 
 # Your existing KEYWORD_DEFINITIONS dictionary remains the same
@@ -459,7 +459,7 @@ def run():
             # Ignore tmo_long and tmo_Short for High Conviction
             high_conviction_df = high_conviction_stocks(
                 all_signals, 
-                ignore_keywords=["tmo_long", "tmo_Short"]
+                ignore_keywords=["tmo_long", "tmo_Short","orb_bull","orb_bear"]
             )
             
             if not high_conviction_df.empty:
