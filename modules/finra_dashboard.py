@@ -16,14 +16,20 @@ def process_finra_short_sale_data(data):
     return df[df["Symbol"].str.len() <= 4]
 
 def calculate_metrics(row, total_volume):
+    """
+    Calculate trading metrics with corrected buy/sell ratio calculation
+    """
     short_volume = row.get('ShortVolume', 0)
     short_exempt_volume = row.get('ShortExemptVolume', 0)
     
-    bought_volume = short_volume
-    sold_volume = total_volume - short_volume - short_exempt_volume
+    # Corrected calculation:
+    # Short volume represents selling pressure
+    # The remainder represents buying pressure
+    sold_volume = short_volume + short_exempt_volume
+    bought_volume = total_volume - sold_volume
     
     buy_to_sell_ratio = bought_volume / sold_volume if sold_volume > 0 else float('inf')
-    short_volume_ratio = (short_volume + short_exempt_volume) / total_volume if total_volume > 0 else 0
+    short_volume_ratio = sold_volume / total_volume if total_volume > 0 else 0
     
     return {
         'total_volume': total_volume,
@@ -64,21 +70,36 @@ def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     return df_results, significant_days
 
 def find_patterns(lookback_days=5, min_volume=1000000, pattern_type="accumulation"):
-    """Find stocks showing accumulation or distribution patterns"""
+    """
+    Find stocks showing accumulation or distribution patterns with improved error handling
+    """
     pattern_data = {}
+    valid_data_days = 0
     
     for i in range(lookback_days):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
         
-        if data:
+        if not data:
+            continue
+            
+        try:
             df = process_finra_short_sale_data(data)
+            if df.empty:
+                continue
+                
             df = df[df['TotalVolume'] > min_volume]
+            valid_data_days += 1
             
             for _, row in df.iterrows():
                 symbol = row['Symbol']
                 total_volume = row.get('TotalVolume', 0)
-                metrics = calculate_metrics(row, total_volume)
+                
+                try:
+                    metrics = calculate_metrics(row, total_volume)
+                except Exception as e:
+                    print(f"Error calculating metrics for {symbol}: {e}")
+                    continue
                 
                 if symbol not in pattern_data:
                     pattern_data[symbol] = {
@@ -94,28 +115,35 @@ def find_patterns(lookback_days=5, min_volume=1000000, pattern_type="accumulatio
                 pattern_data[symbol]['ratios'].append(metrics['buy_to_sell_ratio'])
                 pattern_data[symbol]['total_volume'] += total_volume
                 
-                # For accumulation, look for high buy/sell ratio
-                # For distribution, look for low buy/sell ratio
-                if pattern_type == "accumulation" and metrics['buy_to_sell_ratio'] > 1.5:
+                # Adjusted thresholds for more reasonable pattern detection
+                if pattern_type == "accumulation" and metrics['buy_to_sell_ratio'] > 1.2:
                     pattern_data[symbol]['days_pattern'] += 1
-                elif pattern_type == "distribution" and metrics['buy_to_sell_ratio'] < 0.7:
+                elif pattern_type == "distribution" and metrics['buy_to_sell_ratio'] < 0.8:
                     pattern_data[symbol]['days_pattern'] += 1
+        except Exception as e:
+            print(f"Error processing data for date {date}: {e}")
+            continue
+    
+    # Only proceed if we have enough valid data days
+    if valid_data_days < 2:
+        return pd.DataFrame()
     
     results = []
     for symbol, data in pattern_data.items():
-        if len(data['dates']) >= 3:  # Must have at least 3 days of data
+        if len(data['dates']) >= 2:  # Reduced minimum days requirement
             avg_ratio = sum(data['ratios']) / len(data['ratios'])
             avg_volume = data['total_volume'] / len(data['dates'])
             
-            if data['days_pattern'] >= 2:  # At least 2 days showing pattern
+            if data['days_pattern'] >= 1:  # Reduced pattern days requirement
                 results.append({
                     'Symbol': symbol,
                     'Avg Daily Volume': int(avg_volume),
                     'Avg Buy/Sell Ratio': round(avg_ratio, 2),
                     'Days Showing Pattern': data['days_pattern'],
                     'Total Volume': int(data['total_volume']),
-                    'Latest Ratio': data['ratios'][0],
-                    'Volume Trend': 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing'
+                    'Latest Ratio': data['ratios'][0] if data['ratios'] else 0,
+                    'Volume Trend': 'Increasing' if (len(data['volumes']) > 1 and 
+                        data['volumes'][0] > data['volumes'][-1]) else 'Decreasing'
                 })
     
     # Sort based on pattern type
@@ -128,7 +156,7 @@ def find_patterns(lookback_days=5, min_volume=1000000, pattern_type="accumulatio
                         key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), 
                         reverse=True)
     
-    return pd.DataFrame(results[:40])
+    return pd.DataFrame(results[:40] if results else [])
 
 def run():
     st.title("FINRA Short Sale Analysis")
