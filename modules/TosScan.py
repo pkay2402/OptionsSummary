@@ -42,9 +42,110 @@ Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volu
 DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call"]
 
-# Your existing KEYWORD_DEFINITIONS dictionary remains the same
+# Keyword definitions with added risk levels and descriptions
 KEYWORD_DEFINITIONS = {
-    # ... (keep your existing definitions)
+    "Long_VP": {
+        "description": "Volume Profile based long signal.",
+        "risk_level": "Medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below the volume node"
+    },
+    "Short_VP": {
+        "description": "Volume Profile based short signal.",
+        "risk_level": "Medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above the volume node"
+    },
+    "orb_bull": {
+        "description": "10 mins 9 ema crossed above opening range high of 30mins",
+        "risk_level": "high",
+        "timeframe": "Intraday",
+        "suggested_stop": "Below the ORB high"
+    },
+    "orb_bear": {
+        "description": "10 mins 9 ema crossed below opening range low of 30mins",
+        "risk_level": "high",
+        "timeframe": "Intraday",
+        "suggested_stop": "Above the ORB low"
+    },
+    "volume_scan": {
+        "description": "high intrday volume and stock atleast 2% up",
+        "risk_level": "high",
+        "timeframe": "Intraday. Enter at vwap test/and trading above 9 ema on 10mins",
+        "suggested_stop": "below vwap"
+    },
+    "A+Bull_30m": {
+        "description": "oversold stocks entering bullish zone",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "below recent low/support"
+    },
+    "tmo_long": {
+        "description": "oversold stocks entering bullish momentum on 60mins",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "below recent low/support"
+    },
+    "tmo_Short": {
+        "description": "overbought stocks entering losing bullish momentum on 60mins",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above recent high/resistance"
+    },
+    "HighVolumeSymbols": {
+        "description": "On Daily TF stocks consistently trading above high volume. High volumes leads to change in trends. This can be bullish or bearish",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below high volume node"
+    },
+    "Long_IT_volume": {
+        "description": "On Daily TF stocks breaking out 9ema above high volume node",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below high volume node"
+    },
+    "Short_IT_volume": {
+        "description": "On Daily TF stocks breaking down 9ema below low volume node",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above low volume node"
+    },
+    "bull_Daily_sqz": {
+        "description": "On Daily TF stocks breaking out of large squeeze",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below low of previous day"
+    },
+    "bear_Daily_sqz": {
+        "description": "On Daily TF stocks breaking down of large squeeze",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above high of previous day"
+    },
+    "LSMHG_Long": {
+        "description": "On Daily TF stocks being bought on 1 yr low area and macd has crossed over",
+        "risk_level": "medium",
+        "timeframe": "1-2 months",
+        "suggested_stop": "Below low of previous day"
+    },
+    "LSMHG_Short": {
+        "description": "On Daily TF stocks being sold on 1 yr high area and macd has crossed under",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above high of previous day"
+    },
+    "ETF_options": {
+        "description": "ETF options showing potential momentum setups",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "UOP_Call": {
+        "description": "Unusual options activity scanner for calls",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    }
 }
 
 @lru_cache(maxsize=2)
