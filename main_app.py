@@ -1,5 +1,5 @@
-# main.py
 import streamlit as st
+# This MUST be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Trading Tools Hub")
 from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
@@ -13,13 +13,28 @@ from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator
 from modules.GannSwing import run as GannSwing_run
 from modules.CFTC import cftc_analyzer_module
-from modules.BlockTrade import Blocktrade_run  # Corrected case to match BlockTrade.py
+from modules.BlockTrade import Blocktrade_run  # Corrected case
 
-# [add_buymeacoffee function remains unchanged]
+def add_buymeacoffee():
+    try:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("""
+            <div style="text-align: center;">
+                <p>If you find these tools helpful, consider supporting the project:</p>
+                <a href="https://www.buymeacoffee.com/tosalerts33" target="_blank">
+                    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" 
+                         alt="Buy Me A Coffee" 
+                         style="height: 45px; width: 162px;">
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
+    except Exception as e:
+        st.sidebar.error(f"Error rendering Buy Me a Coffee button: {str(e)}")
 
 def main():
     st.title("Trading Tools Hub")
     
+    # Add custom CSS to ensure sidebar footer stays at bottom
     st.markdown("""
         <style>
         .css-1544g2n {
@@ -28,9 +43,12 @@ def main():
         </style>
     """, unsafe_allow_html=True)
     
+    # Render the Buy Me a Coffee button once at the start (before app selection)
+    add_buymeacoffee()  # Moved here to ensure it renders early and consistently
+    
     app_selection = st.sidebar.selectbox("Choose the app:", 
                                       ["FINRA Dashboard",
-                                       "Block Trades",  # Matches the if condition below
+                                       "Block Trades",
                                        "Stock Trend Oscillator",
                                        "Flow Summary", 
                                        "Momentum Signals", 
@@ -43,12 +61,13 @@ def main():
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer"])
     
+    # Route to the selected app
     if app_selection == "Stock Trend Oscillator":
         show_trend_oscillator()
     elif app_selection == "Flow Summary":
         flowSummary_run()
-    elif app_selection == "Block Trades":  # This is correct and matches the selectbox option
-        Blocktrade_run()  # This will now work with the corrected import
+    elif app_selection == "Block Trades":
+        Blocktrade_run()
     elif app_selection == "Momentum Signals":
         MomentumSignals_run()
     elif app_selection == "Momentum ETF":
@@ -69,8 +88,6 @@ def main():
         SP500Performance_run()
     elif app_selection == "CFTC Data Analyzer":
         cftc_analyzer_module()
-        
-    add_buymeacoffee()
 
 if __name__ == "__main__":
     main()
