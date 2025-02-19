@@ -13,7 +13,7 @@ from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator  # Changed to new function name
 from modules.GannSwing import run as GannSwing_run
 from modules.CFTC import cftc_analyzer_module  # Import the new CFTC module
-from modules.Blocktrade import Blocktrade_module
+from modules.Blocktrade import Blocktrade_run
 
 def add_buymeacoffee():
     st.sidebar.markdown("---")
