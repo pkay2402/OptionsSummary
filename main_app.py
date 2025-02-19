@@ -1,8 +1,6 @@
 import streamlit as st
-
 # This MUST be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Trading Tools Hub")
-
 from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
@@ -14,6 +12,7 @@ from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator  # Changed to new function name
 from modules.GannSwing import run as GannSwing_run
+from modules.CFTC import cftc_analyzer_module  # Import the new CFTC module
 
 def add_buymeacoffee():
     st.sidebar.markdown("---")
@@ -51,7 +50,8 @@ def main():
                                        "TOS Scanner",
                                        "Gann Swing Analysis",
                                        "Seasonality",
-                                       "S&P 500 Performance"])
+                                       "S&P 500 Performance",
+                                       "CFTC Data Analyzer"])  # Add new option
     
     # Route to the selected app
     if app_selection == "Stock Trend Oscillator":
@@ -76,6 +76,8 @@ def main():
         Seasonality_run()
     elif app_selection == "S&P 500 Performance":
         SP500Performance_run()
+    elif app_selection == "CFTC Data Analyzer":
+        cftc_analyzer_module()  # Run the CFTC analyzer module
         
     # Add Buy Me a Coffee button at the bottom of sidebar
     add_buymeacoffee()
