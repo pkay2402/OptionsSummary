@@ -13,7 +13,7 @@ from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator  # Changed to new function name
 from modules.GannSwing import run as GannSwing_run
 from modules.CFTC import cftc_analyzer_module  # Import the new CFTC module
-from modules.blocktrade import blocktrade_module
+from modules.Blocktrade import Blocktrade_module
 
 def add_buymeacoffee():
     st.sidebar.markdown("---")
@@ -61,7 +61,7 @@ def main():
     elif app_selection == "Flow Summary":
         flowSummary_run()
     elif app_selection == "Block Trades":
-        blocktrade_run()
+        Blocktrade_run()
     elif app_selection == "Momentum Signals":
         MomentumSignals_run()
     elif app_selection == "Momentum ETF":
