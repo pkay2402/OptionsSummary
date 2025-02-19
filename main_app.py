@@ -41,13 +41,13 @@ def main():
     """, unsafe_allow_html=True)
     
     app_selection = st.sidebar.selectbox("Choose the app:", 
-                                      ["Stock Analysis",
+                                      ["FINRA Dashboard",
                                        "Stock Trend Oscillator",
                                        "Flow Summary", 
                                        "Momentum Signals", 
                                        "Momentum ETF",
                                        "GEX Analysis",
-                                       "FINRA Dashboard",
+                                       "Stock Analysis",
                                        "TOS Scanner",
                                        "Gann Swing Analysis",
                                        "Seasonality",
