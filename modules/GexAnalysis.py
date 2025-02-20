@@ -13,34 +13,67 @@ def calculate_gamma(S, K, T, r, sigma, option_type='call'):
     gamma = np.exp(-d1**2/2) / (S*sigma*np.sqrt(2*np.pi*T))
     return gamma
 
-def get_all_expirations(ticker):
+def get_all_expirations(ticker_symbol, max_days=365):
+    """Enhanced function to get all expirations with better handling of frequencies"""
     try:
+        ticker = yf.Ticker(ticker_symbol)
         expirations = ticker.options
         today = datetime.now()
         
         expiration_data = []
         for exp in expirations:
-            exp_date = datetime.strptime(exp, '%Y-%m-%d')
-            days_to_exp = (exp_date - today).days
-            
             try:
+                exp_date = datetime.strptime(exp, '%Y-%m-%d')
+                days_to_exp = (exp_date - today).days
+                
+                # Skip if expiration is too far out or in the past
+                if days_to_exp < -1 or days_to_exp > max_days:
+                    continue
+                    
                 opt = ticker.option_chain(exp)
-                total_oi = opt.calls['openInterest'].sum() + opt.puts['openInterest'].sum()
-                expiration_data.append({
-                    'date': exp,
-                    'days': days_to_exp,
-                    'oi': total_oi
-                })
+                calls_oi = opt.calls['openInterest'].sum() if not opt.calls.empty else 0
+                puts_oi = opt.puts['openInterest'].sum() if not opt.puts.empty else 0
+                total_oi = calls_oi + puts_oi
+                
+                if total_oi > 0:  # Only include expirations with actual open interest
+                    expiration_data.append({
+                        'date': exp,
+                        'days': days_to_exp,
+                        'oi': total_oi,
+                        'calls_oi': calls_oi,
+                        'puts_oi': puts_oi
+                    })
             except Exception as e:
-                st.warning(f"Error processing expiration {exp}: {str(e)}")
+                st.warning(f"Skipping expiration {exp}: {str(e)}")
                 continue
                 
-        return pd.DataFrame(expiration_data)
+        if not expiration_data:
+            st.warning(f"No valid expirations found for {ticker_symbol}")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(expiration_data)
+        df = df.sort_values('days')  # Sort by days to expiration
+        
+        # Detect expiration frequency
+        if len(df) > 5:
+            avg_days_between = df['days'].diff().mean()
+            if avg_days_between < 3:
+                frequency = "Daily"
+            elif avg_days_between < 10:
+                frequency = "Weekly"
+            else:
+                frequency = "Monthly"
+            st.session_state['exp_frequency'] = frequency
+        
+        return df
+        
     except Exception as e:
-        st.error(f"Error fetching expirations: {str(e)}")
+        st.error(f"Error fetching expirations for {ticker_symbol}: {str(e)}")
         return pd.DataFrame()
 
-def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold, strike_spacing_override=None, risk_free_rate=0.05):
+def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold, 
+                  strike_spacing_override=None, risk_free_rate=0.05):
+    """Enhanced GEX data fetcher with better asset-type handling"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period='5d')
@@ -55,17 +88,21 @@ def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold, strike
         
         opt = ticker.option_chain(expiration)
         
-        # Use override if provided, otherwise calculate based on price
+        # Dynamic strike spacing based on asset type and price
         if strike_spacing_override:
             strike_spacing = strike_spacing_override
         else:
-            if current_price > 500:
-                strike_spacing = 5
-            elif current_price > 100:
-                strike_spacing = 2.5
-            else:
-                strike_spacing = 1
-            
+            is_index = ticker_symbol in ['SPY', 'QQQ', 'IWM']  # Add more indexes as needed
+            if is_index:
+                strike_spacing = 1.0 if current_price > 200 else 0.5
+            else:  # For stocks
+                if current_price > 500:
+                    strike_spacing = 5.0
+                elif current_price > 100:
+                    strike_spacing = 2.5
+                else:
+                    strike_spacing = 1.0
+                    
         calls = opt.calls[['strike', 'openInterest', 'impliedVolatility']].copy()
         calls.loc[:, 'type'] = 'call'
         
@@ -167,7 +204,6 @@ def run():
     # Initialize variables
     gex_data = pd.DataFrame()
     current_price = None
-    full_gex_data = pd.DataFrame()
 
     # Main parameters in sidebar
     st.sidebar.header("Analysis Parameters")
@@ -178,10 +214,7 @@ def run():
 
     if st.sidebar.button("Load Ticker Data"):
         try:
-            ticker = yf.Ticker(ticker_symbol)
-            
-            # Get all expirations
-            exp_data = get_all_expirations(ticker)
+            exp_data = get_all_expirations(ticker_symbol)
             
             if not exp_data.empty:
                 st.session_state['exp_data'] = exp_data
@@ -213,21 +246,32 @@ def run():
         # Expiration Selection
         st.subheader("Select Expiration")
         
-        # Filter options
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            min_days = st.number_input("Minimum Days to Expiration", 0, 365, 1)
+            min_days = st.number_input("Min Days", 0, 365, 0)
         with col2:
-            max_days = st.number_input("Maximum Days to Expiration", min_days, 365, 30)
-
-        # Filter expiration data
-        filtered_exp_data = st.session_state['exp_data'][
-            (st.session_state['exp_data']['days'] >= min_days) &
-            (st.session_state['exp_data']['days'] <= max_days)
-        ]
-
+            max_days = st.number_input("Max Days", min_days, 365, 60)
+        with col3:
+            show_all = st.checkbox("Show All Expirations", False)
+            
+        filtered_exp_data = st.session_state['exp_data']
+        if not show_all:
+            filtered_exp_data = filtered_exp_data[
+                (filtered_exp_data['days'] >= min_days) &
+                (filtered_exp_data['days'] <= max_days)
+            ]
+            
         if not filtered_exp_data.empty:
-            st.dataframe(filtered_exp_data)
+            # Add frequency detection display
+            if 'exp_frequency' in st.session_state:
+                st.info(f"Detected expiration frequency: {st.session_state['exp_frequency']}")
+                
+            st.dataframe(filtered_exp_data.style.format({
+                'days': '{:.0f}',
+                'oi': '{:,.0f}',
+                'calls_oi': '{:,.0f}',
+                'puts_oi': '{:,.0f}'
+            }))
             
             selected_exp = st.selectbox(
                 "Select Expiration Date",
@@ -235,9 +279,8 @@ def run():
             )
 
             if st.button("Generate GEX Analysis"):
-                # Fetch and plot GEX data
                 try:
-                    result = fetch_gex_data(
+                    gex_data, current_price = fetch_gex_data(
                         st.session_state['ticker'],
                         selected_exp,
                         price_range,
@@ -246,14 +289,8 @@ def run():
                         risk_free_rate
                     )
                     
-                    if len(result) == 3:
-                        gex_data, current_price, full_gex_data = result
-                    else:
-                        gex_data, current_price = result
-                        full_gex_data = gex_data.copy()
-                    
                     if not gex_data.empty and current_price is not None:
-                        # Display current price and statistics
+                        # Display current price
                         st.metric("Current Price", f"${current_price:.2f}")
                         
                         # Show GEX plot
@@ -268,13 +305,7 @@ def run():
                         total_gex = gex_data['gex'].sum()
                         max_positive_gex = gex_data['gex'].max()
                         max_negative_gex = gex_data['gex'].min()
-                        
-                        # Find strongest GEX level
-                        if 'abs_gex' in full_gex_data.columns:
-                            strongest_gex_strike = full_gex_data.loc[full_gex_data['abs_gex'].idxmax(), 'strike']
-                        else:
-                            full_gex_data['abs_gex'] = abs(full_gex_data['gex'])
-                            strongest_gex_strike = full_gex_data.loc[full_gex_data['abs_gex'].idxmax(), 'strike']
+                        strongest_gex_strike = gex_data.loc[gex_data['gex'].abs().idxmax(), 'strike']
                         
                         # Determine market positioning
                         market_bias = "Positive" if total_gex > 0 else "Negative"
@@ -319,9 +350,9 @@ def run():
                         *Note: GEX analysis should be used in conjunction with other technical and fundamental indicators.*
                         """)
                         
-                        # Display raw data in expandable section
                         with st.expander("View Raw GEX Data"):
                             st.dataframe(gex_data)
+                            
                 except Exception as e:
                     st.error(f"Error generating GEX analysis: {str(e)}")
         else:
