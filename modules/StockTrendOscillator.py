@@ -95,7 +95,7 @@ def create_chart(df, symbol):
             x=df.index,
             y=df['EMA21'],
             name='EMA21',
-            line=dict(color='yellow', width=1),
+            line=dict(color='red', width=1),
             connectgaps=True
         ),
         row=1, col=1
