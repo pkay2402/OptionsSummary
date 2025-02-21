@@ -19,44 +19,73 @@ STOCK_LIST = {
     'NFLX': 'Netflix',
     'SPY': 'SP500',
     'QQQ': 'NQ100',
-    'MSTR': 'Strategy'
+    'COIN': 'COIN'
 }
 
 def calculate_wilders_ma(data, periods):
-    """Calculate Wilder's Moving Average"""
+    """Calculate Wilder's Moving Average, matching ThinkScript's implementation"""
+    # Ensure data is a pandas Series; fill NaN with forward-fill to maintain length
+    if data.isna().any():
+        data = data.ffill()
     return data.ewm(alpha=1/periods, adjust=False).mean()
 
-def calculate_trend_oscillator(df_higher, l1=20, l2=50):
-    """Calculate Trend Oscillator using higher timeframe data (1D or 5D) and return buy/sell signals"""
-    # Get price changes on higher timeframe
+def calculate_trend_oscillator(df_higher, l1, l2):
+    """Calculate Trend Oscillator using higher timeframe data (1D or 5D) and return buy/sell signals, matching ThinkScript"""
+    # Ensure df_higher has no NaN values in 'Close' column, but preserve index length
+    df_higher = df_higher.copy()
+    if df_higher['Close'].isna().any():
+        df_higher['Close'] = df_higher['Close'].ffill().bfill()  # Forward and backward fill to maintain length
+    
+    # Get price changes on higher timeframe (close - close[1]), preserving index
     price_change = df_higher['Close'] - df_higher['Close'].shift(1)
     abs_price_change = abs(price_change)
     
-    # Calculate Wilder's Moving Averages on higher timeframe data
-    a1 = calculate_wilders_ma(price_change, l1)
-    a2 = calculate_wilders_ma(abs_price_change, l1)
+    # Calculate Wilder's Moving Averages, ensuring no NaN and maintaining index length
+    a1 = calculate_wilders_ma(price_change, l1).reindex(df_higher.index, method='ffill').fillna(0)
+    a2 = calculate_wilders_ma(abs_price_change, l1).reindex(df_higher.index, method='ffill').fillna(0)
     
-    # Calculate trend oscillator (ensure it's a pandas Series)
+    # Calculate A3 and Trend Oscillator, matching ThinkScript's logic, ensuring same length as df_higher.index
     a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc_higher = pd.Series(50 * (a3 + 1), index=df_higher.index)
+    trend_oscillator = pd.Series(50 * (a3 + 1), index=df_higher.index).fillna(50)  # Fill NaN with 50 (midline) as default
     
-    # Calculate EMA of trend oscillator on higher timeframe data (ensure it's a pandas Series)
-    ema_higher = trend_osc_higher.ewm(span=l2, adjust=False).mean()
+    # Calculate EMA of Trend Oscillator (signal line), matching ThinkScript's ExpAverage, ensuring same length
+    ema = trend_oscillator.ewm(span=l2, adjust=False).mean().reindex(df_higher.index, method='ffill').fillna(50)  # Fill NaN with 50 (midline)
     
-    # Calculate buy/sell signals on higher timeframe data (using pandas Series)
-    buy_signals_higher = ((trend_osc_higher > ema_higher) & (trend_osc_higher.shift(1) <= ema_higher.shift(1)))
-    sell_signals_higher = ((trend_osc_higher < ema_higher) & (trend_osc_higher.shift(1) >= ema_higher.shift(1)))
+    # Calculate buy/sell signals (crossings of TrendOscillator and EMA), matching ThinkScript's arrows
+    # Ensure signals maintain the same index length, filling with False where needed
+    trend_oscillator_shifted = trend_oscillator.shift(1).reindex(df_higher.index, method='ffill').fillna(50)
+    ema_shifted = ema.shift(1).reindex(df_higher.index, method='ffill').fillna(50)
     
-    return trend_osc_higher, ema_higher, buy_signals_higher, sell_signals_higher
+    buy_signals = ((trend_oscillator > ema) & (trend_oscillator_shifted <= ema_shifted))
+    sell_signals = ((trend_oscillator < ema) & (trend_oscillator_shifted >= ema_shifted))
+    
+    # Reindex signals to match df_higher.index, filling with False
+    buy_signals = buy_signals.reindex(df_higher.index, method='ffill').fillna(False)
+    sell_signals = sell_signals.reindex(df_higher.index, method='ffill').fillna(False)
+    
+    # Debug prints to check lengths (remove or comment out in production)
+    print(f"df_higher.index length: {len(df_higher.index)}")
+    print(f"trend_oscillator length: {len(trend_oscillator)}")
+    print(f"ema length: {len(ema)}")
+    print(f"buy_signals length: {len(buy_signals)}")
+    print(f"sell_signals length: {len(sell_signals)}")
+    
+    return trend_oscillator, ema, buy_signals, sell_signals
 
 def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher):
-    """Create interactive chart with independent lower timeframe price chart and higher timeframe trend oscillator"""
+    """Create interactive chart with independent lower timeframe price chart and higher timeframe trend oscillator, matching ThinkScript"""
+    # Determine L1 and L2 based on ThinkScript logic for the lower timeframe
+    if timeframe_lower == '1H':
+        l1, l2 = 20, 30  # For 1H, use 1D higher timeframe with L1=20, L2=30 (from ThinkScript for hourly)
+    else:  # 1D
+        l1, l2 = 20, 35  # For 1D, use 5D higher timeframe with L1=20, L2=35 (from ThinkScript for daily)
+
     # Calculate 21 and 50 EMAs for lower timeframe price
     df_lower['EMA21'] = df_lower['Close'].ewm(span=21, adjust=False).mean()
     df_lower['EMA50'] = df_lower['Close'].ewm(span=50, adjust=False).mean()
     
     # Calculate trend oscillator, signal line, and signals for higher timeframe data
-    trend_osc_higher, ema_higher, buy_signals_higher, sell_signals_higher = calculate_trend_oscillator(df_higher)
+    trend_oscillator, ema, buy_signals, sell_signals = calculate_trend_oscillator(df_higher, l1, l2)
     
     # Create figure with two independent subplots (no shared x-axes)
     fig = make_subplots(rows=2, cols=1, 
@@ -99,13 +128,13 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
         row=1, col=1
     )
 
-    # Add higher timeframe Trend Oscillator and EMA to lower subplot
+    # Add higher timeframe Trend Oscillator and EMA to lower subplot, matching ThinkScript line weights
     fig.add_trace(
         go.Scatter(
             x=df_higher.index,
-            y=trend_osc_higher,
+            y=trend_oscillator,
             name=f'Trend Oscillator ({timeframe_higher})',
-            line=dict(color='green', width=2),
+            line=dict(color='green', width=5),  # Use single green color, matching ThinkScript
             connectgaps=True
         ),
         row=2, col=1
@@ -114,52 +143,51 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
     fig.add_trace(
         go.Scatter(
             x=df_higher.index,
-            y=ema_higher,
+            y=ema,
             name=f'Signal Line ({timeframe_higher})',
-            line=dict(color='red', width=2),
+            line=dict(color='red', width=5),  # Match ThinkScript line weight
             connectgaps=True
         ),
         row=2, col=1
     )
 
-    # Add horizontal lines for overbought/oversold levels on higher timeframe oscillator
+    # Add horizontal lines for overbought (65), oversold (30), and midline (50), matching ThinkScript
     for level in [30, 50, 65]:
         fig.add_hline(
             y=level,
-            line_dash="dash",
+            line_dash="dash" if level in [30, 65] else "solid",  # Dashed for overbought/oversold, solid for midline
             line_color="white",
-            opacity=0.5,
+            opacity=0.7,  # Increase opacity to match ThinkScript visibility
             row=2, col=1
         )
 
-    # Plot buy signals on higher timeframe oscillator
+    # Plot buy signals (upward green triangles) and sell signals (downward red triangles) on higher timeframe, matching ThinkScript arrows
     fig.add_trace(
         go.Scatter(
-            x=df_higher.index[buy_signals_higher],
-            y=trend_osc_higher[buy_signals_higher],
+            x=df_higher.index[buy_signals],
+            y=trend_oscillator[buy_signals],
             mode='markers',
             marker=dict(
                 symbol='triangle-up',
                 size=12,
                 color='green',
-                line=dict(width=2)
+                line=dict(width=1)  # Match ThinkScript line weight
             ),
             name=f'Buy Signal ({timeframe_higher})'
         ),
         row=2, col=1
     )
     
-    # Plot sell signals on higher timeframe oscillator
     fig.add_trace(
         go.Scatter(
-            x=df_higher.index[sell_signals_higher],
-            y=trend_osc_higher[sell_signals_higher],
+            x=df_higher.index[sell_signals],
+            y=trend_oscillator[sell_signals],
             mode='markers',
             marker=dict(
                 symbol='triangle-down',
                 size=12,
                 color='red',
-                line=dict(width=2)
+                line=dict(width=1)  # Match ThinkScript line weight
             ),
             name=f'Sell Signal ({timeframe_higher})'
         ),
@@ -173,7 +201,7 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
     ]
     rangebreaks = [rb for rb in rangebreaks if rb is not None]
 
-    # Update layout
+    # Update layout to match ThinkScript's dark background and styling
     fig.update_layout(
         title=f'{symbol} - {timeframe_lower} Price Chart and {timeframe_higher} Trend Oscillator',
         yaxis_title=f'Price ({timeframe_lower})',
@@ -181,17 +209,25 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
         xaxis_rangeslider_visible=False,
         height=800,
         template='plotly_dark',
+        plot_bgcolor='black',  # Match ThinkScript's dark background
+        paper_bgcolor='black',  # Match ThinkScript's dark background
         xaxis=dict(  # Lower timeframe x-axis (1H or 1D)
-            rangebreaks=rangebreaks
+            rangebreaks=rangebreaks,
+            showgrid=False,  # Remove gridlines to match ThinkScript
+            zeroline=False
         ),
         xaxis2=dict(  # Higher timeframe x-axis (1D or 5D)
-            title=f'Date ({timeframe_higher})'
-        )
+            title=f'Date ({timeframe_higher})',
+            showgrid=False,  # Remove gridlines to match ThinkScript
+            zeroline=False
+        ),
+        yaxis=dict(showgrid=False, zeroline=False),  # Remove gridlines for price chart
+        yaxis2=dict(showgrid=False, zeroline=False)  # Remove gridlines for oscillator
     )
     
     # Update y-axes
     fig.update_yaxes(title_text=f'Price ({timeframe_lower})', row=1, col=1)
-    fig.update_yaxes(title_text=f'Trend Oscillator ({timeframe_higher})', row=2, col=1, range=[0, 100])  # Ensure y-axis range is 0-100
+    fig.update_yaxes(title_text=f'Trend Oscillator ({timeframe_higher})', row=2, col=1, range=[0, 100])  # Ensure y-axis range is 30-65
 
     return fig
 
@@ -200,13 +236,13 @@ def show_trend_oscillator():
     st.header('Multi-Stock Trend Oscillator Dashboard')
 
     st.write("""
-    A Streamlit-based interactive stock analysis dashboard that combines price action with a custom trend oscillator.
+    A Streamlit-based interactive stock analysis dashboard that combines price action with a custom trend oscillator, matching ThinkScript logic.
     
     Key features:
     - Pre-selected major stocks (AAPL, MSFT, GOOGL, etc.) and custom symbol input
     - Choose between 1-hour/1-day or 1-day/5-day setups
     - Interactive price charts with 21 and 50 EMAs
-    - Trend oscillator with signal line and buy/sell indicators
+    - Trend oscillator with signal line, buy/sell signals, and overbought/oversold levels matching ThinkScript
     """)
     
     # User selection for timeframe setup
@@ -290,7 +326,7 @@ def show_trend_oscillator():
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # Display current indicator values (from 1-day oscillator)
-                    trend_osc_1d, ema_1d, _, _ = calculate_trend_oscillator(df_higher)
+                    trend_osc_1d, ema_1d, _, _ = calculate_trend_oscillator(df_higher, 20, 30)  # L1=20, L2=30 for 1H (1D oscillator)
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -354,7 +390,7 @@ def show_trend_oscillator():
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # Display current indicator values (from 5-day oscillator)
-                    trend_osc_5d, ema_5d, _, _ = calculate_trend_oscillator(df_higher)
+                    trend_osc_5d, ema_5d, _, _ = calculate_trend_oscillator(df_higher, 20, 35)  # L1=20, L2=35 for 1D (5D oscillator)
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
