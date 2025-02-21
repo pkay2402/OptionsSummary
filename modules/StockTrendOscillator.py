@@ -48,20 +48,20 @@ def calculate_trend_oscillator(df_1h, l1=20, l2=50):
     a1 = calculate_wilders_ma(price_change, l1)
     a2 = calculate_wilders_ma(abs_price_change, l1)
     
-    # Calculate trend oscillator
+    # Calculate trend oscillator (ensure it's a pandas Series)
     a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc_4h = 50 * (a3 + 1)
+    trend_osc_4h = pd.Series(50 * (a3 + 1), index=df_4h.index)
     
-    # Calculate EMA of trend oscillator on 4-hour data
-    ema_4h = pd.Series(trend_osc_4h).ewm(span=l2, adjust=False).mean()
+    # Calculate EMA of trend oscillator on 4-hour data (ensure it's a pandas Series)
+    ema_4h = trend_osc_4h.ewm(span=l2, adjust=False).mean()
     
-    # Calculate buy/sell signals on 4-hour data
+    # Calculate buy/sell signals on 4-hour data (using pandas Series)
     buy_signals_4h = ((trend_osc_4h > ema_4h) & (trend_osc_4h.shift(1) <= ema_4h.shift(1)))
     sell_signals_4h = ((trend_osc_4h < ema_4h) & (trend_osc_4h.shift(1) >= ema_4h.shift(1)))
     
     # Reindex to match 1-hour timeframe (forward-fill to align)
-    trend_osc = pd.Series(trend_osc_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
-    ema = pd.Series(ema_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
+    trend_osc = trend_osc_4h.reindex(df_1h.index, method='ffill')
+    ema = ema_4h.reindex(df_1h.index, method='ffill')
     buy_signals = pd.Series(buy_signals_4h, index=df_4h.index).reindex(df_1h.index, method='ffill').fillna(False)
     sell_signals = pd.Series(sell_signals_4h, index=df_4h.index).reindex(df_1h.index, method='ffill').fillna(False)
     
