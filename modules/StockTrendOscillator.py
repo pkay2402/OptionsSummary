@@ -241,18 +241,26 @@ def show_trend_oscillator():
                 # Fetch 4-hour data for trend oscillator
                 df_4h = stock.history(start=start_date, end=end_date, interval='4h')
                 
-                # Filter 1-hour data for market hours (9:30 AM to 4:00 PM ET)
-                df_1h.index = df_1h.index.tz_localize(None)
-                df_1h = df_1h.between_time('09:30', '16:00')
+                # Ensure indices are DatetimeIndex and handle timezone
+                if not isinstance(df_1h.index, pd.DatetimeIndex):
+                    df_1h.index = pd.DatetimeIndex(df_1h.index)
+                if not isinstance(df_4h.index, pd.DatetimeIndex):
+                    df_4h.index = pd.DatetimeIndex(df_4h.index)
                 
-                # Remove weekends from 1-hour data
+                # Localize timezone if needed (yfinance might return timezone-aware data)
+                if df_1h.index.tz is None:
+                    df_1h.index = df_1h.index.tz_localize('UTC').tz_convert('America/New_York')
+                if df_4h.index.tz is None:
+                    df_4h.index = df_4h.index.tz_localize('UTC').tz_convert('America/New_York')
+                
+                # Filter 1-hour data for market hours (9:30 AM to 4:00 PM ET) and remove weekends
+                df_1h = df_1h.between_time('09:30', '16:00')
                 df_1h = df_1h[df_1h.index.dayofweek < 5]
                 
                 # Keep only last 30 days of trading data for 1-hour
                 df_1h = df_1h.last('30D')
                 
                 # Filter 4-hour data (remove weekends if needed, but typically 4-hour data already accounts for trading hours)
-                df_4h.index = df_4h.index.tz_localize(None)
                 df_4h = df_4h[df_4h.index.dayofweek < 5]
                 df_4h = df_4h.last('30D')
                 
