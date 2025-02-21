@@ -36,7 +36,7 @@ def get_higher_timeframe_data(df, interval='4H'):
     return resampled
 
 def calculate_trend_oscillator(df_1h, l1=20, l2=50):
-    """Calculate Trend Oscillator using 4-hour timeframe data"""
+    """Calculate Trend Oscillator using 4-hour timeframe data and return buy/sell signals"""
     # Resample 1-hour data to 4-hour data
     df_4h = get_higher_timeframe_data(df_1h, interval='4H')
     
@@ -55,16 +55,22 @@ def calculate_trend_oscillator(df_1h, l1=20, l2=50):
     # Calculate EMA of trend oscillator on 4-hour data
     ema_4h = pd.Series(trend_osc_4h).ewm(span=l2, adjust=False).mean()
     
+    # Calculate buy/sell signals on 4-hour data
+    buy_signals_4h = ((trend_osc_4h > ema_4h) & (trend_osc_4h.shift(1) <= ema_4h.shift(1)))
+    sell_signals_4h = ((trend_osc_4h < ema_4h) & (trend_osc_4h.shift(1) >= ema_4h.shift(1)))
+    
     # Reindex to match 1-hour timeframe (forward-fill to align)
     trend_osc = pd.Series(trend_osc_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
     ema = pd.Series(ema_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
+    buy_signals = pd.Series(buy_signals_4h, index=df_4h.index).reindex(df_1h.index, method='ffill').fillna(False)
+    sell_signals = pd.Series(sell_signals_4h, index=df_4h.index).reindex(df_1h.index, method='ffill').fillna(False)
     
-    return trend_osc, ema
+    return trend_osc, ema, buy_signals, sell_signals
 
 def create_chart(df, symbol):
     """Create interactive chart with trend oscillator"""
     # Calculate indicators (pass the 1-hour DataFrame)
-    trend_osc, ema = calculate_trend_oscillator(df)
+    trend_osc, ema, buy_signals, sell_signals = calculate_trend_oscillator(df)
     
     # Calculate 21 and 50 EMAs for price (still on 1-hour timeframe)
     df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
@@ -145,11 +151,7 @@ def create_chart(df, symbol):
             row=2, col=1
         )
 
-    # Add buy/sell signals
-    buy_signals = ((trend_osc > ema) & (trend_osc.shift(1) <= ema.shift(1)))
-    sell_signals = ((trend_osc < ema) & (trend_osc.shift(1) >= ema.shift(1)))
-    
-    # Plot buy signals
+    # Plot buy signals (using the 4-hour signals reindexed to 1-hour)
     fig.add_trace(
         go.Scatter(
             x=df.index[buy_signals],
@@ -166,7 +168,7 @@ def create_chart(df, symbol):
         row=2, col=1
     )
     
-    # Plot sell signals
+    # Plot sell signals (using the 4-hour signals reindexed to 1-hour)
     fig.add_trace(
         go.Scatter(
             x=df.index[sell_signals],
@@ -201,7 +203,7 @@ def create_chart(df, symbol):
     
     # Update y-axes
     fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(title_text="Trend Oscillator", row=2, col=1)
+    fig.update_yaxes(title_text="Trend Oscillator", row=2, col=1, range=[0, 100])  # Ensure y-axis range is 0-100
 
     return fig
 
@@ -262,7 +264,7 @@ def show_trend_oscillator():
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Display current indicator values
-                trend_osc, ema = calculate_trend_oscillator(df)
+                trend_osc, ema, _, _ = calculate_trend_oscillator(df)
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -275,3 +277,6 @@ def show_trend_oscillator():
                 
         except Exception as e:
             st.error(f'Error occurred: {str(e)}')
+
+if __name__ == "__main__":
+    show_trend_oscillator()
