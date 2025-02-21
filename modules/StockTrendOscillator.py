@@ -18,7 +18,8 @@ STOCK_LIST = {
     'AMD': 'AMD',
     'NFLX': 'Netflix',
     'SPY': 'SP500',
-    'QQQ': 'NQ100'
+    'QQQ': 'NQ100',
+    'MSTR': 'Strategy'
 }
 
 def calculate_wilders_ma(data, periods):
