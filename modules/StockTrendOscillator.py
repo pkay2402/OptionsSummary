@@ -35,31 +35,38 @@ def get_higher_timeframe_data(df, interval='4H'):
     })
     return resampled
 
-def calculate_trend_oscillator(df, l1=20, l2=50):
-    """Calculate Trend Oscillator using higher timeframe data"""
-    # Get price changes
-    price_change = df['Close'] - df['Close'].shift(1)
+def calculate_trend_oscillator(df_1h, l1=20, l2=50):
+    """Calculate Trend Oscillator using 4-hour timeframe data"""
+    # Resample 1-hour data to 4-hour data
+    df_4h = get_higher_timeframe_data(df_1h, interval='4H')
+    
+    # Get price changes on 4-hour timeframe
+    price_change = df_4h['Close'] - df_4h['Close'].shift(1)
     abs_price_change = abs(price_change)
     
-    # Calculate Wilder's Moving Averages
+    # Calculate Wilder's Moving Averages on 4-hour data
     a1 = calculate_wilders_ma(price_change, l1)
     a2 = calculate_wilders_ma(abs_price_change, l1)
     
     # Calculate trend oscillator
     a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc = 50 * (a3 + 1)
+    trend_osc_4h = 50 * (a3 + 1)
     
-    # Calculate EMA of trend oscillator
-    ema = pd.Series(trend_osc).ewm(span=l2, adjust=False).mean()
+    # Calculate EMA of trend oscillator on 4-hour data
+    ema_4h = pd.Series(trend_osc_4h).ewm(span=l2, adjust=False).mean()
     
-    return pd.Series(trend_osc), pd.Series(ema)
+    # Reindex to match 1-hour timeframe (forward-fill to align)
+    trend_osc = pd.Series(trend_osc_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
+    ema = pd.Series(ema_4h, index=df_4h.index).reindex(df_1h.index, method='ffill')
+    
+    return trend_osc, ema
 
 def create_chart(df, symbol):
     """Create interactive chart with trend oscillator"""
-    # Calculate indicators
+    # Calculate indicators (pass the 1-hour DataFrame)
     trend_osc, ema = calculate_trend_oscillator(df)
     
-    # Calculate 21 and 50 EMAs for price
+    # Calculate 21 and 50 EMAs for price (still on 1-hour timeframe)
     df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     
