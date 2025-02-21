@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import pytz
 
 def calculate_gamma(S, K, T, r, sigma, option_type='call'):
     if T <= 0.001:
@@ -14,35 +15,45 @@ def calculate_gamma(S, K, T, r, sigma, option_type='call'):
     return gamma
 
 def get_all_expirations(ticker_symbol, max_days=365):
-    """Enhanced function to get all expirations with better handling of frequencies"""
+    """Enhanced function to get all expirations with proper timezone handling using pytz"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         expirations = ticker.options
-        today = datetime.now()
+        
+        # Use US/Eastern timezone since options typically trade on US exchanges
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         expiration_data = []
         for exp in expirations:
             try:
+                # Parse expiration date and make it timezone-aware
                 exp_date = datetime.strptime(exp, '%Y-%m-%d')
-                days_to_exp = (exp_date - today).days
+                exp_date = eastern.localize(exp_date)
                 
-                # Skip if expiration is too far out or in the past
-                if days_to_exp < -1 or days_to_exp > max_days:
+                # Calculate days to expiration using date components only
+                days_to_exp = (exp_date.date() - today_start.date()).days
+                
+                # Skip if expiration is too far out
+                if days_to_exp > max_days:
                     continue
                     
-                opt = ticker.option_chain(exp)
-                calls_oi = opt.calls['openInterest'].sum() if not opt.calls.empty else 0
-                puts_oi = opt.puts['openInterest'].sum() if not opt.puts.empty else 0
-                total_oi = calls_oi + puts_oi
-                
-                if total_oi > 0:  # Only include expirations with actual open interest
-                    expiration_data.append({
-                        'date': exp,
-                        'days': days_to_exp,
-                        'oi': total_oi,
-                        'calls_oi': calls_oi,
-                        'puts_oi': puts_oi
-                    })
+                # Include same-day expiration (days_to_exp == 0) and future dates
+                if days_to_exp >= 0:
+                    opt = ticker.option_chain(exp)
+                    calls_oi = opt.calls['openInterest'].sum() if not opt.calls.empty else 0
+                    puts_oi = opt.puts['openInterest'].sum() if not opt.puts.empty else 0
+                    total_oi = calls_oi + puts_oi
+                    
+                    if total_oi > 0:  # Only include expirations with actual open interest
+                        expiration_data.append({
+                            'date': exp,
+                            'days': days_to_exp,
+                            'oi': total_oi,
+                            'calls_oi': calls_oi,
+                            'puts_oi': puts_oi
+                        })
             except Exception as e:
                 st.warning(f"Skipping expiration {exp}: {str(e)}")
                 continue
@@ -195,122 +206,163 @@ def plot_gex(gex_data, current_price, ticker_symbol, bar_width=2.0, show_labels=
     return fig
 
 def run():
-    st.title("Options Gamma Exposure (GEX) Analysis")
+    # Main header with improved styling
     st.markdown("""
-    This application analyzes and visualizes the Gamma Exposure (GEX) for stock options.
-    GEX helps understand potential price magnetism and resistance levels based on options market positioning.
-    """)
-
-    # Initialize variables
-    gex_data = pd.DataFrame()
-    current_price = None
-
-    # Main parameters in sidebar
-    st.sidebar.header("Analysis Parameters")
-
-    # Ticker input
-    ticker_input = st.sidebar.text_input("Enter Ticker Symbol:", value='SPY')
-    ticker_symbol = ticker_input.upper()
-
-    if st.sidebar.button("Load Ticker Data"):
-        try:
-            exp_data = get_all_expirations(ticker_symbol)
-            
-            if not exp_data.empty:
-                st.session_state['exp_data'] = exp_data
-                st.session_state['ticker'] = ticker_symbol
-                st.success(f"Successfully loaded data for {ticker_symbol}")
-            else:
-                st.error("No expiration dates found")
-                return
-                
-        except Exception as e:
-            st.error(f"Error loading {ticker_symbol}: {str(e)}")
-            return
-
-    if 'exp_data' in st.session_state:
-        # Advanced Parameters
-        with st.expander("Advanced Parameters", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                price_range = st.slider("Price Range (%)", 1, 50, 15)
-                gex_threshold = st.slider("GEX Threshold", 0.1, 50.0, 5.0)
-                strike_spacing = st.number_input("Strike Spacing Override (0 for auto)", 0.0, 100.0, 0.0)
-                
-            with col2:
-                risk_free_rate = st.slider("Risk-Free Rate (%)", 0.0, 10.0, 5.0) / 100
-                bar_width = st.slider("Bar Width", 0.5, 5.0, 2.0)
-                show_labels = st.checkbox("Show Value Labels", True)
-
-        # Expiration Selection
-        st.subheader("Select Expiration")
+    <h1 style='text-align: center;'>Options Gamma Exposure (GEX) Analysis</h1>
+    """, unsafe_allow_html=True)
+    
+    # Clean sidebar layout
+    with st.sidebar:
+        st.markdown("### 📊 Analysis Controls")
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            min_days = st.number_input("Min Days", 0, 365, 0)
-        with col2:
-            max_days = st.number_input("Max Days", min_days, 365, 60)
-        with col3:
-            show_all = st.checkbox("Show All Expirations", False)
+        # Ticker input with better presentation
+        ticker_container = st.container()
+        with ticker_container:
+            st.markdown("#### Enter Ticker Symbol")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                ticker_input = st.text_input("", value='SPY', label_visibility="collapsed")
+                ticker_symbol = ticker_input.upper()
+            with col2:
+                load_button = st.button("Load", use_container_width=True)
+        
+        # Divider
+        st.markdown("---")
+        
+        # Advanced Parameters - Collapsed by default
+        with st.expander("🔧 Advanced Parameters", expanded=False):
+            st.markdown("##### Analysis Settings")
+            price_range = st.slider("Price Range (%)", 1, 50, 15)
+            gex_threshold = st.slider("GEX Threshold", 0.1, 50.0, 5.0)
+            strike_spacing = st.number_input("Strike Spacing Override (0 for auto)", 0.0, 100.0, 0.0)
             
-        filtered_exp_data = st.session_state['exp_data']
-        if not show_all:
-            filtered_exp_data = filtered_exp_data[
-                (filtered_exp_data['days'] >= min_days) &
-                (filtered_exp_data['days'] <= max_days)
-            ]
-            
-        if not filtered_exp_data.empty:
-            # Add frequency detection display
-            if 'exp_frequency' in st.session_state:
-                st.info(f"Detected expiration frequency: {st.session_state['exp_frequency']}")
-                
-            st.dataframe(filtered_exp_data.style.format({
-                'days': '{:.0f}',
-                'oi': '{:,.0f}',
-                'calls_oi': '{:,.0f}',
-                'puts_oi': '{:,.0f}'
-            }))
-            
-            selected_exp = st.selectbox(
-                "Select Expiration Date",
-                filtered_exp_data['date'].tolist()
-            )
+            st.markdown("##### Display Settings")
+            risk_free_rate = st.slider("Risk-Free Rate (%)", 0.0, 10.0, 5.0) / 100
+            bar_width = st.slider("Bar Width", 0.5, 5.0, 2.0)
+            show_labels = st.checkbox("Show Value Labels", True)
 
-            if st.button("Generate GEX Analysis"):
-                try:
-                    gex_data, current_price = fetch_gex_data(
-                        st.session_state['ticker'],
-                        selected_exp,
-                        price_range,
-                        gex_threshold,
-                        strike_spacing if strike_spacing > 0 else None,
-                        risk_free_rate
-                    )
+    # Main content area
+    main_container = st.container()
+    with main_container:
+        # Introduction text
+        st.markdown("""
+        <div style='background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;'>
+        📈 This tool analyzes and visualizes Gamma Exposure (GEX) for stock options, helping you understand:
+        <ul>
+        <li>Potential price magnetism levels</li>
+        <li>Market resistance points</li>
+        <li>Options market positioning</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if load_button:
+            try:
+                with st.spinner('Loading expiration data...'):
+                    exp_data = get_all_expirations(ticker_symbol)
+                
+                if not exp_data.empty:
+                    st.session_state['exp_data'] = exp_data
+                    st.session_state['ticker'] = ticker_symbol
+                    st.success(f"✅ Successfully loaded data for {ticker_symbol}")
+                else:
+                    st.error("❌ No expiration dates found")
+                    return
                     
-                    if not gex_data.empty and current_price is not None:
-                        # Display current price
-                        st.metric("Current Price", f"${current_price:.2f}")
-                        
-                        # Show GEX plot
-                        fig = plot_gex(gex_data, current_price, st.session_state['ticker'], 
-                                     bar_width, show_labels)
-                        st.pyplot(fig)
-                        
+            except Exception as e:
+                st.error(f"❌ Error loading {ticker_symbol}: {str(e)}")
+                return
+
+        if 'exp_data' in st.session_state:
+            # Expiration Selection with improved layout
+            st.markdown("### 📅 Select Expiration")
+            
+            # Date range filters in a clean layout
+            filter_cols = st.columns(4)
+            with filter_cols[0]:
+                min_days = st.number_input("Min Days", 0, 365, 0)
+            with filter_cols[1]:
+                max_days = st.number_input("Max Days", min_days, 365, 60)
+            with filter_cols[2]:
+                show_all = st.checkbox("Show All Dates", False)
+            with filter_cols[3]:
+                if 'exp_frequency' in st.session_state:
+                    st.info(f"📊 {st.session_state['exp_frequency']} Expirations")
+            
+            # Filter and display expiration data
+            filtered_exp_data = st.session_state['exp_data']
+            if not show_all:
+                filtered_exp_data = filtered_exp_data[
+                    (filtered_exp_data['days'] >= min_days) &
+                    (filtered_exp_data['days'] <= max_days)
+                ]
+                
+            if not filtered_exp_data.empty:
+                # Expiration data table with improved styling
+                st.markdown("##### Available Expiration Dates")
+                st.dataframe(
+                    filtered_exp_data.style.format({
+                        'days': '{:.0f}',
+                        'oi': '{:,.0f}',
+                        'calls_oi': '{:,.0f}',
+                        'puts_oi': '{:,.0f}'
+                    }).set_properties(**{
+                        'background-color': '#f0f2f6',
+                        'font-size': '14px'
+                    }),
+                    use_container_width=True
+                )
+                
+                # Expiration selection and analysis button
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_exp = st.selectbox(
+                        "Select Expiration Date",
+                        filtered_exp_data['date'].tolist()
+                    )
+                with col2:
+                    analyze_button = st.button("📊 Analyze GEX", use_container_width=True)
+
+                if analyze_button:
+                    try:
+                        with st.spinner('Calculating GEX...'):
+                            gex_data, current_price = fetch_gex_data(
+                                st.session_state['ticker'],
+                                selected_exp,
+                                price_range,
+                                gex_threshold,
+                                strike_spacing if strike_spacing > 0 else None,
+                                risk_free_rate
+                            )
+
+                        if not gex_data.empty and current_price is not None:
+                            # Results section
+                            st.markdown("---")
+                            st.markdown("### 📈 Analysis Results")
+
+                            # Current price and metrics
+                            metrics_cols = st.columns(3)
+                            with metrics_cols[0]:
+                                st.metric("Current Price", f"${current_price:.2f}")
+
+                            # Show GEX plot
+                            fig = plot_gex(gex_data, current_price, st.session_state['ticker'], 
+                                         bar_width, show_labels)
+                            st.pyplot(fig)
+
                         # Add Summary Section
                         st.subheader("GEX Analysis Summary")
-                        
+
                         # Calculate key metrics
                         total_gex = gex_data['gex'].sum()
                         max_positive_gex = gex_data['gex'].max()
                         max_negative_gex = gex_data['gex'].min()
                         strongest_gex_strike = gex_data.loc[gex_data['gex'].abs().idxmax(), 'strike']
-                        
+
                         # Determine market positioning
                         market_bias = "Positive" if total_gex > 0 else "Negative"
                         gex_strength = "Strong" if abs(total_gex) > 20 else "Moderate" if abs(total_gex) > 10 else "Weak"
-                        
+
                         # Display summary metrics
                         col1, col2, col3 = st.columns(3)
                         with col1:
@@ -319,7 +371,7 @@ def run():
                             st.metric("Market Bias", market_bias)
                         with col3:
                             st.metric("GEX Strength", gex_strength)
-                        
+
                         st.markdown("### Key Takeaways")
                         st.markdown(f"""
                         **Market Structure:**
@@ -327,34 +379,34 @@ def run():
                         - Strongest GEX Level: ${strongest_gex_strike:.2f}
                         - Largest Positive GEX: {max_positive_gex:.2f}
                         - Largest Negative GEX: {max_negative_gex:.2f}
-                        
+
                         **What This Means:**
                         1. **Price Magnetism:**
                            - Strong GEX levels tend to act as price magnets
                            - ${strongest_gex_strike:.2f} is the strongest magnetic level
-                        
+
                         2. **Market Movement:**
                            - Positive GEX suggests resistance to downward movement
                            - Negative GEX suggests resistance to upward movement
                            - Current bias suggests {'resistance to downward moves' if total_gex > 0 else 'resistance to upward moves'}
-                        
+
                         3. **Volatility Implications:**
                            - {'High GEX levels typically suppress volatility' if abs(total_gex) > 20 else 'Moderate GEX levels suggest normal volatility' if abs(total_gex) > 10 else 'Low GEX levels may allow for larger price movements'}
                            - Expect {'more stable price action' if abs(total_gex) > 20 else 'normal price action' if abs(total_gex) > 10 else 'potentially volatile price action'}
-                        
+
                         **Trading Considerations:**
                         - Look for potential price resistance at ${strongest_gex_strike:.2f}
                         - {'Consider mean reversion strategies near strong GEX levels' if abs(total_gex) > 20 else 'Monitor price action around GEX levels for potential support/resistance'}
                         - Volatility trades should account for {'suppression near GEX levels' if abs(total_gex) > 20 else 'normal conditions' if abs(total_gex) > 10 else 'potential expansion'}
-                        
+
                         *Note: GEX analysis should be used in conjunction with other technical and fundamental indicators.*
                         """)
-                        
+
                         with st.expander("View Raw GEX Data"):
                             st.dataframe(gex_data)
-                            
-                except Exception as e:
-                    st.error(f"Error generating GEX analysis: {str(e)}")
+
+                    except Exception as e:
+                        st.error(f"Error generating GEX analysis: {str(e)}")
         else:
             st.warning("No expirations found within the selected date range")
 
