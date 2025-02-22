@@ -8,6 +8,7 @@ import pytz
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 # Setup logging
 logging.basicConfig(filename='options_range.log', level=logging.INFO,
@@ -56,19 +57,32 @@ def fetch_option_chain(ticker, exp, price_min, price_max):
         logging.warning(f"Error fetching option chain for {exp['date']}: {str(e)}")
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=60)  # Refresh every minute during market hours
+@st.cache_data(ttl=300)  # Use longer TTL for weekends/non-market hours
 def fetch_options_data(ticker_symbol, expirations):
     """Fetch volume, OI, and calculate range using ATM premiums"""
     try:
         ticker = yf.Ticker(ticker_symbol)
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        
+        # Try to fetch current price (might fail on weekends)
         hist = ticker.history(period='1d', interval='1m')
         current_price = hist['Close'].iloc[-1] if not hist.empty else None
-        if not current_price:
-            raise ValueError("Unable to fetch current price")
         
-        # Calculate 1-hour price trend
-        last_hour = hist.tail(60)
-        price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
+        if not current_price:
+            # Fallback: Fetch Friday's close if market is closed
+            friday = now - timedelta(days=(now.weekday() + 1) % 7)  # Go back to Friday
+            hist = ticker.history(start=friday, end=friday + timedelta(days=1), interval='1d')
+            current_price = hist['Close'].iloc[-1] if not hist.empty else None
+            if not current_price:
+                raise ValueError("Unable to fetch historical price data")
+        
+        # Calculate 1-hour price trend (use Friday's data if no intraday available)
+        try:
+            last_hour = hist.tail(60)
+            price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
+        except:
+            price_trend = 0  # Default to no trend if intraday data isn't available
         
         # Find ATM premiums for next week's expiry
         weekly_target = expirations[0]['date']
@@ -216,6 +230,18 @@ def validate_ticker(ticker_symbol):
         st.error(f"Invalid ticker symbol: {ticker_symbol}")
         return False
 
+def is_market_open(eastern_now):
+    """Check if U.S. market is open (Monday–Friday, 9:30–16:00 EST)"""
+    weekday = eastern_now.weekday()
+    hour = eastern_now.hour
+    minute = eastern_now.minute
+    
+    # Check if it's a weekday (0 = Monday, 4 = Friday)
+    if weekday in [5, 6]:  # Saturday (5) or Sunday (6)
+        return False
+    # Check if it's within market hours (9:30–16:00 EST)
+    return 9 <= hour < 16 and (hour != 9 or minute >= 30)
+
 def run():
     st.markdown("<h1 style='text-align: center;'>Weekly Options Range & Trade Analysis</h1>", unsafe_allow_html=True)
     st.sidebar.markdown("### Configuration")
@@ -232,23 +258,56 @@ def run():
             st.error("No weekly expirations found")
             return
         
-        placeholder = st.empty()
-        while True:
-            with st.spinner(f'Analyzing {ticker_input} options data...'):
-                pivot_df, current_price, price_trend, expected_move = fetch_options_data(ticker_input, weekly_exps)
-                if pivot_df.empty or current_price is None:
-                    st.error("No data available")
-                    break
+        # Display initial results immediately
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        
+        with st.spinner(f'Analyzing {ticker_input} options data...'):
+            pivot_df, current_price, price_trend, expected_move = fetch_options_data(ticker_input, weekly_exps)
+            if pivot_df.empty or current_price is None:
+                st.error("No data available")
+                return
+            
+            weekly_target = weekly_exps[0]['date']
+            lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target, expected_move)
+            direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
+            trade_action, trade_rationale = recommend_trade(direction, current_price, lower_bound, upper_bound, confidence)
+        
+        # Display initial results
+        st.subheader(f"{ticker_input} - Current Price: ${current_price:.2f}")
+        st.markdown(f"**Expected Move (ATM Premiums)**: ±${expected_move:.2f} (Total ${current_price - expected_move:.2f}–${current_price + expected_move:.2f})")
+        st.markdown(f"**Traders expect {ticker_input} to trade between ${lower_bound:.2f} and ${upper_bound:.2f} next week ({weekly_target})**")
+        st.markdown(f"**Sentiment**: {direction} (Confidence: {confidence:.0f}%) - {rationale}")
+        st.markdown(f"**Trade Recommendation**: {trade_action} - {trade_rationale}")
+        
+        market_status = "closed" if not is_market_open(now) else "open"
+        if market_status == "closed":
+            st.write(f"**Market Status**: Closed (Weekend or after hours). Showing data from the last trading day (Friday, {now - timedelta(days=(now.weekday() + 1) % 7):%Y-%m-%d}).")
+        else:
+            st.write("**Market Status**: Open. Data is real-time.")
+        
+        fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target, expected_move)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Optional: Real-time updates during market hours only
+        if st.checkbox("Enable Real-Time Updates (Market Hours Only)") and is_market_open(now):
+            placeholder = st.empty()
+            update_count = 0
+            max_updates = 10  # Limit to prevent infinite loop in testing
+            
+            while update_count < max_updates:
+                with st.spinner(f'Updating {ticker_input} options data...'):
+                    pivot_df, current_price, price_trend, expected_move = fetch_options_data(ticker_input, weekly_exps)
+                    if pivot_df.empty or current_price is None:
+                        st.error("No data available during update")
+                        break
+                    
+                    weekly_target = weekly_exps[0]['date']
+                    lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target, expected_move)
+                    direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
+                    trade_action, trade_rationale = recommend_trade(direction, current_price, lower_bound, upper_bound, confidence)
                 
-                # Weekly range for next expiry
-                weekly_target = weekly_exps[0]['date']
-                lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target, expected_move)
-                
-                # Analyze sentiment and recommend trade
-                direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
-                trade_action, trade_rationale = recommend_trade(direction, current_price, lower_bound, upper_bound, confidence)
-                
-                # Display results
                 with placeholder.container():
                     st.subheader(f"{ticker_input} - Current Price: ${current_price:.2f}")
                     st.markdown(f"**Expected Move (ATM Premiums)**: ±${expected_move:.2f} (Total ${current_price - expected_move:.2f}–${current_price + expected_move:.2f})")
@@ -259,19 +318,14 @@ def run():
                     fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target, expected_move)
                     if fig:
                         st.plotly_chart(fig, use_container_width=True)
-            
-            # Refresh during market hours
-            eastern = pytz.timezone('US/Eastern')
-            now = datetime.now(eastern)
-            market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-            market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-            if market_open <= now <= market_close:
+                
                 st.write(f"Updating in {refresh_rate} seconds...")
-                st.experimental_rerun()
                 time.sleep(refresh_rate)
-            else:
-                st.write("Market is closed. Showing latest data.")
-                break
+                update_count += 1
+        elif not is_market_open(now):
+            st.write("Real-time updates are unavailable outside market hours. Check back during Monday–Friday, 9:30–16:00 EST.")
+
+    st.write("Analysis complete. Use the 'Start Analysis' button to refresh or enable real-time updates.")
 
 if __name__ == "__main__":
     run()
