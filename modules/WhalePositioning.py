@@ -179,18 +179,37 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         (vol_adjusted_score / max(abs(vol_adjusted_score), 1) * vol_weight)
     ) / total_weight
 
-    def calculate_target_scores(df, direction):
-        # Ensure df_scaled matches df's index
-        df_features = features.loc[df.index]
+    def calculate_target_scores(df, direction, expiry_date=None):
+        # If df comes from xs(), it has a single-level index (strike); reconstruct features
+        if expiry_date is not None:
+            # For weekly/monthly targets, use strike index and provided expiry
+            df_features = pd.DataFrame({
+                'strike_distance': (df.index - current_price) / current_price,
+                'call_put_ratio': df['call_wv'] / (df['put_wv'] + 1e-6),
+                'oi_concentration': df['call_oi'] + df['put_oi'],
+                'volume_momentum': df['call_wv'] - df['put_wv'],
+                'iv_spread': df['call_iv'] - df['put_iv'],
+                'time_decay': np.exp(-0.05 * (pd.to_datetime(expiry_date) - pd.Timestamp.now()).days),
+                'price_trend': price_trend / 100
+            }, index=df.index)
+            days_to_exp_subset = pd.Series(
+                (pd.to_datetime(expiry_date) - pd.Timestamp.now()).days,
+                index=df.index
+            )
+        else:
+            # For target_df, use the original MultiIndex
+            df_features = features.loc[df.index]
+            days_to_exp_subset = days_to_exp.loc[df.index]
+
         df_scaled = scaler.transform(df_features)
         if len(df_scaled) != len(df):
-            logging.error(f"Length mismatch: df_scaled ({len(df_scaled)}) vs df ({len(df)})")
+            logging.error(f"Length mismatch: df_scaled ({len(df_scaled)}) vs df ({len(df)}), df index: {df.index}")
             raise ValueError("Scaled features length does not match DataFrame length")
         df['probability'] = rf_model.predict(df_scaled)
         df['weighted_score'] = (
             df['probability'] * 
             (df['call_wv'] if direction > 0 else df['put_wv']) * 
-            np.exp(-0.05 * days_to_exp.loc[df.index])
+            np.exp(-0.05 * days_to_exp_subset)
         )
         return df
 
@@ -239,7 +258,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
     if weekly_target:
         weekly_df = whale_df.xs(weekly_target, level='expiry_date')
         if not weekly_df.empty:
-            weekly_df = calculate_target_scores(weekly_df, direction_score)
+            weekly_df = calculate_target_scores(weekly_df, direction_score, expiry_date=weekly_target)
             if direction_score > 0 and not weekly_df[weekly_df.index > current_price].empty:
                 weekly_target_strike = weekly_df[weekly_df.index > current_price]['weighted_score'].idxmax()
             elif direction_score <= 0 and not weekly_df[weekly_df.index < current_price].empty:
@@ -248,7 +267,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
     if monthly_target:
         monthly_df = whale_df.xs(monthly_target, level='expiry_date')
         if not monthly_df.empty:
-            monthly_df = calculate_target_scores(monthly_df, direction_score)
+            monthly_df = calculate_target_scores(monthly_df, direction_score, expiry_date=monthly_target)
             if direction_score > 0 and not monthly_df[monthly_df.index > current_price].empty:
                 monthly_target_strike = monthly_df[monthly_df.index > current_price]['weighted_score'].idxmax()
             elif direction_score <= 0 and not monthly_df[monthly_df.index < current_price].empty:
@@ -256,6 +275,9 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
 
     weekly_message = f"Weekly Target: ${weekly_target_strike:.2f} ({weekly_target})" if weekly_target_strike else "Weekly Target: N/A"
     monthly_message = f"Monthly Target: ${monthly_target_strike:.2f} ({monthly_target})" if monthly_target_strike else "Monthly Target: N/A"
+
+    logging.info(f"Prediction for {direction}: Score={direction_score:.2f}, Confidence={confidence:.0f}%, Features={feature_importance}")
+    return f"{direction} toward ${target_strike:.2f} for {target_expiry} (Confidence: {confidence:.0f}%)<br>{weekly_message}<br>{monthly_message}", target_strike, target_expiry, color, confidence
 
     logging.info(f"Prediction for {direction}: Score={direction_score:.2f}, Confidence={confidence:.0f}%, Features={feature_importance}")
     return f"{direction} toward ${target_strike:.2f} for {target_expiry} (Confidence: {confidence:.0f}%)<br>{weekly_message}<br>{monthly_message}", target_strike, target_expiry, color, confidence
