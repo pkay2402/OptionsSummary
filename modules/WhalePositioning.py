@@ -40,7 +40,7 @@ def get_weekly_expirations(ticker_symbol, num_weeks=4):
         return []
 
 def fetch_option_chain(ticker, exp, price_min, price_max):
-    """Fetch option chain data"""
+    """Fetching option chain data"""
     try:
         opt = ticker.option_chain(exp['date'])
         calls = opt.calls[(opt.calls['strike'] >= price_min) & (opt.calls['strike'] <= price_max)][['strike', 'openInterest', 'volume']].copy()
