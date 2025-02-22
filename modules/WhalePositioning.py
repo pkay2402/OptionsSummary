@@ -133,7 +133,6 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         index=whale_df.index
     )
 
-    # Feature engineering with consistent indexing
     features = pd.DataFrame({
         'strike_distance': (strikes - current_price) / current_price,
         'call_put_ratio': whale_df['call_wv'] / (whale_df['put_wv'] + 1e-6),
@@ -180,9 +179,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
     ) / total_weight
 
     def calculate_target_scores(df, direction, expiry_date=None):
-        # If df comes from xs(), it has a single-level index (strike); reconstruct features
         if expiry_date is not None:
-            # For weekly/monthly targets, use strike index and provided expiry
             df_features = pd.DataFrame({
                 'strike_distance': (df.index - current_price) / current_price,
                 'call_put_ratio': df['call_wv'] / (df['put_wv'] + 1e-6),
@@ -197,7 +194,6 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
                 index=df.index
             )
         else:
-            # For target_df, use the original MultiIndex
             df_features = features.loc[df.index]
             days_to_exp_subset = days_to_exp.loc[df.index]
 
@@ -211,9 +207,11 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
             (df['call_wv'] if direction > 0 else df['put_wv']) * 
             np.exp(-0.05 * days_to_exp_subset)
         )
+        # Log weighted scores for debugging
+        logging.debug(f"Weighted scores for {expiry_date or 'target'}: {df['weighted_score'].to_dict()}")
         return df
 
-    # Target selection
+    # Target selection with constraints
     if direction_score > 0:
         target_df = whale_df[strikes > current_price].copy()
         if not target_df.empty:
@@ -235,13 +233,26 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
             target_strike = current_price
             target_expiry = whale_df.index.get_level_values('expiry_date')[0]
 
+    # Confidence and direction
     model_agreement = len([s for s in [rf_prediction, statistical_score, vol_adjusted_score] 
                          if np.sign(s) == np.sign(direction_score)]) / 3
     confidence = min(abs(direction_score) * 100 * model_agreement, 95)
 
     threshold = 0.3 * (1 + vol_regime)
-    direction = "Bullish" if direction_score > threshold else "Bearish" if direction_score < -threshold else "Neutral"
-    color = "green" if direction == "Bullish" else "red" if direction == "Bearish" else "gray"
+    if direction_score > threshold:
+        direction = "Bullish"
+        color = "green"
+    elif direction_score < -threshold:
+        direction = "Bearish"
+        color = "red"
+    else:
+        direction = "Neutral"
+        color = "gray"
+        # Override extreme targets for Neutral with low confidence
+        if confidence < 25:  # Arbitrary threshold; adjust as needed
+            target_strike = current_price
+            target_expiry = whale_df.index.get_level_values('expiry_date')[0]
+            logging.info(f"Neutral with low confidence ({confidence:.0f}%), resetting target to current price: ${current_price:.2f}")
 
     today = pd.Timestamp.now().date()
     next_week = today + timedelta(days=7)
@@ -255,15 +266,26 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         if exp_date <= next_month and monthly_target is None:
             monthly_target = expiry['date']
 
+    # Weekly target with range constraint
     if weekly_target:
         weekly_df = whale_df.xs(weekly_target, level='expiry_date')
         if not weekly_df.empty:
             weekly_df = calculate_target_scores(weekly_df, direction_score, expiry_date=weekly_target)
             if direction_score > 0 and not weekly_df[weekly_df.index > current_price].empty:
-                weekly_target_strike = weekly_df[weekly_df.index > current_price]['weighted_score'].idxmax()
+                weekly_targets = weekly_df[weekly_df.index > current_price]
+                weekly_target_strike = weekly_targets.loc[weekly_targets['weighted_score'].idxmax()].name
             elif direction_score <= 0 and not weekly_df[weekly_df.index < current_price].empty:
-                weekly_target_strike = weekly_df[weekly_df.index < current_price]['weighted_score'].idxmax()
+                weekly_targets = weekly_df[weekly_df.index < current_price]
+                weekly_target_strike = weekly_targets.loc[weekly_targets['weighted_score'].idxmax()].name
+            # Constrain weekly target to ±5% unless confidence is high
+            if weekly_target_strike and confidence < 50:  # Adjust threshold as needed
+                max_drop = current_price * 0.95  # -5%
+                max_rise = current_price * 1.05  # +5%
+                if weekly_target_strike < max_drop or weekly_target_strike > max_rise:
+                    weekly_target_strike = current_price
+                    logging.info(f"Weekly target ${weekly_target_strike:.2f} outside ±5% range, reset to ${current_price:.2f}")
 
+    # Monthly target (less constrained)
     if monthly_target:
         monthly_df = whale_df.xs(monthly_target, level='expiry_date')
         if not monthly_df.empty:
@@ -275,9 +297,6 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
 
     weekly_message = f"Weekly Target: ${weekly_target_strike:.2f} ({weekly_target})" if weekly_target_strike else "Weekly Target: N/A"
     monthly_message = f"Monthly Target: ${monthly_target_strike:.2f} ({monthly_target})" if monthly_target_strike else "Monthly Target: N/A"
-
-    logging.info(f"Prediction for {direction}: Score={direction_score:.2f}, Confidence={confidence:.0f}%, Features={feature_importance}")
-    return f"{direction} toward ${target_strike:.2f} for {target_expiry} (Confidence: {confidence:.0f}%)<br>{weekly_message}<br>{monthly_message}", target_strike, target_expiry, color, confidence
 
     logging.info(f"Prediction for {direction}: Score={direction_score:.2f}, Confidence={confidence:.0f}%, Features={feature_importance}")
     return f"{direction} toward ${target_strike:.2f} for {target_expiry} (Confidence: {confidence:.0f}%)<br>{weekly_message}<br>{monthly_message}", target_strike, target_expiry, color, confidence
