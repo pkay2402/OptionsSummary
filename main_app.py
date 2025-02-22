@@ -13,7 +13,8 @@ from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator
 from modules.GannSwing import run as GannSwing_run
 from modules.CFTC import cftc_analyzer_module
-from modules.BlockTrade import Blocktrade_run  # Corrected case
+from modules.BlockTrade import Blocktrade_run
+from modules.WhalePositioning import run as WhalePositioning_run  # New import
 
 def add_buymeacoffee():
     try:
@@ -43,8 +44,7 @@ def main():
         </style>
     """, unsafe_allow_html=True)
     
-    # Render the Buy Me a Coffee button once at the start (before app selection)
-    add_buymeacoffee()  # Moved here to ensure it renders early and consistently
+    add_buymeacoffee()
     
     app_selection = st.sidebar.selectbox("Choose the app:", 
                                       ["FINRA Dashboard",
@@ -59,9 +59,9 @@ def main():
                                        "Gann Swing Analysis",
                                        "Seasonality",
                                        "S&P 500 Performance",
-                                       "CFTC Data Analyzer"])
+                                       "CFTC Data Analyzer",
+                                       "Whale Positioning"])  # New option
     
-    # Route to the selected app
     if app_selection == "Stock Trend Oscillator":
         show_trend_oscillator()
     elif app_selection == "Flow Summary":
@@ -88,6 +88,8 @@ def main():
         SP500Performance_run()
     elif app_selection == "CFTC Data Analyzer":
         cftc_analyzer_module()
+    elif app_selection == "Whale Positioning":
+        WhalePositioning_run()
 
 if __name__ == "__main__":
     main()
