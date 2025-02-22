@@ -126,7 +126,6 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         return message, target_strike, target_expiry, color, confidence
 
     strikes = whale_df.index.get_level_values('strike')
-    # Store days_to_exp as a Series with the same index as whale_df for consistent subsetting
     days_to_exp = pd.Series(
         whale_df.index.get_level_values('expiry_date').map(
             lambda x: (pd.to_datetime(x) - pd.Timestamp.now()).days
@@ -134,7 +133,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         index=whale_df.index
     )
 
-    # Feature engineering
+    # Feature engineering with consistent indexing
     features = pd.DataFrame({
         'strike_distance': (strikes - current_price) / current_price,
         'call_put_ratio': whale_df['call_wv'] / (whale_df['put_wv'] + 1e-6),
@@ -145,10 +144,8 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         'price_trend': price_trend / 100
     }, index=whale_df.index)
 
-    # Handle potential NaN values
     features = features.fillna(0)
 
-    # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(features)
     
@@ -156,27 +153,22 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         logging.error(f"Invalid X_scaled shape: {X_scaled.shape}; expected ({features.shape[0]}, {features.shape[1]})")
         raise ValueError("Feature scaling produced an invalid shape")
 
-    # Train Random Forest
     target = np.where(strikes > current_price, 1, -1)
     rf_model = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42)
     rf_model.fit(X_scaled, target)
     feature_importance = dict(zip(features.columns, rf_model.feature_importances_))
 
-    # Predict on all samples and take mean for a single direction score
     rf_predictions = rf_model.predict(X_scaled)
     rf_prediction = np.mean(rf_predictions)
 
-    # Statistical momentum analysis
     volume_zscore = stats.zscore(whale_df['call_wv'] - whale_df['put_wv']).mean()
     oi_zscore = stats.zscore(whale_df['call_oi'] - whale_df['put_oi']).mean()
     statistical_score = (volume_zscore + oi_zscore) / 2
 
-    # Volatility-adjusted scoring
     vol_regime = (whale_df['call_iv'].mean() + whale_df['put_iv'].mean()) / 2
     iv_skew = (whale_df['call_iv'] - whale_df['put_iv']).mean()
     vol_adjusted_score = (whale_df['call_wv'].sum() - whale_df['put_wv'].sum()) * (1 - vol_regime)
 
-    # Combine scores with dynamic weighting
     rf_weight = 0.4 + feature_importance.get('volume_momentum', 0.1)
     stat_weight = 0.3 * (1 + abs(statistical_score))
     vol_weight = 0.3 * (1 - vol_regime)
@@ -188,9 +180,13 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
     ) / total_weight
 
     def calculate_target_scores(df, direction):
-        df_scaled = scaler.transform(features.loc[df.index])
+        # Ensure df_scaled matches df's index
+        df_features = features.loc[df.index]
+        df_scaled = scaler.transform(df_features)
+        if len(df_scaled) != len(df):
+            logging.error(f"Length mismatch: df_scaled ({len(df_scaled)}) vs df ({len(df)})")
+            raise ValueError("Scaled features length does not match DataFrame length")
         df['probability'] = rf_model.predict(df_scaled)
-        # Use the subsetted days_to_exp corresponding to df's index
         df['weighted_score'] = (
             df['probability'] * 
             (df['call_wv'] if direction > 0 else df['put_wv']) * 
@@ -220,17 +216,14 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
             target_strike = current_price
             target_expiry = whale_df.index.get_level_values('expiry_date')[0]
 
-    # Confidence calculation
     model_agreement = len([s for s in [rf_prediction, statistical_score, vol_adjusted_score] 
                          if np.sign(s) == np.sign(direction_score)]) / 3
     confidence = min(abs(direction_score) * 100 * model_agreement, 95)
 
-    # Direction determination
     threshold = 0.3 * (1 + vol_regime)
     direction = "Bullish" if direction_score > threshold else "Bearish" if direction_score < -threshold else "Neutral"
     color = "green" if direction == "Bullish" else "red" if direction == "Bearish" else "gray"
 
-    # Weekly and monthly targets
     today = pd.Timestamp.now().date()
     next_week = today + timedelta(days=7)
     next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
@@ -247,19 +240,19 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         weekly_df = whale_df.xs(weekly_target, level='expiry_date')
         if not weekly_df.empty:
             weekly_df = calculate_target_scores(weekly_df, direction_score)
-            if direction_score > 0:
-                weekly_target_strike = weekly_df[weekly_df.index > current_price]['weighted_score'].idxmax() if not weekly_df[weekly_df.index > current_price].empty else None
-            else:
-                weekly_target_strike = weekly_df[weekly_df.index < current_price]['weighted_score'].idxmax() if not weekly_df[weekly_df.index < current_price].empty else None
+            if direction_score > 0 and not weekly_df[weekly_df.index > current_price].empty:
+                weekly_target_strike = weekly_df[weekly_df.index > current_price]['weighted_score'].idxmax()
+            elif direction_score <= 0 and not weekly_df[weekly_df.index < current_price].empty:
+                weekly_target_strike = weekly_df[weekly_df.index < current_price]['weighted_score'].idxmax()
 
     if monthly_target:
         monthly_df = whale_df.xs(monthly_target, level='expiry_date')
         if not monthly_df.empty:
             monthly_df = calculate_target_scores(monthly_df, direction_score)
-            if direction_score > 0:
-                monthly_target_strike = monthly_df[monthly_df.index > current_price]['weighted_score'].idxmax() if not monthly_df[monthly_df.index > current_price].empty else None
-            else:
-                monthly_target_strike = monthly_df[monthly_df.index < current_price]['weighted_score'].idxmax() if not monthly_df[monthly_df.index < current_price].empty else None
+            if direction_score > 0 and not monthly_df[monthly_df.index > current_price].empty:
+                monthly_target_strike = monthly_df[monthly_df.index > current_price]['weighted_score'].idxmax()
+            elif direction_score <= 0 and not monthly_df[monthly_df.index < current_price].empty:
+                monthly_target_strike = monthly_df[monthly_df.index < current_price]['weighted_score'].idxmax()
 
     weekly_message = f"Weekly Target: ${weekly_target_strike:.2f} ({weekly_target})" if weekly_target_strike else "Weekly Target: N/A"
     monthly_message = f"Monthly Target: ${monthly_target_strike:.2f} ({monthly_target})" if monthly_target_strike else "Monthly Target: N/A"
