@@ -1,22 +1,14 @@
+# modules/WhalePositioning.py
 import streamlit as st
 import yfinance as yf
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import pytz
-import logging
-from tenacity import retry, stop_after_attempt, wait_exponential
-from concurrent.futures import ThreadPoolExecutor
 
-# Setup logging
-logging.basicConfig(filename='options_range.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-
-@st.cache_data(ttl=300)
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def get_weekly_expirations(ticker_symbol, num_weeks=4):
-    """Fetch weekly expirations"""
+def get_weekly_expirations(ticker_symbol, num_weeks=8):
+    """Fetch the next 8 weekly expirations"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         expirations = ticker.options
@@ -28,233 +20,242 @@ def get_weekly_expirations(ticker_symbol, num_weeks=4):
         for exp in expirations:
             exp_date = datetime.strptime(exp, '%Y-%m-%d').date()
             days_to_exp = (exp_date - today).days
-            if exp_date.weekday() == 4 and 0 <= days_to_exp <= (num_weeks * 7 + 7):
+            if 0 <= days_to_exp <= (num_weeks * 7 + 7):
                 weekly_exps.append({'date': exp, 'days': days_to_exp})
         
-        result = sorted(weekly_exps, key=lambda x: x['days'])[:num_weeks]
-        logging.info(f"Fetched {len(result)} weekly expirations for {ticker_symbol}")
-        return result
+        return sorted(weekly_exps, key=lambda x: x['days'])[:num_weeks]
     except Exception as e:
-        logging.error(f"Error fetching expirations: {str(e)}")
-        st.error(f"Error fetching expirations: {str(e)}")
+        st.error(f"Error fetching weekly expirations: {str(e)}")
         return []
 
-def fetch_option_chain(ticker, exp, price_min, price_max):
-    """Fetching option chain data"""
-    try:
-        opt = ticker.option_chain(exp['date'])
-        calls = opt.calls[(opt.calls['strike'] >= price_min) & (opt.calls['strike'] <= price_max)][['strike', 'openInterest', 'volume']].copy()
-        calls['type'] = 'call'
-        calls['expiry_date'] = exp['date']
-        
-        puts = opt.puts[(opt.puts['strike'] >= price_min) & (opt.puts['strike'] <= price_max)][['strike', 'openInterest', 'volume']].copy()
-        puts['type'] = 'put'
-        puts['expiry_date'] = exp['date']
-        
-        return calls, puts
-    except Exception as e:
-        logging.warning(f"Error fetching option chain for {exp['date']}: {str(e)}")
-        return pd.DataFrame(), pd.DataFrame()
-
-@st.cache_data(ttl=60)  # Refresh every minute during market hours
-def fetch_options_data(ticker_symbol, expirations, price_range_pct=10):
-    """Fetch volume and OI data"""
+def fetch_whale_positions(ticker_symbol, expirations, price_range_pct=10):
+    """Get calls/puts OI and volume within 10% of current price with price trend"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period='1d', interval='1m')
         current_price = hist['Close'].iloc[-1] if not hist.empty else None
+        
         if not current_price:
             raise ValueError("Unable to fetch current price")
-        
-        # Calculate 1-hour price trend
+            
         last_hour = hist.tail(60)
         price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
         
+        whale_data = []
         price_min = current_price * (1 - price_range_pct/100)
         price_max = current_price * (1 + price_range_pct/100)
         
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(lambda exp: fetch_option_chain(ticker, exp, price_min, price_max), expirations))
-        options_data = [item for sublist in results for item in sublist if not item.empty]
+        for exp in expirations:
+            opt = ticker.option_chain(exp['date'])
+            calls = opt.calls[
+                (opt.calls['strike'] >= price_min) & 
+                (opt.calls['strike'] <= price_max)
+            ][['strike', 'openInterest', 'volume']].copy()
+            calls['type'] = 'call'
+            calls['days_to_exp'] = exp['days']
+            calls['expiry_date'] = exp['date']
+            
+            puts = opt.puts[
+                (opt.puts['strike'] >= price_min) & 
+                (opt.puts['strike'] <= price_max)
+            ][['strike', 'openInterest', 'volume']].copy()
+            puts['type'] = 'put'
+            puts['days_to_exp'] = exp['days']
+            puts['expiry_date'] = exp['date']
+            
+            whale_data.append(calls)
+            whale_data.append(puts)
         
-        if not options_data:
-            raise ValueError("No option data within price range")
+        df = pd.concat(whale_data)
         
-        df = pd.concat(options_data)
-        df['total_activity'] = df['volume'].fillna(0) + df['openInterest'].fillna(0)
-        pivot_df = df.pivot_table(index=['strike', 'expiry_date'], columns='type', 
-                                 values=['total_activity'], aggfunc='sum').fillna(0)
-        pivot_df.columns = ['call_activity', 'put_activity']
-        pivot_df['total_activity'] = pivot_df['call_activity'] + pivot_df['put_activity']
+        df['price_weight'] = 1 - (abs(df['strike'] - current_price) / (current_price * price_range_pct/100))
+        df['time_weight'] = 1 / (df['days_to_exp'] + 1)
+        df['weighted_volume'] = df['volume'] * df['price_weight'] * df['time_weight']
         
-        return pivot_df, current_price, price_trend
+        agg_df = df.groupby(['strike', 'type', 'expiry_date']).agg({
+            'openInterest': 'sum',
+            'volume': 'sum',
+            'weighted_volume': 'sum'
+        }).reset_index()
+        
+        pivot_df = agg_df.pivot(index=['strike', 'expiry_date'], columns='type', 
+                              values=['openInterest', 'volume', 'weighted_volume']).fillna(0)
+        pivot_df.columns = ['call_oi', 'put_oi', 'call_vol', 'put_vol', 'call_wv', 'put_wv']
+        
+        pivot_df['total_oi'] = pivot_df['call_oi'] + pivot_df['put_oi']
+        pivot_df['net_vol'] = pivot_df['call_vol'] - pivot_df['put_vol']
+        pivot_df['net_wv'] = pivot_df['call_wv'] - pivot_df['put_wv']
+        
+        strike_df = pivot_df.groupby(level='strike').sum()
+        
+        return pivot_df, strike_df, current_price, price_trend
     except Exception as e:
-        logging.error(f"Error fetching options data: {str(e)}")
-        st.error(f"Error fetching options data: {str(e)}")
-        return pd.DataFrame(), None, None
+        st.error(f"Error fetching whale positions: {str(e)}")
+        return pd.DataFrame(), pd.DataFrame(), None, None
 
-def calculate_trading_range(pivot_df, current_price, expiry_date, activity_threshold=0.8):
-    """Calculate expected trading range for a given expiry"""
-    if pivot_df.empty:
-        return None, None
+def predict_price_direction(current_price, whale_df, price_trend):
+    """Smart prediction with expiration date"""
+    if whale_df.empty:
+        return "Insufficient data", None, None, "gray"
     
-    expiry_df = pivot_df.xs(expiry_date, level='expiry_date')
-    total_activity = expiry_df['total_activity'].sum()
-    if total_activity == 0:
-        return current_price, current_price
+    call_wv_score = whale_df['call_wv'].sum()
+    put_wv_score = whale_df['put_wv'].sum()
+    net_wv_score = call_wv_score - put_wv_score
     
-    # Sort by strike and compute cumulative activity
-    expiry_df = expiry_df.sort_index()
-    expiry_df['cumulative_activity'] = expiry_df['total_activity'].cumsum() / total_activity
+    call_oi_concentration = whale_df[whale_df.index.get_level_values('strike') > current_price]['call_oi'].sum()
+    put_oi_concentration = whale_df[whale_df.index.get_level_values('strike') < current_price]['put_oi'].sum()
     
-    # Find range containing threshold% of activity
-    lower_bound = expiry_df[expiry_df['cumulative_activity'] >= (1 - activity_threshold) / 2].index[0]
-    upper_bound = expiry_df[expiry_df['cumulative_activity'] <= 1 - (1 - activity_threshold) / 2].index[-1]
+    direction_score = (
+        (net_wv_score / max(abs(net_wv_score), 1)) * 0.4 +
+        (price_trend / max(abs(price_trend), 0.1)) * 0.3 +
+        ((call_oi_concentration - put_oi_concentration) / 
+         max(call_oi_concentration + put_oi_concentration, 1)) * 0.3
+    )
     
-    return lower_bound, upper_bound
-
-def analyze_sentiment(pivot_df, current_price, expiry_date, price_trend):
-    """Analyze trader sentiment based on options activity"""
-    if pivot_df.empty:
-        return "Neutral", 0, "No data available"
+    if direction_score > 0:
+        target_df = whale_df[whale_df.index.get_level_values('strike') > current_price]
+        if not target_df.empty:
+            target_row = target_df.loc[target_df['call_wv'].idxmax()]
+            target_strike = target_row.name[0]
+            target_expiry = target_row.name[1]
+        else:
+            target_strike = current_price
+            target_expiry = whale_df.index.get_level_values('expiry_date')[0]
+    else:
+        target_df = whale_df[whale_df.index.get_level_values('strike') < current_price]
+        if not target_df.empty:
+            target_row = target_df.loc[target_df['put_wv'].idxmax()]
+            target_strike = target_row.name[0]
+            target_expiry = target_row.name[1]
+        else:
+            target_strike = current_price
+            target_expiry = whale_df.index.get_level_values('expiry_date')[0]
     
-    expiry_df = pivot_df.xs(expiry_date, level='expiry_date')
-    total_call = expiry_df['call_activity'].sum()
-    total_put = expiry_df['put_activity'].sum()
-    total_activity = total_call + total_put
-    
-    if total_activity == 0:
-        return "Neutral", 0, "No significant activity"
-    
-    # Sentiment score: Positive for bullish, negative for bearish
-    sentiment_score = (total_call - total_put) / total_activity
-    confidence = min(abs(sentiment_score) * 100, 90)  # Cap at 90% for realism
-    
-    # Determine sentiment
-    if sentiment_score > 0.2:  # Strong bullish if calls dominate by 20%
+    if direction_score > 0.3:
         direction = "Bullish"
-        rationale = f"High call activity (${expiry_df['call_activity'].idxmax():.2f}) suggests bullish sentiment"
-    elif sentiment_score < -0.2:  # Strong bearish if puts dominate by 20%
+        color = "green"
+    elif direction_score < -0.3:
         direction = "Bearish"
-        rationale = f"High put activity (${expiry_df['put_activity'].idxmax():.2f}) suggests bearish sentiment"
+        color = "red"
     else:
         direction = "Neutral"
-        rationale = "Balanced call and put activity, no clear direction"
+        color = "gray"
     
-    # Adjust with price trend
-    if price_trend > 1:  # Strong upward trend (>1% in 1 hour)
-        direction = "Bullish" if direction != "Bearish" else "Neutral"
-        rationale += f"; confirmed by +{price_trend:.2f}% 1-hour trend"
-    elif price_trend < -1:  # Strong downward trend (<-1% in 1 hour)
-        direction = "Bearish" if direction != "Bullish" else "Neutral"
-        rationale += f"; confirmed by {price_trend:.2f}% 1-hour trend"
+    confidence = min(abs(direction_score) * 100, 100)
     
-    return direction, confidence, rationale
+    return (f"{direction} toward ${target_strike:.2f} for {target_expiry} "
+            f"(Confidence: {confidence:.0f}%)"), target_strike, target_expiry, color
 
-def recommend_trade(direction, current_price, lower_bound, upper_bound, confidence):
-    """Recommend trading action based on sentiment and range"""
-    if confidence < 30:  # Low confidence, avoid action
-        return "Hold", f"Low confidence ({confidence:.0f}%) in sentiment; monitor closely"
-    
-    if direction == "Bullish":
-        if current_price < upper_bound:
-            return "Buy", f"Bullish sentiment; buy at ${current_price:.2f} targeting ${upper_bound:.2f}"
-        return "Hold", "Bullish, but price near or above target range"
-    
-    elif direction == "Bearish":
-        if current_price > lower_bound:
-            return "Sell", f"Bearish sentiment; sell at ${current_price:.2f} targeting ${lower_bound:.2f}"
-        return "Hold", "Bearish, but price near or below target range"
-    
-    else:  # Neutral
-        return "Hold", "No clear bullish or bearish signal; hold position"
-
-def plot_activity(pivot_df, current_price, ticker_symbol, weekly_target):
-    """Plot activity distribution"""
-    if pivot_df.empty:
+def plot_volume_trend(whale_df, current_price, ticker_symbol):
+    """Bar chart showing weighted volume trend"""
+    if whale_df.empty:
         return None
     
-    weekly_df = pivot_df.xs(weekly_target, level='expiry_date')
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=weekly_df.index, y=weekly_df['call_activity'], name='Call Activity', marker_color='green', opacity=0.7))
-    fig.add_trace(go.Bar(x=weekly_df.index, y=weekly_df['put_activity'], name='Put Activity', marker_color='red', opacity=0.7))
-    fig.add_vline(x=current_price, line_dash="dash", line_color="blue", annotation_text=f"Current: ${current_price:.2f}")
-    fig.update_layout(
-        title=f"Options Activity for {ticker_symbol} (Next Week: {weekly_target})",
-        xaxis_title="Strike Price",
-        yaxis_title="Total Activity (Volume + OI)",
-        barmode='stack',
-        legend=dict(x=0.01, y=0.99)
-    )
+    strike_df = whale_df.groupby(level='strike').sum()
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.bar(strike_df.index - 0.2, strike_df['call_wv'], width=0.4, 
+           color='green', alpha=0.7, label='Call Weighted Volume')
+    ax.bar(strike_df.index + 0.2, strike_df['put_wv'], width=0.4, 
+           color='red', alpha=0.7, label='Put Weighted Volume')
+    
+    ax.axvline(current_price, color='blue', linestyle='--', 
+              label=f'Current Price: ${current_price:.2f}')
+    
+    ax.set_title(f"Weighted Volume Trend Analysis for {ticker_symbol} (±10% Price Range)")
+    ax.set_xlabel("Strike Price")
+    ax.set_ylabel("Weighted Volume")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    total_call_wv = strike_df['call_wv'].sum()
+    total_put_wv = strike_df['put_wv'].sum()
+    stats_text = f"Call WV: {total_call_wv:,.0f}\nPut WV: {total_put_wv:,.0f}"
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
     return fig
 
-def validate_ticker(ticker_symbol):
-    """Validate ticker symbol"""
-    try:
-        ticker = yf.Ticker(ticker_symbol)
-        ticker.info
-        return True
-    except:
-        logging.warning(f"Invalid ticker symbol: {ticker_symbol}")
-        st.error(f"Invalid ticker symbol: {ticker_symbol}")
-        return False
-
 def run():
-    st.markdown("<h1 style='text-align: center;'>Weekly Options Range & Trade Analysis</h1>", unsafe_allow_html=True)
-    st.sidebar.markdown("### Configuration")
-    ticker_input = st.sidebar.text_input("Ticker Symbol", value='SPY').upper()
-    price_range_pct = st.sidebar.slider("Price Range (%)", 5, 20, 10)
-    num_weeks = st.sidebar.slider("Weeks to Analyze", 1, 4, 4)
-    refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", 30, 300, 60)
+    st.markdown("<h1 style='text-align: center;'>Smart Whale Positioning Analysis</h1>", unsafe_allow_html=True)
     
-    if st.sidebar.button("Start Analysis"):
-        if not validate_ticker(ticker_input):
-            return
-        
-        weekly_exps = get_weekly_expirations(ticker_input, num_weeks)
-        if not weekly_exps:
-            st.error("No weekly expirations found")
-            return
-        
-        placeholder = st.empty()
-        while True:
-            with st.spinner(f'Analyzing {ticker_input} options data...'):
-                pivot_df, current_price, price_trend = fetch_options_data(ticker_input, weekly_exps, price_range_pct)
-                if pivot_df.empty or current_price is None:
-                    st.error("No data available")
-                    break
-                
-                # Weekly range for next expiry
-                weekly_target = weekly_exps[0]['date']
-                lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target)
-                
-                # Analyze sentiment and recommend trade
-                direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
-                trade_action, trade_rationale = recommend_trade(direction, current_price, lower_bound, upper_bound, confidence)
-                
-                # Display results
-                with placeholder.container():
-                    st.subheader(f"{ticker_input} - Current Price: ${current_price:.2f}")
-                    st.markdown(f"**Traders expect {ticker_input} to trade between ${lower_bound:.2f} and ${upper_bound:.2f} next week ({weekly_target})**")
-                    st.markdown(f"**Sentiment**: {direction} (Confidence: {confidence:.0f}%) - {rationale}")
-                    st.markdown(f"**Trade Recommendation**: {trade_action} - {trade_rationale}")
-                    
-                    fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target)
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
+    ticker_symbol = st.sidebar.text_input("Ticker Symbol", value='SPY', key='whale_ticker').upper()
+    analyze_button = st.sidebar.button("Analyze", key='whale_analyze')
+    
+    if analyze_button:
+        with st.spinner('Analyzing whale positions...'):
+            weekly_exps = get_weekly_expirations(ticker_symbol)
             
-            # Refresh during market hours
-            eastern = pytz.timezone('US/Eastern')
-            now = datetime.now(eastern)
-            market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-            market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-            if market_open <= now <= market_close:
-                st.write(f"Updating in {refresh_rate} seconds...")
-                st.experimental_rerun()
-                time.sleep(refresh_rate)
+            if weekly_exps:
+                whale_df, strike_df, current_price, price_trend = fetch_whale_positions(ticker_symbol, weekly_exps)
+                
+                if not whale_df.empty and current_price:
+                    st.subheader(f"Options Data within 10% of Current Price (${current_price:.2f})")
+                    display_df = strike_df[['call_oi', 'put_oi', 'total_oi', 'call_vol', 'put_vol', 'net_vol']]
+                    st.dataframe(
+                        display_df.style.format({
+                            'call_oi': '{:,.0f}',
+                            'put_oi': '{:,.0f}',
+                            'total_oi': '{:,.0f}',
+                            'call_vol': '{:,.0f}',
+                            'put_vol': '{:,.0f}',
+                            'net_vol': '{:+,.0f}'
+                        }).background_gradient(subset=['total_oi'], cmap='Blues'),
+                        use_container_width=True
+                    )
+                    
+                    direction, target_strike, target_expiry, color = predict_price_direction(
+                        current_price, whale_df, price_trend
+                    )
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Current Price", f"${current_price:.2f}")
+                        st.metric("Last Hour Trend", f"{price_trend:+.2f}%")
+                    with col2:
+                        st.markdown(f"""
+                        <div style='background-color: {color}; color: white; padding: 10px; 
+                        border-radius: 5px; text-align: center;'>
+                        Predicted Direction: {direction}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.subheader("Weighted Volume Trend Analysis")
+                    fig = plot_volume_trend(whale_df, current_price, ticker_symbol)
+                    if fig:
+                        st.pyplot(fig)
+                    
+                    st.subheader("Key Insights")
+                    total_call_oi = strike_df['call_oi'].sum()
+                    total_put_oi = strike_df['put_oi'].sum()
+                    total_call_vol = strike_df['call_vol'].sum()
+                    total_put_vol = strike_df['put_vol'].sum()
+                    total_call_wv = strike_df['call_wv'].sum()
+                    total_put_wv = strike_df['put_wv'].sum()
+                    
+                    st.markdown(f"""
+                    - **Analysis Range**: Strikes between ${current_price*0.9:.2f} and ${current_price*1.1:.2f}
+                    - **Open Interest**: 
+                      - Calls: {total_call_oi:,.0f} contracts
+                      - Puts: {total_put_oi:,.0f} contracts
+                      - Call/Put Ratio: {total_call_oi/total_put_oi if total_put_oi > 0 else 'N/A':.2f}
+                    - **Today's Volume**:
+                      - Call Volume: {total_call_vol:,.0f} contracts
+                      - Put Volume: {total_put_vol:,.0f} contracts
+                      - Weighted Call Volume: {total_call_wv:,.0f}
+                      - Weighted Put Volume: {total_put_wv:,.0f}
+                    - **Momentum Factors**:
+                      - Price Trend (1h): {price_trend:+.2f}%
+                      - Volume Momentum: {total_call_wv - total_put_wv:+,.0f}
+                    - **Prediction**: {direction}
+                    - **Target Details**:
+                      - Strike: ${target_strike:.2f}
+                      - Expiration: {target_expiry}
+                    - **Note**: Prediction targets the expiry with strongest weighted volume
+                    """)
+                else:
+                    st.warning("No data available within the specified price range")
             else:
-                st.write("Market is closed. Showing latest data.")
-                break
-
-if __name__ == "__main__":
-    run()
+                st.warning("No weekly expirations found for this ticker")
