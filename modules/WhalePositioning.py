@@ -126,9 +126,13 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         return message, target_strike, target_expiry, color, confidence
 
     strikes = whale_df.index.get_level_values('strike')
-    days_to_exp = whale_df.index.get_level_values('expiry_date').map(
-        lambda x: (pd.to_datetime(x) - pd.Timestamp.now()).days
-    ).to_numpy()
+    # Store days_to_exp as a Series with the same index as whale_df for consistent subsetting
+    days_to_exp = pd.Series(
+        whale_df.index.get_level_values('expiry_date').map(
+            lambda x: (pd.to_datetime(x) - pd.Timestamp.now()).days
+        ),
+        index=whale_df.index
+    )
 
     # Feature engineering
     features = pd.DataFrame({
@@ -139,7 +143,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
         'iv_spread': whale_df['call_iv'] - whale_df['put_iv'],
         'time_decay': np.exp(-0.05 * days_to_exp),
         'price_trend': price_trend / 100
-    })
+    }, index=whale_df.index)
 
     # Handle potential NaN values
     features = features.fillna(0)
@@ -160,7 +164,7 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
 
     # Predict on all samples and take mean for a single direction score
     rf_predictions = rf_model.predict(X_scaled)
-    rf_prediction = np.mean(rf_predictions)  # Aggregate predictions
+    rf_prediction = np.mean(rf_predictions)
 
     # Statistical momentum analysis
     volume_zscore = stats.zscore(whale_df['call_wv'] - whale_df['put_wv']).mean()
@@ -186,10 +190,11 @@ def predict_price_direction(current_price, whale_df, price_trend, weekly_expirie
     def calculate_target_scores(df, direction):
         df_scaled = scaler.transform(features.loc[df.index])
         df['probability'] = rf_model.predict(df_scaled)
+        # Use the subsetted days_to_exp corresponding to df's index
         df['weighted_score'] = (
             df['probability'] * 
             (df['call_wv'] if direction > 0 else df['put_wv']) * 
-            np.exp(-0.05 * days_to_exp[df.index.get_level_values('expiry_date')])
+            np.exp(-0.05 * days_to_exp.loc[df.index])
         )
         return df
 
