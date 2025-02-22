@@ -66,6 +66,10 @@ def fetch_options_data(ticker_symbol, expirations, price_range_pct=10):
         if not current_price:
             raise ValueError("Unable to fetch current price")
         
+        # Calculate 1-hour price trend
+        last_hour = hist.tail(60)
+        price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
+        
         price_min = current_price * (1 - price_range_pct/100)
         price_max = current_price * (1 + price_range_pct/100)
         
@@ -83,11 +87,11 @@ def fetch_options_data(ticker_symbol, expirations, price_range_pct=10):
         pivot_df.columns = ['call_activity', 'put_activity']
         pivot_df['total_activity'] = pivot_df['call_activity'] + pivot_df['put_activity']
         
-        return pivot_df, current_price
+        return pivot_df, current_price, price_trend
     except Exception as e:
         logging.error(f"Error fetching options data: {str(e)}")
         st.error(f"Error fetching options data: {str(e)}")
-        return pd.DataFrame(), None
+        return pd.DataFrame(), None, None
 
 def calculate_trading_range(pivot_df, current_price, expiry_date, activity_threshold=0.8):
     """Calculate expected trading range for a given expiry"""
@@ -108,6 +112,62 @@ def calculate_trading_range(pivot_df, current_price, expiry_date, activity_thres
     upper_bound = expiry_df[expiry_df['cumulative_activity'] <= 1 - (1 - activity_threshold) / 2].index[-1]
     
     return lower_bound, upper_bound
+
+def analyze_sentiment(pivot_df, current_price, expiry_date, price_trend):
+    """Analyze trader sentiment based on options activity"""
+    if pivot_df.empty:
+        return "Neutral", 0, "No data available"
+    
+    expiry_df = pivot_df.xs(expiry_date, level='expiry_date')
+    total_call = expiry_df['call_activity'].sum()
+    total_put = expiry_df['put_activity'].sum()
+    total_activity = total_call + total_put
+    
+    if total_activity == 0:
+        return "Neutral", 0, "No significant activity"
+    
+    # Sentiment score: Positive for bullish, negative for bearish
+    sentiment_score = (total_call - total_put) / total_activity
+    confidence = min(abs(sentiment_score) * 100, 90)  # Cap at 90% for realism
+    
+    # Determine sentiment
+    if sentiment_score > 0.2:  # Strong bullish if calls dominate by 20%
+        direction = "Bullish"
+        rationale = f"High call activity (${expiry_df['call_activity'].idxmax():.2f}) suggests bullish sentiment"
+    elif sentiment_score < -0.2:  # Strong bearish if puts dominate by 20%
+        direction = "Bearish"
+        rationale = f"High put activity (${expiry_df['put_activity'].idxmax():.2f}) suggests bearish sentiment"
+    else:
+        direction = "Neutral"
+        rationale = "Balanced call and put activity, no clear direction"
+    
+    # Adjust with price trend
+    if price_trend > 1:  # Strong upward trend (>1% in 1 hour)
+        direction = "Bullish" if direction != "Bearish" else "Neutral"
+        rationale += f"; confirmed by +{price_trend:.2f}% 1-hour trend"
+    elif price_trend < -1:  # Strong downward trend (<-1% in 1 hour)
+        direction = "Bearish" if direction != "Bullish" else "Neutral"
+        rationale += f"; confirmed by {price_trend:.2f}% 1-hour trend"
+    
+    return direction, confidence, rationale
+
+def recommend_trade(direction, current_price, lower_bound, upper_bound, confidence):
+    """Recommend trading action based on sentiment and range"""
+    if confidence < 30:  # Low confidence, avoid action
+        return "Hold", f"Low confidence ({confidence:.0f}%) in sentiment; monitor closely"
+    
+    if direction == "Bullish":
+        if current_price < upper_bound:
+            return "Buy", f"Bullish sentiment; buy at ${current_price:.2f} targeting ${upper_bound:.2f}"
+        return "Hold", "Bullish, but price near or above target range"
+    
+    elif direction == "Bearish":
+        if current_price > lower_bound:
+            return "Sell", f"Bearish sentiment; sell at ${current_price:.2f} targeting ${lower_bound:.2f}"
+        return "Hold", "Bearish, but price near or below target range"
+    
+    else:  # Neutral
+        return "Hold", "No clear bullish or bearish signal; hold position"
 
 def plot_activity(pivot_df, current_price, ticker_symbol, weekly_target):
     """Plot activity distribution"""
@@ -140,7 +200,7 @@ def validate_ticker(ticker_symbol):
         return False
 
 def run():
-    st.markdown("<h1 style='text-align: center;'>Weekly Options Range Analysis</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>Weekly Options Range & Trade Analysis</h1>", unsafe_allow_html=True)
     st.sidebar.markdown("### Configuration")
     ticker_input = st.sidebar.text_input("Ticker Symbol", value='SPY').upper()
     price_range_pct = st.sidebar.slider("Price Range (%)", 5, 20, 10)
@@ -159,7 +219,7 @@ def run():
         placeholder = st.empty()
         while True:
             with st.spinner(f'Analyzing {ticker_input} options data...'):
-                pivot_df, current_price = fetch_options_data(ticker_input, weekly_exps, price_range_pct)
+                pivot_df, current_price, price_trend = fetch_options_data(ticker_input, weekly_exps, price_range_pct)
                 if pivot_df.empty or current_price is None:
                     st.error("No data available")
                     break
@@ -168,10 +228,16 @@ def run():
                 weekly_target = weekly_exps[0]['date']
                 lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target)
                 
+                # Analyze sentiment and recommend trade
+                direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
+                trade_action, trade_rationale = recommend_trade(direction, current_price, lower_bound, upper_bound, confidence)
+                
                 # Display results
                 with placeholder.container():
                     st.subheader(f"{ticker_input} - Current Price: ${current_price:.2f}")
                     st.markdown(f"**Traders expect {ticker_input} to trade between ${lower_bound:.2f} and ${upper_bound:.2f} next week ({weekly_target})**")
+                    st.markdown(f"**Sentiment**: {direction} (Confidence: {confidence:.0f}%) - {rationale}")
+                    st.markdown(f"**Trade Recommendation**: {trade_action} - {trade_rationale}")
                     
                     fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target)
                     if fig:
