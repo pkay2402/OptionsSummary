@@ -14,7 +14,7 @@ logging.basicConfig(filename='options_range.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 @st.cache_data(ttl=300)
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+@retry(stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def get_weekly_expirations(ticker_symbol, num_weeks=4):
     """Fetch weekly expirations"""
     try:
@@ -40,14 +40,14 @@ def get_weekly_expirations(ticker_symbol, num_weeks=4):
         return []
 
 def fetch_option_chain(ticker, exp, price_min, price_max):
-    """Fetch option chain data"""
+    """Fetch option chain data including premiums"""
     try:
         opt = ticker.option_chain(exp['date'])
-        calls = opt.calls[(opt.calls['strike'] >= price_min) & (opt.calls['strike'] <= price_max)][['strike', 'openInterest', 'volume']].copy()
+        calls = opt.calls[(opt.calls['strike'] >= price_min) & (opt.calls['strike'] <= price_max)][['strike', 'openInterest', 'volume', 'lastPrice']].copy()
         calls['type'] = 'call'
         calls['expiry_date'] = exp['date']
         
-        puts = opt.puts[(opt.puts['strike'] >= price_min) & (opt.puts['strike'] <= price_max)][['strike', 'openInterest', 'volume']].copy()
+        puts = opt.puts[(opt.puts['strike'] >= price_min) & (opt.puts['strike'] <= price_max)][['strike', 'openInterest', 'volume', 'lastPrice']].copy()
         puts['type'] = 'put'
         puts['expiry_date'] = exp['date']
         
@@ -57,8 +57,8 @@ def fetch_option_chain(ticker, exp, price_min, price_max):
         return pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data(ttl=60)  # Refresh every minute during market hours
-def fetch_options_data(ticker_symbol, expirations, price_range_pct=5):
-    """Fetch volume and OI data"""
+def fetch_options_data(ticker_symbol, expirations):
+    """Fetch volume, OI, and calculate range using ATM premiums"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period='1d', interval='1m')
@@ -70,31 +70,46 @@ def fetch_options_data(ticker_symbol, expirations, price_range_pct=5):
         last_hour = hist.tail(60)
         price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
         
-        price_min = current_price * (1 - price_range_pct/100)
-        price_max = current_price * (1 + price_range_pct/100)
+        # Find ATM premiums for next week's expiry
+        weekly_target = expirations[0]['date']
+        calls, puts = fetch_option_chain(ticker, {'date': weekly_target}, 0, float('inf'))
         
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(lambda exp: fetch_option_chain(ticker, exp, price_min, price_max), expirations))
-        options_data = [item for sublist in results for item in sublist if not item.empty]
+        if calls.empty or puts.empty:
+            raise ValueError("No option data available for ATM calculation")
         
-        if not options_data:
-            raise ValueError("No option data within price range")
+        # Find ATM strikes (closest to current price)
+        atm_call_strike = calls.iloc[(calls['strike'] - current_price).abs().idxmin()]
+        atm_put_strike = puts.iloc[(puts['strike'] - current_price).abs().idxmin()]
         
-        df = pd.concat(options_data)
-        df['total_activity'] = df['volume'].fillna(0) + df['openInterest'].fillna(0)
-        pivot_df = df.pivot_table(index=['strike', 'expiry_date'], columns='type', 
-                                 values=['total_activity'], aggfunc='sum').fillna(0)
+        # Use lastPrice as premium (approximating mid-market price)
+        call_premium = atm_call_strike['lastPrice']
+        put_premium = atm_put_strike['lastPrice']
+        
+        # Calculate expected move as sum of ATM call and put premiums
+        expected_move = call_premium + put_premium
+        
+        # Set price range based on expected move
+        price_min = current_price - expected_move
+        price_max = current_price + expected_move
+        
+        # Fetch data within the premium-based range
+        calls, puts = fetch_option_chain(ticker, {'date': weekly_target}, price_min, price_max)
+        options_data = pd.concat([calls, puts])
+        options_data['total_activity'] = options_data['volume'].fillna(0) + options_data['openInterest'].fillna(0)
+        
+        pivot_df = options_data.pivot_table(index=['strike', 'expiry_date'], columns='type', 
+                                          values=['total_activity'], aggfunc='sum').fillna(0)
         pivot_df.columns = ['call_activity', 'put_activity']
         pivot_df['total_activity'] = pivot_df['call_activity'] + pivot_df['put_activity']
         
-        return pivot_df, current_price, price_trend
+        return pivot_df, current_price, price_trend, expected_move
     except Exception as e:
         logging.error(f"Error fetching options data: {str(e)}")
         st.error(f"Error fetching options data: {str(e)}")
-        return pd.DataFrame(), None, None
+        return pd.DataFrame(), None, None, None
 
-def calculate_trading_range(pivot_df, current_price, expiry_date, activity_threshold=0.8):
-    """Calculate expected trading range for a given expiry"""
+def calculate_trading_range(pivot_df, current_price, expiry_date, expected_move, activity_threshold=0.8):
+    """Calculate expected trading range for a given expiry using expected move"""
     if pivot_df.empty:
         return None, None
     
@@ -107,9 +122,9 @@ def calculate_trading_range(pivot_df, current_price, expiry_date, activity_thres
     expiry_df = expiry_df.sort_index()
     expiry_df['cumulative_activity'] = expiry_df['total_activity'].cumsum() / total_activity
     
-    # Find range containing threshold% of activity
-    lower_bound = expiry_df[expiry_df['cumulative_activity'] >= (1 - activity_threshold) / 2].index[0]
-    upper_bound = expiry_df[expiry_df['cumulative_activity'] <= 1 - (1 - activity_threshold) / 2].index[-1]
+    # Find range containing threshold% of activity, constrained by expected move
+    lower_bound = max(expiry_df[expiry_df['cumulative_activity'] >= (1 - activity_threshold) / 2].index[0], current_price - expected_move)
+    upper_bound = min(expiry_df[expiry_df['cumulative_activity'] <= 1 - (1 - activity_threshold) / 2].index[-1], current_price + expected_move)
     
     return lower_bound, upper_bound
 
@@ -169,8 +184,8 @@ def recommend_trade(direction, current_price, lower_bound, upper_bound, confiden
     else:  # Neutral
         return "Hold", "No clear bullish or bearish signal; hold position"
 
-def plot_activity(pivot_df, current_price, ticker_symbol, weekly_target):
-    """Plot activity distribution"""
+def plot_activity(pivot_df, current_price, ticker_symbol, weekly_target, expected_move):
+    """Plot activity distribution with expected move range"""
     if pivot_df.empty:
         return None
     
@@ -179,6 +194,8 @@ def plot_activity(pivot_df, current_price, ticker_symbol, weekly_target):
     fig.add_trace(go.Bar(x=weekly_df.index, y=weekly_df['call_activity'], name='Call Activity', marker_color='green', opacity=0.7))
     fig.add_trace(go.Bar(x=weekly_df.index, y=weekly_df['put_activity'], name='Put Activity', marker_color='red', opacity=0.7))
     fig.add_vline(x=current_price, line_dash="dash", line_color="blue", annotation_text=f"Current: ${current_price:.2f}")
+    fig.add_vline(x=current_price - expected_move, line_dash="dash", line_color="purple", annotation_text=f"Expected Low: ${current_price - expected_move:.2f}")
+    fig.add_vline(x=current_price + expected_move, line_dash="dash", line_color="purple", annotation_text=f"Expected High: ${current_price + expected_move:.2f}")
     fig.update_layout(
         title=f"Options Activity for {ticker_symbol} (Next Week: {weekly_target})",
         xaxis_title="Strike Price",
@@ -203,7 +220,6 @@ def run():
     st.markdown("<h1 style='text-align: center;'>Weekly Options Range & Trade Analysis</h1>", unsafe_allow_html=True)
     st.sidebar.markdown("### Configuration")
     ticker_input = st.sidebar.text_input("Ticker Symbol", value='SPY').upper()
-    price_range_pct = st.sidebar.slider("Price Range (%)", 5, 20, 10)
     num_weeks = st.sidebar.slider("Weeks to Analyze", 1, 4, 4)
     refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", 30, 300, 60)
     
@@ -219,14 +235,14 @@ def run():
         placeholder = st.empty()
         while True:
             with st.spinner(f'Analyzing {ticker_input} options data...'):
-                pivot_df, current_price, price_trend = fetch_options_data(ticker_input, weekly_exps, price_range_pct)
+                pivot_df, current_price, price_trend, expected_move = fetch_options_data(ticker_input, weekly_exps)
                 if pivot_df.empty or current_price is None:
                     st.error("No data available")
                     break
                 
                 # Weekly range for next expiry
                 weekly_target = weekly_exps[0]['date']
-                lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target)
+                lower_bound, upper_bound = calculate_trading_range(pivot_df, current_price, weekly_target, expected_move)
                 
                 # Analyze sentiment and recommend trade
                 direction, confidence, rationale = analyze_sentiment(pivot_df, current_price, weekly_target, price_trend)
@@ -235,11 +251,12 @@ def run():
                 # Display results
                 with placeholder.container():
                     st.subheader(f"{ticker_input} - Current Price: ${current_price:.2f}")
+                    st.markdown(f"**Expected Move (ATM Premiums)**: ±${expected_move:.2f} (Total ${current_price - expected_move:.2f}–${current_price + expected_move:.2f})")
                     st.markdown(f"**Traders expect {ticker_input} to trade between ${lower_bound:.2f} and ${upper_bound:.2f} next week ({weekly_target})**")
                     st.markdown(f"**Sentiment**: {direction} (Confidence: {confidence:.0f}%) - {rationale}")
                     st.markdown(f"**Trade Recommendation**: {trade_action} - {trade_rationale}")
                     
-                    fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target)
+                    fig = plot_activity(pivot_df, current_price, ticker_input, weekly_target, expected_move)
                     if fig:
                         st.plotly_chart(fig, use_container_width=True)
             
