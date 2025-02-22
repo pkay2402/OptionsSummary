@@ -57,7 +57,7 @@ def fetch_option_chain(ticker, exp, price_min, price_max):
         return pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data(ttl=60)  # Refresh every minute during market hours
-def fetch_options_data(ticker_symbol, expirations, price_range_pct=5):
+def fetch_options_data(ticker_symbol, expirations, price_range_pct=10):
     """Fetch volume and OI data"""
     try:
         ticker = yf.Ticker(ticker_symbol)
