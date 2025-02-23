@@ -60,8 +60,8 @@ def load_csv(uploaded_file):
                 if col == 'Ticker':
                     df[col] = df[col].str.upper()
         
-        # Filter for OUT_THE_MONEY flows only
-        df = df[df['Money Type'] == 'OUT_THE_MONEY']
+        # Filter for OUT_THE_MONEY flows only and Is Opening Position == Yes
+        df = df[(df['Money Type'] == 'OUT_THE_MONEY') & (df['Is Opening Position'] == 'Yes')]
         
         return df
     except Exception as e:
