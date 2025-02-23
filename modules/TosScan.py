@@ -39,8 +39,9 @@ RETRY_DELAY = 2  # seconds
 
 # Define keywords for different scan types
 Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short"]
-OPTION_KEYWORDS = ["ETF_options", "UOP_Call"]
+DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", 
+"bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short","StockReversalLong","StockReversalShort"]
+OPTION_KEYWORDS = ["ETF_options", "UOP_Call","call_swing","put_swing"]
 
 # Keyword definitions with added risk levels and descriptions
 KEYWORD_DEFINITIONS = {
@@ -134,6 +135,18 @@ KEYWORD_DEFINITIONS = {
         "timeframe": "2 weeks",
         "suggested_stop": "Above high of previous day"
     },
+    "StockReversalLong": {
+        "description": "On Daily TF stocks now showing signs of bull reversal",
+        "risk_level": "medium",
+        "timeframe": "2 weeks-1 month",
+        "suggested_stop": "Below low of previous day"
+    },
+    "StockReversalShort": {
+        "description": "On Daily TF stocks now showing signs of bear reversal",
+        "risk_level": "medium",
+        "timeframe": "2 weeks-1 month",
+        "suggested_stop": "Above high of previous day"
+    },
     "ETF_options": {
         "description": "ETF options showing potential momentum setups",
         "risk_level": "High",
@@ -142,6 +155,18 @@ KEYWORD_DEFINITIONS = {
     },
     "UOP_Call": {
         "description": "Unusual options activity scanner for calls",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "call_swing": {
+        "description": "stock options showing potential momentum setups",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "put_swing": {
+        "description": "stock options showing potential bearish setups",
         "risk_level": "High",
         "timeframe": "As per expiry date",
         "suggested_stop": "Based on risk apetite"
