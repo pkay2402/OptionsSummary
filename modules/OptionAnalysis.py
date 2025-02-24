@@ -270,7 +270,7 @@ def main():
                 
                 top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=100, value=50)
                 premium_price = st.number_input("Minimum Premium Price", min_value=0, value=100000)
-                side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'A'])
+                side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'BB'])
                 with st.expander("Select Tickers", expanded=False):
                     tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
                 sort_by = st.selectbox("Sort By", options=["Premium Price", "Ticker"])
