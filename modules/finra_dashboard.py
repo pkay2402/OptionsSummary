@@ -35,6 +35,36 @@ def calculate_metrics(row, total_volume):
         'short_volume_ratio': round(short_volume_ratio, 4)
     }
 
+def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
+    results = []
+    significant_days = 0
+    
+    for i in range(lookback_days * 2):  # Double to account for non-trading days
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        
+        if data:
+            df = process_finra_short_sale_data(data)
+            symbol_data = df[df['Symbol'] == symbol]
+            
+            if not symbol_data.empty:
+                row = symbol_data.iloc[0]
+                total_volume = row.get('TotalVolume', 0)
+                metrics = calculate_metrics(row, total_volume)
+                
+                if metrics['buy_to_sell_ratio'] > threshold:
+                    significant_days += 1
+                
+                metrics['date'] = date
+                results.append(metrics)
+    
+    df_results = pd.DataFrame(results)
+    if not df_results.empty:
+        df_results['date'] = pd.to_datetime(df_results['date'], format='%Y%m%d')
+        df_results = df_results.sort_values('date', ascending=False)
+    
+    return df_results, significant_days
+
 def validate_pattern(symbol, dates, pattern_type="accumulation"):
     try:
         stock = yf.Ticker(symbol)
