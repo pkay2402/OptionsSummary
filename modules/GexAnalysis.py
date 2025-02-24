@@ -84,7 +84,7 @@ def get_all_expirations(ticker_symbol, max_days=365):
 
 def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold, 
                   strike_spacing_override=None, risk_free_rate=0.05):
-    """Enhanced GEX data fetcher with better asset-type handling"""
+    """Enhanced GEX data fetcher with dynamic threshold adjustment"""
     try:
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period='5d')
@@ -130,10 +130,22 @@ def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold,
             (puts['strike'] <= current_price + price_range)
         ]
         
+        # Debug: Check filtered data
+        #st.write(f"Debug - Calls after price filter: {len(calls)} rows")
+        #st.write(f"Debug - Puts after price filter: {len(puts)} rows")
+        
         calls = calls[calls['openInterest'] > 0].dropna()
         puts = puts[puts['openInterest'] > 0].dropna()
         
+        # Debug: Check after OI and NaN filter
+        #st.write(f"Debug - Calls after OI filter: {len(calls)} rows")
+        #st.write(f"Debug - Puts after OI filter: {len(puts)} rows")
+        
         options_data = pd.concat([calls, puts])
+        
+        if options_data.empty:
+            st.warning("No options with open interest found in the selected price range.")
+            return pd.DataFrame(), current_price
         
         gex_data = []
         for _, row in options_data.iterrows():
@@ -154,9 +166,31 @@ def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold,
             })
         
         df = pd.DataFrame(gex_data)
-        df['abs_gex'] = abs(df['gex'])
+        if df.empty:
+            st.warning("No GEX data calculated.")
+            return pd.DataFrame(), current_price
         
-        filtered_df = df[df['abs_gex'] > threshold].drop('abs_gex', axis=1)
+        # Dynamic threshold adjustment
+        if not df.empty:
+            # Calculate the 25th percentile of absolute GEX values as a dynamic threshold
+            dynamic_threshold = np.percentile(df['gex'].abs(), 25)  # Use 25th percentile as a starting point
+            if dynamic_threshold == 0:  # Fallback if all GEX values are 0 or negative
+                dynamic_threshold = np.mean(df['gex'].abs()) * 0.1  # Use 10% of mean as fallback
+            
+            # Use the smaller of the user-specified threshold and dynamic threshold
+            final_threshold = min(threshold, max(dynamic_threshold, 0.01))  # Ensure minimum 0.01
+            
+            # Notify user of dynamic adjustment
+            if final_threshold < threshold:
+                st.info(f"Adjusted GEX threshold dynamically from {threshold:.2f} to {final_threshold:.2f} to capture data.")
+            
+            df['abs_gex'] = abs(df['gex'])
+            filtered_df = df[df['abs_gex'] > final_threshold].drop('abs_gex', axis=1)
+        else:
+            filtered_df = df  # If df is empty, return empty DataFrame
+        
+        # Debug: Check final filtered data
+        #st.write(f"Debug - Final GEX data after threshold: {len(filtered_df)} rows")
         
         return filtered_df, current_price
         
@@ -167,7 +201,7 @@ def fetch_gex_data(ticker_symbol, expiration, price_range_pct, threshold,
 def plot_gex(gex_data, current_price, ticker_symbol, bar_width=2.0, show_labels=True):
     if gex_data.empty:
         st.warning("No significant GEX values found for the selected parameters")
-        return
+        return None
     
     fig, ax = plt.subplots(figsize=(15, 8))
     
@@ -335,7 +369,9 @@ def run():
                                 risk_free_rate
                             )
 
-                        if not gex_data.empty and current_price is not None:
+                        if gex_data.empty or current_price is None:
+                            st.warning("No significant GEX data found for the selected parameters.")
+                        else:
                             # Results section
                             st.markdown("---")
                             st.markdown("### 📈 Analysis Results")
@@ -348,62 +384,66 @@ def run():
                             # Show GEX plot
                             fig = plot_gex(gex_data, current_price, st.session_state['ticker'], 
                                          bar_width, show_labels)
-                            st.pyplot(fig)
+                            if fig:
+                                st.pyplot(fig)
 
-                        # Add Summary Section
-                        st.subheader("GEX Analysis Summary")
+                            # Add Summary Section
+                            st.subheader("GEX Analysis Summary")
 
-                        # Calculate key metrics
-                        total_gex = gex_data['gex'].sum()
-                        max_positive_gex = gex_data['gex'].max()
-                        max_negative_gex = gex_data['gex'].min()
-                        strongest_gex_strike = gex_data.loc[gex_data['gex'].abs().idxmax(), 'strike']
+                            if not gex_data.empty:
+                                # Calculate key metrics
+                                total_gex = gex_data['gex'].sum()
+                                max_positive_gex = gex_data['gex'].max()
+                                max_negative_gex = gex_data['gex'].min()
+                                strongest_gex_strike = gex_data.loc[gex_data['gex'].abs().idxmax(), 'strike']
 
-                        # Determine market positioning
-                        market_bias = "Positive" if total_gex > 0 else "Negative"
-                        gex_strength = "Strong" if abs(total_gex) > 20 else "Moderate" if abs(total_gex) > 10 else "Weak"
+                                # Determine market positioning
+                                market_bias = "Positive" if total_gex > 0 else "Negative"
+                                gex_strength = "Strong" if abs(total_gex) > 20 else "Moderate" if abs(total_gex) > 10 else "Weak"
 
-                        # Display summary metrics
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total GEX", f"{total_gex:.2f}")
-                        with col2:
-                            st.metric("Market Bias", market_bias)
-                        with col3:
-                            st.metric("GEX Strength", gex_strength)
+                                # Display summary metrics
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Total GEX", f"{total_gex:.2f}")
+                                with col2:
+                                    st.metric("Market Bias", market_bias)
+                                with col3:
+                                    st.metric("GEX Strength", gex_strength)
 
-                        st.markdown("### Key Takeaways")
-                        st.markdown(f"""
-                        **Market Structure:**
-                        - Overall GEX Bias: {market_bias} with {gex_strength.lower()} strength
-                        - Strongest GEX Level: ${strongest_gex_strike:.2f}
-                        - Largest Positive GEX: {max_positive_gex:.2f}
-                        - Largest Negative GEX: {max_negative_gex:.2f}
+                                st.markdown("### Key Takeaways")
+                                st.markdown(f"""
+                                **Market Structure:**
+                                - Overall GEX Bias: {market_bias} with {gex_strength.lower()} strength
+                                - Strongest GEX Level: ${strongest_gex_strike:.2f}
+                                - Largest Positive GEX: {max_positive_gex:.2f}
+                                - Largest Negative GEX: {max_negative_gex:.2f}
 
-                        **What This Means:**
-                        1. **Price Magnetism:**
-                           - Strong GEX levels tend to act as price magnets
-                           - ${strongest_gex_strike:.2f} is the strongest magnetic level
+                                **What This Means:**
+                                1. **Price Magnetism:**
+                                   - Strong GEX levels tend to act as price magnets
+                                   - ${strongest_gex_strike:.2f} is the strongest magnetic level
 
-                        2. **Market Movement:**
-                           - Positive GEX suggests resistance to downward movement
-                           - Negative GEX suggests resistance to upward movement
-                           - Current bias suggests {'resistance to downward moves' if total_gex > 0 else 'resistance to upward moves'}
+                                2. **Market Movement:**
+                                   - Positive GEX suggests resistance to downward movement
+                                   - Negative GEX suggests resistance to upward movement
+                                   - Current bias suggests {'resistance to downward moves' if total_gex > 0 else 'resistance to upward moves'}
 
-                        3. **Volatility Implications:**
-                           - {'High GEX levels typically suppress volatility' if abs(total_gex) > 20 else 'Moderate GEX levels suggest normal volatility' if abs(total_gex) > 10 else 'Low GEX levels may allow for larger price movements'}
-                           - Expect {'more stable price action' if abs(total_gex) > 20 else 'normal price action' if abs(total_gex) > 10 else 'potentially volatile price action'}
+                                3. **Volatility Implications:**
+                                   - {'High GEX levels typically suppress volatility' if abs(total_gex) > 20 else 'Moderate GEX levels suggest normal volatility' if abs(total_gex) > 10 else 'Low GEX levels may allow for larger price movements'}
+                                   - Expect {'more stable price action' if abs(total_gex) > 20 else 'normal price action' if abs(total_gex) > 10 else 'potentially volatile price action'}
 
-                        **Trading Considerations:**
-                        - Look for potential price resistance at ${strongest_gex_strike:.2f}
-                        - {'Consider mean reversion strategies near strong GEX levels' if abs(total_gex) > 20 else 'Monitor price action around GEX levels for potential support/resistance'}
-                        - Volatility trades should account for {'suppression near GEX levels' if abs(total_gex) > 20 else 'normal conditions' if abs(total_gex) > 10 else 'potential expansion'}
+                                **Trading Considerations:**
+                                - Look for potential price resistance at ${strongest_gex_strike:.2f}
+                                - {'Consider mean reversion strategies near strong GEX levels' if abs(total_gex) > 20 else 'Monitor price action around GEX levels for potential support/resistance'}
+                                - Volatility trades should account for {'suppression near GEX levels' if abs(total_gex) > 20 else 'normal conditions' if abs(total_gex) > 10 else 'potential expansion'}
 
-                        *Note: GEX analysis should be used in conjunction with other technical and fundamental indicators.*
-                        """)
+                                *Note: GEX analysis should be used in conjunction with other technical and fundamental indicators.*
+                                """)
 
-                        with st.expander("View Raw GEX Data"):
-                            st.dataframe(gex_data)
+                                with st.expander("View Raw GEX Data"):
+                                    st.dataframe(gex_data)
+                            else:
+                                st.warning("No GEX data available for summary.")
 
                     except Exception as e:
                         st.error(f"Error generating GEX analysis: {str(e)}")
