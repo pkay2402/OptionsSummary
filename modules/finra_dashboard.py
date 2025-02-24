@@ -91,7 +91,7 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
         results = sorted(results, key=lambda x: (x['Days Showing Pattern'], x['Avg Buy/Sell Ratio'], x['Total Volume']), reverse=True)
     else:
         results = sorted(results, key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), reverse=True)
-    return pd.DataFrame(results[:20])
+    return pd.DataFrame(results[:40])
 
 # New function for sector rotation
 def get_sector_rotation(lookback_days=10, min_volume=50000):
