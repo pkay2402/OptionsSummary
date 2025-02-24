@@ -194,7 +194,7 @@ def run():
                 st.dataframe(styled_df)
     
     with tab2:
-        st.subheader("Top 20 Stocks Showing Accumulation")
+        st.subheader("Top 40 Stocks Showing Accumulation")
         col1, col2 = st.columns(2)
         with col1:
             acc_min_volume = st.number_input("Minimum Daily Volume (Accumulation)", value=1000000, step=500000, format="%d", key="acc_vol")
@@ -212,7 +212,7 @@ def run():
                 st.write("No accumulation patterns detected with current filters.")
     
     with tab3:
-        st.subheader("Top 20 Stocks Showing Distribution")
+        st.subheader("Top 40 Stocks Showing Distribution")
         col1, col2 = st.columns(2)
         with col1:
             dist_min_volume = st.number_input("Minimum Daily Volume (Distribution)", value=1000000, step=500000, format="%d", key="dist_vol")
