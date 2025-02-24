@@ -1,6 +1,6 @@
-import streamlit as st
-# This MUST be the first Streamlit command
+import streamlit as st  # This MUST be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Trading Tools Hub")
+
 from modules.flowSummary import run as flowSummary_run
 from modules.MomentumSignals import run as MomentumSignals_run
 from modules.MomentumETF import run as MomentumETF_run
@@ -12,9 +12,10 @@ from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator
 from modules.GannSwing import run as GannSwing_run
+from modules.GannCycleAnalysis import run as GannCycle_run  # New import
 from modules.CFTC import cftc_analyzer_module
 from modules.BlockTrade import Blocktrade_run
-from modules.WhalePositioning import run as WhalePositioning_run  # New import
+from modules.WhalePositioning import run as WhalePositioning_run
 
 def add_buymeacoffee():
     try:
@@ -46,7 +47,7 @@ def main():
     
     add_buymeacoffee()
     
-    app_selection = st.sidebar.selectbox("Choose the app:", 
+    app_selection = st.sidebar.selectbox("Choose the app:",
                                       ["FINRA Dashboard",
                                        "Block Trades",
                                        "Stock Trend Oscillator",
@@ -57,11 +58,12 @@ def main():
                                        "Stock Analysis",
                                        "TOS Scanner",
                                        "Gann Swing Analysis",
+                                       "Gann Cycle Analysis",  # New option
                                        "Seasonality",
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer",
-                                       "Whale Positioning"])  # New option
-    
+                                       "Whale Positioning"])
+
     if app_selection == "Stock Trend Oscillator":
         show_trend_oscillator()
     elif app_selection == "Flow Summary":
@@ -82,6 +84,8 @@ def main():
         StockAnalysis_run()
     elif app_selection == "Gann Swing Analysis":
         GannSwing_run()
+    elif app_selection == "Gann Cycle Analysis":  # New condition
+        GannCycle_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
     elif app_selection == "S&P 500 Performance":
