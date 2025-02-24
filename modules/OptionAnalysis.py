@@ -185,7 +185,7 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
         ]
         
         if sort_by == "Premium Price":
-            aggressive_df = aggressive_df.sort_values('Premium Price', ascending=False)
+            aggressive_df = aggressive_df.sort_values(by=["Premium Price", "Ticker"], ascending=[False, True])
         else:
             aggressive_df = aggressive_df.sort_values(['Ticker', 'Premium Price'], ascending=[True, False])
     else:
