@@ -6,17 +6,32 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+# Sample list of top 100 stocks (S&P 100 subset for demonstration)
+with st.expander("Edit Ticker List", expanded=False):
+    default_tickers = [
+        'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'NVDA', 'JPM', 'WMT', 'V',
+        'PG', 'JNJ', 'UNH', 'HD', 'BAC', 'MA', 'XOM', 'AVGO', 'CVX', 'ABBV',
+        'PFE', 'CSCO', 'LLY', 'COST', 'MRK', 'ADBE', 'CRM', 'KO', 'PEP', 'TMO',
+        'ORCL', 'NKE', 'ABT', 'MCD', 'CMCSA', 'ACN', 'DHR', 'WFC', 'VZ', 'TXN',
+        'PM', 'NEE', 'NFLX', 'AMD', 'BMY', 'RTX', 'UPS', 'INTC', 'QCOM', 'T',
+        'HON', 'IBM', 'GE', 'CAT', 'LIN', 'AMT', 'BA', 'SPGI', 'INTU', 'LOW',
+        'UNP', 'SBUX', 'CVS', 'GILD', 'GS', 'C', 'MDLZ', 'AMGN', 'BLK', 'MMM',
+        'TJX', 'DE', 'MO', 'AXP', 'MS', 'PLD', 'LMT', 'MDT', 'SCHW', 'BKNG',
+        'PNC', 'DUK', 'ADP', 'TGT', 'SYK', 'ISRG', 'COP', 'SO', 'CI', 'BDX',
+        'CB', 'CSX', 'CL', 'CME', 'EOG', 'NOC', 'BSX', 'USB', 'ICE', 'MMC','FCX','ZS'
+    ]
+    tickers_input = st.text_area("Enter tickers separated by commas", value=",".join(default_tickers))
+    SP100_TICKERS = [ticker.strip() for ticker in tickers_input.split(",") if ticker.strip()]
+
 def fetch_stock_data(ticker, start_date, end_date):
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(start=start_date, end=end_date)
-        info = stock.info
         if hist.empty:
             raise ValueError("No data available for this ticker")
-        return hist, info
+        return hist
     except Exception as e:
-        st.error(f"Error fetching data for {ticker}: {str(e)}")
-        return None, None
+        return None
 
 def detect_volume_spikes(df, window=20, threshold=2):
     df['Volume_MA'] = df['Volume'].rolling(window=window).mean()
@@ -50,62 +65,73 @@ def analyze_block_trade_reaction(df, days_after=5):
     return block_trades
 
 def Blocktrade_run():
-    st.title("Stock Activity Dashboard")
+    st.title("Stocks Block Trade Analyzer")
 
-    ticker = st.text_input("Enter Stock Ticker Symbol (e.g., AAPL, MSFT):", "AAPL").upper()
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=180)
+    start_date = end_date - timedelta(days=30)
 
-    if st.button("Analyze"):  # Only run this block when the button is clicked
-        with st.spinner("Fetching and analyzing data..."):
-            hist, info = fetch_stock_data(ticker, start_date, end_date)
-            if hist is None or info is None:  # Explicitly check for None
-                return  # Exit early if data fetch failed
+    if st.button("Analyze Stocks"):
+        with st.spinner("Fetching and analyzing data for top 100 stocks..."):
+            all_block_trades = []
+            progress_bar = st.progress(0)
+            
+            for i, ticker in enumerate(SP100_TICKERS):
+                hist = fetch_stock_data(ticker, start_date, end_date)
+                if hist is not None:
+                    hist = detect_volume_spikes(hist)
+                    block_trades = analyze_block_trade_reaction(hist)
+                    if not block_trades.empty:
+                        # Get current price
+                        stock = yf.Ticker(ticker)
+                        current_price = stock.info['regularMarketPrice']
+                        block_trades['Ticker'] = ticker
+                        block_trades['Current_Price'] = current_price
+                        all_block_trades.append(block_trades)
+                progress_bar.progress((i + 1) / len(SP100_TICKERS))
 
-            hist = detect_volume_spikes(hist)
-            block_trades = analyze_block_trade_reaction(hist)
+            if all_block_trades:
+                combined_block_trades = pd.concat(all_block_trades)
+                
+                # Sort by date in descending order
+                combined_block_trades = combined_block_trades.sort_values(by='Date', ascending=False)
+                
+                # Display summary table with Current_Price added
+                st.subheader("Detected Block Trades in Top 100 Stocks")
+                st.dataframe(combined_block_trades[[
+                    'Ticker', 'Volume', 'Price_Change_1D', 
+                    'Price_Change_5D', 'Trade_Type', 'Current_Price'
+                ]].reset_index())
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=hist.index,
-                y=hist['Close'],
-                name='Price',
-                line=dict(color='yellow'),
-                yaxis='y1'
-            ))
-            fig.add_trace(go.Bar(
-                x=hist.index,
-                y=hist['Volume'],
-                name='Volume',
-                opacity=0.5,
-                marker_color='grey',
-                yaxis='y2'
-            ))
-            fig.add_trace(go.Scatter(
-                x=block_trades.index,
-                y=block_trades['Volume'],
-                mode='markers',
-                name='Block Trades',
-                marker=dict(
-                    size=12,
-                    color=np.where(block_trades['Trade_Type'] == 'Buy', 'green', 'red'),
-                    line=dict(width=2, color='white')
-                ),
-                yaxis='y2',
-                text=[f"1D: {p1:.2f}%, 5D: {p5:.2f}%" for p1, p5 in zip(block_trades['Price_Change_1D'], block_trades['Price_Change_5D'])],
-                hoverinfo='text'
-            ))
-            fig.update_layout(
-                title=f"{ticker} Price, Volume, and Block Trade Reactions",
-                yaxis=dict(title='Price', side='left', color='yellow'),
-                yaxis2=dict(title='Volume', overlaying='y', side='right', color='grey'),
-                legend=dict(x=0.01, y=0.99),
-                template='plotly_dark',
-                hovermode='x unified',
-                height=600
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            st.subheader("Stock Information")
-            st.write(f"Company Name: {info.get('longName', 'N/A')}")
-            st.write(f"Sector: {info.get('sector', 'N/A')}")
-            st.write(f"Market Cap: ${info.get('marketCap', 'N/A'):,.0f}")
+                # Plot block trades summary
+                fig = go.Figure()
+                for ticker in combined_block_trades['Ticker'].unique():
+                    ticker_trades = combined_block_trades[combined_block_trades['Ticker'] == ticker]
+                    fig.add_trace(go.Scatter(
+                        x=ticker_trades.index,
+                        y=ticker_trades['Volume'],
+                        mode='markers',
+                        name=ticker,
+                        marker=dict(
+                            size=12,
+                            color=np.where(ticker_trades['Trade_Type'] == 'Buy', 'green', 'red'),
+                            line=dict(width=2, color='white')
+                        ),
+                        text=[f"{ticker} - 1D: {p1:.2f}%, 5D: {p5:.2f}%" 
+                              for p1, p5 in zip(ticker_trades['Price_Change_1D'], ticker_trades['Price_Change_5D'])],
+                        hoverinfo='text'
+                    ))
+
+                fig.update_layout(
+                    title="Block Trades Across Top 100 Stocks",
+                    yaxis=dict(title='Volume'),
+                    legend=dict(x=0.01, y=0.99),
+                    template='plotly_dark',
+                    hovermode='x unified',
+                    height=600
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.write("No significant block trades detected in the top 100 stocks.")
+
+if __name__ == "__main__":
+    Blocktrade_run()
