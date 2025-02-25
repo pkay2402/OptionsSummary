@@ -203,7 +203,8 @@ def get_Mega12_rotation(lookback_days=10, min_volume=100000):
         'JPM': 'JPM',
         'LLY': 'LLY',
         'UNH': 'UNH',
-        'XOM': 'XOM'
+        'XOM': 'XOM',
+        'META': 'META'
         # Add more symbols or fetch from yfinance
     }
     
