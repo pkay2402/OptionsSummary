@@ -188,10 +188,75 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
     
     return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
 
+    # New function for sector rotation
+def get_Mega12_rotation(lookback_days=10, min_volume=100000):
+    # Simplified sector mapping (expand with full S&P 500 sector data)
+    sector_map = {
+        'AAPL': 'AAPL',
+        'AMZN': 'AMZN',
+        'TSLA': 'TSLA',
+        'GOOG': 'GOOG',
+        'MSFT': 'MSFT',
+        'NFLX': 'NFLX',
+        'NVDA': 'NVDA',
+        'AVGO': 'AVGO',
+        'JPM': 'JPM',
+        'LLY': 'LLY',
+        'UNH': 'UNH',
+        'XOM': 'XOM'
+        # Add more symbols or fetch from yfinance
+    }
+    
+    sector_data = {}
+    for i in range(lookback_days):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        if data:
+            df = process_finra_short_sale_data(data)
+            df = df[df['TotalVolume'] > min_volume]
+            for _, row in df.iterrows():
+                symbol = row['Symbol']
+                if symbol in sector_map:
+                    sector = sector_map[symbol]
+                    total_volume = row.get('TotalVolume', 0)
+                    metrics = calculate_metrics(row, total_volume)
+                    
+                    if sector not in sector_data:
+                        sector_data[sector] = {'dates': [], 'ratios': [], 'volumes': [], 'symbols': set()}
+                    sector_data[sector]['dates'].append(date)
+                    sector_data[sector]['ratios'].append(metrics['buy_to_sell_ratio'])
+                    sector_data[sector]['volumes'].append(total_volume)
+                    sector_data[sector]['symbols'].add(symbol)
+    
+    results = []
+    for sector, data in sector_data.items():
+        if len(data['dates']) >= 3:  # Require data for at least 3 days
+            avg_ratio = sum(data['ratios']) / len(data['ratios'])
+            avg_volume = sum(data['volumes']) / len(data['volumes'])
+            ratio_trend = (data['ratios'][0] - data['ratios'][-1]) / len(data['ratios'])  # Daily change in ratio
+            volume_trend = 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing'
+            results.append({
+                'Sector': sector,
+                'Avg Buy/Sell Ratio': round(avg_ratio, 2),
+                'Ratio Trend': 'Up' if ratio_trend > 0 else 'Down',
+                'Avg Daily Volume': int(avg_volume),
+                'Volume Trend': volume_trend,
+                'Symbols Count': len(data['symbols']),
+                'Latest Ratio': data['ratios'][0]
+            })
+    
+    # Sort by ratio trend and volume for buying/selling signals
+    buying_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Up'], 
+                            key=lambda x: (x['Avg Buy/Sell Ratio'], x['Avg Daily Volume']), reverse=True)
+    selling_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Down'], 
+                             key=lambda x: (x['Avg Buy/Sell Ratio'], x['Avg Daily Volume']))
+    
+    return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
+
 def run():
     st.title("FINRA Short Sale Analysis")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation"])
+    tab1, tab2, tab3, tab4,tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Stock Rotation"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -263,12 +328,12 @@ def run():
         st.subheader("Sector Rotation Analysis")
         col1, col2 = st.columns(2)
         with col1:
-            rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
+            rot_min_volume_sector = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol_sector")
         with col2:
-            rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
-        
+            rot_lookback_days_sector = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days_sector")
+
         if st.button("Analyze Sector Rotation"):
-            buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
+            buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days_sector, min_volume=rot_min_volume_sector)
             st.write("### Sectors Being Bought (Money In)")
             def highlight_buying(row):
                 return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
@@ -285,6 +350,33 @@ def run():
                 st.dataframe(styled_selling)
             else:
                 st.write("No sectors with clear selling trends detected.")
+
+    with tab5:
+        st.subheader("Stock Rotation Analysis")
+        col1, col2 = st.columns(2)
+        with col1:
+            rot_min_volume_stock = st.number_input("Minimum Daily Volume (Stock Rotation)", value=50000, step=10000, format="%d", key="rot_vol_stock")
+        with col2:
+            rot_lookback_days_stock = st.slider("Lookback Days (Stock Rotation)", 1, 30, 10, key="rot_days_stock")
+
+        if st.button("Analyze Stock Rotation"):
+            buying_df, selling_df = get_Mega12_rotation(lookback_days=rot_lookback_days_stock, min_volume=rot_min_volume_stock)
+            st.write("### Stocks Being Bought (Money In)")
+            def highlight_buying(row):
+                return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
+            if not buying_df.empty:
+                styled_buying = buying_df.style.apply(highlight_buying, axis=1)
+                st.dataframe(styled_buying)
+            else:
+                st.write("No stocks with clear buying trends detected.")
+            st.write("### Stocks Being Sold (Money Out)")
+            def highlight_selling(row):
+                return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
+            if not selling_df.empty:
+                styled_selling = selling_df.style.apply(highlight_selling, axis=1)
+                st.dataframe(styled_selling)
+            else:
+                st.write("No stocks with clear selling trends detected.")
 
 if __name__ == "__main__":
     run()
