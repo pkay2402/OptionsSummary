@@ -859,7 +859,7 @@ def run():
         st.markdown("📈")
     with col_title:
         st.markdown('<h1 class="main-title">Stock Insights Hub</h1>', unsafe_allow_html=True)
-        st.markdown('<p>Professional market analysis tools for informed trading decisions</p>', unsafe_allow_html=True)
+        st.markdown('<p>Stock analysis tools for informed trading decisions</p>', unsafe_allow_html=True)
 
     # Main layout with input section
     input_container = st.container()
