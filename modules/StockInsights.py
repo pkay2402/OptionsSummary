@@ -639,147 +639,148 @@ def get_whale_positions(ticker):
 def get_finra_data(ticker):
     return {"short_volume": "TBD"}
 
-# Main App
-st.set_page_config(page_title="Stock Insights Hub", layout="wide", initial_sidebar_state="expanded")
+# Main App 
+def run():
+    st.set_page_config(page_title="Stock Insights Hub", layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
-    <style>
-    .main-title { font-size: 2.5em; color: #1f77b4; margin-bottom: 0.5em; }
-    .subheader { color: #ff7f0e; font-size: 1.5em; margin-top: 1em; }
-    .metric-box { background-color: #f0f2f6; padding: 1em; border-radius: 10px; margin-bottom: 0.5em; }
-    .sidebar .sidebar-content { background-color: #f8f9fa; padding: 1em; border-radius: 10px; }
-    .stButton>button { background-color: #1f77b4; color: white; border-radius: 5px; }
-    .stButton>button:hover { background-color: #ff7f0e; }
-    </style>
-""", unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+        .main-title { font-size: 2.5em; color: #1f77b4; margin-bottom: 0.5em; }
+        .subheader { color: #ff7f0e; font-size: 1.5em; margin-top: 1em; }
+        .metric-box { background-color: #f0f2f6; padding: 1em; border-radius: 10px; margin-bottom: 0.5em; }
+        .sidebar .sidebar-content { background-color: #f8f9fa; padding: 1em; border-radius: 10px; }
+        .stButton>button { background-color: #1f77b4; color: white; border-radius: 5px; }
+        .stButton>button:hover { background-color: #ff7f0e; }
+        </style>
+    """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">📈 Stock Insights Hub</h1>', unsafe_allow_html=True)
-st.write("Unlock actionable stock insights with real-time data and advanced analytics.")
+    st.markdown('<h1 class="main-title">📈 Stock Insights Hub</h1>', unsafe_allow_html=True)
+    st.write("Unlock actionable stock insights with real-time data and advanced analytics.")
 
-# Input section
-col_input, col_empty = st.columns([3, 1])
-with col_input:
-    ticker = st.text_input("Enter Stock Ticker (e.g., AAPL)", "").upper()
-    timeframe_setup = st.selectbox("Timeframe Setup for Oscillator", ['1H/1D', '1D/5D'], index=0, help="Choose the timeframe pair for trend analysis.")
+    # Input section
+    col_input, col_empty = st.columns([3, 1])
+    with col_input:
+        ticker = st.text_input("Enter Stock Ticker (e.g., AAPL)", "").upper()
+        timeframe_setup = st.selectbox("Timeframe Setup for Oscillator", ['1H/1D', '1D/5D'], index=0, help="Choose the timeframe pair for trend analysis.")
 
-if ticker:
-    # Fetch data within a try block
-    stock_summary = pd.DataFrame()
-    stock_hist = pd.DataFrame()
-    oscillator_data = {}
-    momentum_data = {}
-    seasonality_data = {}
-    block_trade_data = {}
-    
-    with st.spinner("Fetching data..."):
-        try:
-            _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
-            stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
-            oscillator_data = get_oscillator(ticker, timeframe_setup)
-            momentum_data = get_momentum(ticker)
-            seasonality_data = get_seasonality(ticker)
-            block_trade_data = get_block_trades(ticker)
-        except Exception as e:
-            st.error(f"Oops! Something went wrong with {ticker}: {str(e)}")
-            st.stop()
+    if ticker:
+        # Fetch data within a try block
+        stock_summary = pd.DataFrame()
+        stock_hist = pd.DataFrame()
+        oscillator_data = {}
+        momentum_data = {}
+        seasonality_data = {}
+        block_trade_data = {}
+        
+        with st.spinner("Fetching data..."):
+            try:
+                _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
+                stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
+                oscillator_data = get_oscillator(ticker, timeframe_setup)
+                momentum_data = get_momentum(ticker)
+                seasonality_data = get_seasonality(ticker)
+                block_trade_data = get_block_trades(ticker)
+            except Exception as e:
+                st.error(f"Oops! Something went wrong with {ticker}: {str(e)}")
+                st.stop()
 
-    # Layout: Two-column main display
-    col1, col2 = st.columns([1, 1], gap="medium")
+        # Layout: Two-column main display
+        col1, col2 = st.columns([1, 1], gap="medium")
 
-    with col1:
-        st.markdown('<h2 class="subheader">Intraday Analysis (1d/5m)</h2>', unsafe_allow_html=True)
-        if not stock_summary.empty:
-            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-            st.write(f"**Current Price:** ${stock_summary['Current Price'].iloc[0]:.2f}")
-            st.write(f"**VWAP:** ${stock_summary['VWAP'].iloc[0]:.2f}")
-            st.write(f"**EMA21:** ${stock_summary['EMA21'].iloc[0]:.2f}")
-            st.write(f"**Relative Strength (vs SPY):** {stock_summary['Rel Strength SPY'].iloc[0]}")
-            st.write(f"**Daily Pivot:** ${stock_summary['Daily Pivot'].iloc[0]:.2f}")
-            st.write(f"**Price vs VWAP:** {stock_summary['Price_Vwap'].iloc[0]}")
-            st.write(f"**Key MAs:** {stock_summary['KeyMAs'].iloc[0]}")
-            st.write(f"**RSI Status:** {stock_summary['RSI_Status'].iloc[0]}")
-            st.markdown('</div>', unsafe_allow_html=True)
-            fig = plot_candlestick(stock_hist, ticker)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("No data available for Intraday Analysis.")
+        with col1:
+            st.markdown('<h2 class="subheader">Intraday Analysis (1d/5m)</h2>', unsafe_allow_html=True)
+            if not stock_summary.empty:
+                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+                st.write(f"**Current Price:** ${stock_summary['Current Price'].iloc[0]:.2f}")
+                st.write(f"**VWAP:** ${stock_summary['VWAP'].iloc[0]:.2f}")
+                st.write(f"**EMA21:** ${stock_summary['EMA21'].iloc[0]:.2f}")
+                st.write(f"**Relative Strength (vs SPY):** {stock_summary['Rel Strength SPY'].iloc[0]}")
+                st.write(f"**Daily Pivot:** ${stock_summary['Daily Pivot'].iloc[0]:.2f}")
+                st.write(f"**Price vs VWAP:** {stock_summary['Price_Vwap'].iloc[0]}")
+                st.write(f"**Key MAs:** {stock_summary['KeyMAs'].iloc[0]}")
+                st.write(f"**RSI Status:** {stock_summary['RSI_Status'].iloc[0]}")
+                st.markdown('</div>', unsafe_allow_html=True)
+                fig = plot_candlestick(stock_hist, ticker)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No data available for Intraday Analysis.")
 
-    with col2:
-        st.markdown(f'<h2 class="subheader">Trend Oscillator ({timeframe_setup})</h2>', unsafe_allow_html=True)
-        if "error" not in oscillator_data:
-            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-            st.write(f"**Trend Oscillator:** {oscillator_data['trend_oscillator']:.2f}" if oscillator_data['trend_oscillator'] is not None else "N/A")
-            st.write(f"**Signal Line:** {oscillator_data['signal_line']:.2f}" if oscillator_data['signal_line'] is not None else "N/A")
-            st.write(f"**Current Trend:** {oscillator_data['trend']}")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if oscillator_data["chart"]:
-                st.plotly_chart(oscillator_data["chart"], use_container_width=True)
-        else:
-            st.warning(f"No oscillator data available: {oscillator_data['error']}")
+        with col2:
+            st.markdown(f'<h2 class="subheader">Trend Oscillator ({timeframe_setup})</h2>', unsafe_allow_html=True)
+            if "error" not in oscillator_data:
+                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+                st.write(f"**Trend Oscillator:** {oscillator_data['trend_oscillator']:.2f}" if oscillator_data['trend_oscillator'] is not None else "N/A")
+                st.write(f"**Signal Line:** {oscillator_data['signal_line']:.2f}" if oscillator_data['signal_line'] is not None else "N/A")
+                st.write(f"**Current Trend:** {oscillator_data['trend']}")
+                st.markdown('</div>', unsafe_allow_html=True)
+                if oscillator_data["chart"]:
+                    st.plotly_chart(oscillator_data["chart"], use_container_width=True)
+            else:
+                st.warning(f"No oscillator data available: {oscillator_data['error']}")
 
-    # Additional Insights Section
-    st.markdown('<h2 class="subheader">🔍 Explore More Insights</h2>', unsafe_allow_html=True)
-    tabs = st.tabs(["Momentum Signals", "Seasonality", "Block Trades"])
+        # Additional Insights Section
+        st.markdown('<h2 class="subheader">🔍 Explore More Insights</h2>', unsafe_allow_html=True)
+        tabs = st.tabs(["Momentum Signals", "Seasonality", "Block Trades"])
 
-    with tabs[0]:
-        if isinstance(momentum_data, dict) and "error" not in momentum_data:
-            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-            st.write(f"**1D Signal:** {momentum_data.get('1D_signal', 'No Data')}")
-            st.write(f"**5D Signal:** {momentum_data.get('5D_signal', 'No Data')}")
-            st.write(f"**Latest Price:** ${momentum_data.get('price', 'N/A')}" if momentum_data.get('price') is not None else "N/A")
-            st.write(f"**EMA 9:** ${momentum_data.get('EMA_9', 'N/A')}" if momentum_data.get('EMA_9') is not None else "N/A")
-            st.write(f"**EMA 21:** ${momentum_data.get('EMA_21', 'N/A')}" if momentum_data.get('EMA_21') is not None else "N/A")
-            st.write(f"**EMA 50:** ${momentum_data.get('EMA_50', 'N/A')}" if momentum_data.get('EMA_50') is not None else "N/A")
-            st.write(f"**EMA 200:** ${momentum_data.get('EMA_200', 'N/A')}" if momentum_data.get('EMA_200') is not None else "N/A")
-            st.write(f"**Daily Pivot:** ${momentum_data.get('daily_pivot', 'N/A')}" if momentum_data.get('daily_pivot') is not None else "N/A")
-            st.write(f"**Weekly Pivot:** ${momentum_data.get('weekly_pivot', 'N/A')}" if momentum_data.get('weekly_pivot') is not None else "N/A")
-            st.write(f"**Monthly Pivot:** ${momentum_data.get('monthly_pivot', 'N/A')}" if momentum_data.get('monthly_pivot') is not None else "N/A")
-            st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.warning("No momentum data available" + (f": {momentum_data.get('error', '')}" if isinstance(momentum_data, dict) and 'error' in momentum_data else ""))
+        with tabs[0]:
+            if isinstance(momentum_data, dict) and "error" not in momentum_data:
+                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+                st.write(f"**1D Signal:** {momentum_data.get('1D_signal', 'No Data')}")
+                st.write(f"**5D Signal:** {momentum_data.get('5D_signal', 'No Data')}")
+                st.write(f"**Latest Price:** ${momentum_data.get('price', 'N/A')}" if momentum_data.get('price') is not None else "N/A")
+                st.write(f"**EMA 9:** ${momentum_data.get('EMA_9', 'N/A')}" if momentum_data.get('EMA_9') is not None else "N/A")
+                st.write(f"**EMA 21:** ${momentum_data.get('EMA_21', 'N/A')}" if momentum_data.get('EMA_21') is not None else "N/A")
+                st.write(f"**EMA 50:** ${momentum_data.get('EMA_50', 'N/A')}" if momentum_data.get('EMA_50') is not None else "N/A")
+                st.write(f"**EMA 200:** ${momentum_data.get('EMA_200', 'N/A')}" if momentum_data.get('EMA_200') is not None else "N/A")
+                st.write(f"**Daily Pivot:** ${momentum_data.get('daily_pivot', 'N/A')}" if momentum_data.get('daily_pivot') is not None else "N/A")
+                st.write(f"**Weekly Pivot:** ${momentum_data.get('weekly_pivot', 'N/A')}" if momentum_data.get('weekly_pivot') is not None else "N/A")
+                st.write(f"**Monthly Pivot:** ${momentum_data.get('monthly_pivot', 'N/A')}" if momentum_data.get('monthly_pivot') is not None else "N/A")
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.warning("No momentum data available" + (f": {momentum_data.get('error', '')}" if isinstance(momentum_data, dict) and 'error' in momentum_data else ""))
 
-    with tabs[1]:
-        if "error" not in seasonality_data:
-            month_name = list(MONTHS.keys())[datetime.now().month - 1]
-            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-            st.write(f"**Historical Avg Return ({month_name}):** {seasonality_data['historical_avg_return']:.2%}" if seasonality_data['historical_avg_return'] is not None else "N/A")
-            if seasonality_data['current_year_return'] is not None:
-                st.write(f"**Current Year Return ({month_name}):** {seasonality_data['current_year_return']:.2%}")
-            st.write(f"**Statistical Significance (p-value):** {seasonality_data['p_value']:.3f}" if seasonality_data['p_value'] is not None else "N/A")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if seasonality_data["chart"]:
-                st.plotly_chart(seasonality_data["chart"], use_container_width=True)
-        else:
-            st.warning(f"No seasonality data available: {seasonality_data['error']}")
+        with tabs[1]:
+            if "error" not in seasonality_data:
+                month_name = list(MONTHS.keys())[datetime.now().month - 1]
+                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+                st.write(f"**Historical Avg Return ({month_name}):** {seasonality_data['historical_avg_return']:.2%}" if seasonality_data['historical_avg_return'] is not None else "N/A")
+                if seasonality_data['current_year_return'] is not None:
+                    st.write(f"**Current Year Return ({month_name}):** {seasonality_data['current_year_return']:.2%}")
+                st.write(f"**Statistical Significance (p-value):** {seasonality_data['p_value']:.3f}" if seasonality_data['p_value'] is not None else "N/A")
+                st.markdown('</div>', unsafe_allow_html=True)
+                if seasonality_data["chart"]:
+                    st.plotly_chart(seasonality_data["chart"], use_container_width=True)
+            else:
+                st.warning(f"No seasonality data available: {seasonality_data['error']}")
 
-    with tabs[2]:
-        if "error" not in block_trade_data:
-            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-            st.write(f"**Current Price:** ${block_trade_data['current_price']:.2f}" if block_trade_data['current_price'] is not None else "N/A")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            if block_trade_data["block_trades"] is not None:
-                st.subheader(f"Detected Block Trades for {ticker}")
-                st.dataframe(block_trade_data["block_trades"][[
-                    'Volume', 'Price_Change_1D', 'Price_Change_5D', 'Trade_Type', 'Current_Price'
-                ]].reset_index())
-                if block_trade_data["chart"]:
-                    st.plotly_chart(block_trade_data["chart"], use_container_width=True)
-        else:
-            st.warning(f"No block trade data available: {block_trade_data['error']}")
+        with tabs[2]:
+            if "error" not in block_trade_data:
+                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+                st.write(f"**Current Price:** ${block_trade_data['current_price']:.2f}" if block_trade_data['current_price'] is not None else "N/A")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                if block_trade_data["block_trades"] is not None:
+                    st.subheader(f"Detected Block Trades for {ticker}")
+                    st.dataframe(block_trade_data["block_trades"][[
+                        'Volume', 'Price_Change_1D', 'Price_Change_5D', 'Trade_Type', 'Current_Price'
+                    ]].reset_index())
+                    if block_trade_data["chart"]:
+                        st.plotly_chart(block_trade_data["chart"], use_container_width=True)
+            else:
+                st.warning(f"No block trade data available: {block_trade_data['error']}")
 
-    # Quick Snapshot
-    st.markdown('<h2 class="subheader">📝 Quick Snapshot</h2>', unsafe_allow_html=True)
-    st.write(f"Explore {ticker}'s detailed insights above!")
-else:
-    st.info("Enter a stock ticker to unlock insights!")
+        # Quick Snapshot
+        st.markdown('<h2 class="subheader">📝 Quick Snapshot</h2>', unsafe_allow_html=True)
+        st.write(f"Explore {ticker}'s detailed insights above!")
+    else:
+        st.info("Enter a stock ticker to unlock insights!")
 
-# Sidebar
-with st.sidebar:
-    st.markdown('<h2 class="subheader">Options</h2>', unsafe_allow_html=True)
-    if st.button("Refresh Data", help="Clear cache and refresh all data"):
-        st.cache_data.clear()
-        st.rerun()
-    st.markdown("---")
-    st.write("Built with 💡 by Learn2Trade")
-    st.write(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # Sidebar
+    with st.sidebar:
+        st.markdown('<h2 class="subheader">Options</h2>', unsafe_allow_html=True)
+        if st.button("Refresh Data", help="Clear cache and refresh all data"):
+            st.cache_data.clear()
+            st.rerun()
+        st.markdown("---")
+        st.write("Built with 💡 by Learn2Trade")
+        st.write(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
