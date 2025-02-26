@@ -641,30 +641,243 @@ def get_finra_data(ticker):
 
 # Main App 
 def run():
-    #st.set_page_config(page_title="Stock Insights Hub", layout="wide", initial_sidebar_state="expanded")
-
+    # Apply custom CSS for professional styling
     st.markdown("""
         <style>
-        .main-title { font-size: 2.5em; color: #1f77b4; margin-bottom: 0.5em; }
-        .subheader { color: #ff7f0e; font-size: 1.5em; margin-top: 1em; }
-        .metric-box { background-color: #f0f2f6; padding: 1em; border-radius: 10px; margin-bottom: 0.5em; }
-        .sidebar .sidebar-content { background-color: #f8f9fa; padding: 1em; border-radius: 10px; }
-        .stButton>button { background-color: #1f77b4; color: white; border-radius: 5px; }
-        .stButton>button:hover { background-color: #ff7f0e; }
+        /* Base styling */
+        .main {
+            background-color: #f9f9fb;
+            padding: 1.5rem;
+        }
+        
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-weight: 600;
+        }
+        
+        /* Main title styling */
+        .main-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 2px solid #3498db;
+        }
+        
+        /* Section headers */
+        .section-header {
+            font-size: 1.5rem;
+            color: #2c3e50;
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        /* Card styling for metric displays */
+        .metric-card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 1.2rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            height: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* Metric styling */
+        .metric-label {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            font-weight: 500;
+            margin-bottom: 0.3rem;
+        }
+        
+        .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .metric-bullish {
+            color: #27ae60;
+            font-weight: 600;
+        }
+        
+        .metric-bearish {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .metric-neutral {
+            color: #f39c12;
+            font-weight: 600;
+        }
+        
+        /* Chart containers */
+        .chart-container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-top: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Input styling */
+        .stTextInput > div > div > input {
+            background-color: white;
+            color: #2c3e50;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+        }
+        
+        .stTextInput > div > div > input:focus {
+            border-color: #3498db;
+            box-shadow: 0 0 0 2px rgba(52,152,219,0.2);
+        }
+        
+        /* Sidebar styling */
+        .sidebar .sidebar-content {
+            background-color: white;
+            padding: 1.5rem;
+        }
+        
+        /* Button styling */
+        .stButton > button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.5rem 1.2rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .stButton > button:hover {
+            background-color: #2980b9;
+        }
+        
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 1rem;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            height: 3rem;
+            white-space: pre-wrap;
+            background-color: white;
+            border-radius: 4px 4px 0 0;
+            border: 1px solid #e0e0e0;
+            border-bottom: none;
+            padding: 0.5rem 1rem;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background-color: white;
+            border-top: 3px solid #3498db;
+        }
+        
+        /* Alert and info boxes */
+        .info-box {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        .warning-box {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        /* Status Indicators */
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-bullish {
+            background-color: #27ae60;
+        }
+        
+        .status-bearish {
+            background-color: #e74c3c;
+        }
+        
+        .status-neutral {
+            background-color: #f39c12;
+        }
+        
+        /* Tables */
+        .dataframe {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .dataframe th {
+            background-color: #f8f9fa;
+            color: #2c3e50;
+            font-weight: 500;
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .dataframe td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .dataframe tr:hover {
+            background-color: #f8f9fa;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<h1 class="main-title">📈 Stock Insights Hub</h1>', unsafe_allow_html=True)
-    st.write("Unlock actionable stock insights with real-time data and advanced analytics.")
+    # App header with logo and title
+    col_logo, col_title, col_empty = st.columns([1, 8, 1])
+    with col_logo:
+        st.markdown("📈")
+    with col_title:
+        st.markdown('<h1 class="main-title">Stock Insights Hub</h1>', unsafe_allow_html=True)
+        st.markdown('<p>Professional market analysis tools for informed trading decisions</p>', unsafe_allow_html=True)
 
-    # Input section
-    col_input, col_empty = st.columns([3, 1])
-    with col_input:
-        ticker = st.text_input("Enter Stock Ticker (e.g., AAPL)", "").upper()
-        timeframe_setup = st.selectbox("Timeframe Setup for Oscillator", ['1H/1D', '1D/5D'], index=0, help="Choose the timeframe pair for trend analysis.")
+    # Main layout with input section
+    input_container = st.container()
+    with input_container:
+        col1, col2, col3 = st.columns([3, 2, 3])
+        with col1:
+            ticker = st.text_input("Enter Stock Ticker", "").upper()
+        with col2:
+            timeframe_setup = st.selectbox("Oscillator Timeframe", ['1H/1D', '1D/5D'], index=0)
+        with col3:
+            analyze_button = st.button("Analyze", use_container_width=True)
 
+    # Display a clean divider
+    st.markdown('<hr style="margin: 1rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
+    
+    # Process if ticker is provided
     if ticker:
-        # Fetch data within a try block
+        # Initialize data containers
         stock_summary = pd.DataFrame()
         stock_hist = pd.DataFrame()
         oscillator_data = {}
@@ -672,8 +885,9 @@ def run():
         seasonality_data = {}
         block_trade_data = {}
         
-        with st.spinner("Fetching data..."):
+        with st.spinner("Analyzing market data..."):
             try:
+                # Fetch all required data (same as original)
                 _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
                 stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
                 oscillator_data = get_oscillator(ticker, timeframe_setup)
@@ -681,106 +895,459 @@ def run():
                 seasonality_data = get_seasonality(ticker)
                 block_trade_data = get_block_trades(ticker)
             except Exception as e:
-                st.error(f"Oops! Something went wrong with {ticker}: {str(e)}")
+                st.error(f"Error retrieving data for {ticker}: {str(e)}")
                 st.stop()
 
-        # Layout: Two-column main display
-        col1, col2 = st.columns([1, 1], gap="medium")
+        # Quick overview - Summary card at the top
+        st.markdown(f'<h2 class="section-header">{ticker} Momentum Signals</h2>', unsafe_allow_html=True)
+        overview_cols = st.columns(4)
+        
+        # Only show if we have momentum data
+        if isinstance(momentum_data, dict) and "error" not in momentum_data:
+            with overview_cols[0]:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-label">Current Price</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-value">${momentum_data.get("price", "N/A")}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with overview_cols[1]:
+                signal_1d = momentum_data.get('1D_signal', 'No Data')
+                signal_class = "metric-bullish" if signal_1d == "Buy" else "metric-bearish" if signal_1d == "Sell" else "metric-neutral"
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-label">1D Signal</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-value {signal_class}">{signal_1d}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with overview_cols[2]:
+                signal_5d = momentum_data.get('5D_signal', 'No Data')
+                signal_class = "metric-bullish" if signal_5d == "Buy" else "metric-bearish" if signal_5d == "Sell" else "metric-neutral"
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-label">5D Signal</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-value {signal_class}">{signal_5d}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with overview_cols[3]:
+                trend = "N/A"
+                if isinstance(oscillator_data, dict) and "trend" in oscillator_data:
+                    trend = oscillator_data["trend"]
+                trend_class = "metric-bullish" if trend == "Bullish" else "metric-bearish" if trend == "Bearish" else "metric-neutral"
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-label">Trend</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-value {trend_class}">{trend}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
-        with col1:
-            st.markdown('<h2 class="subheader">Intraday Analysis (1d/5m)</h2>', unsafe_allow_html=True)
+        # Main analysis section
+        main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights"])
+        
+        # Technical Analysis Tab
+        with main_tabs[0]:
+            st.markdown('<h3 class="section-header">Intraday Price Action & Indicators</h3>', unsafe_allow_html=True)
+            
             if not stock_summary.empty:
-                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-                st.write(f"**Current Price:** ${stock_summary['Current Price'].iloc[0]:.2f}")
-                st.write(f"**VWAP:** ${stock_summary['VWAP'].iloc[0]:.2f}")
-                st.write(f"**EMA21:** ${stock_summary['EMA21'].iloc[0]:.2f}")
-                st.write(f"**Relative Strength (vs SPY):** {stock_summary['Rel Strength SPY'].iloc[0]}")
-                st.write(f"**Daily Pivot:** ${stock_summary['Daily Pivot'].iloc[0]:.2f}")
-                st.write(f"**Price vs VWAP:** {stock_summary['Price_Vwap'].iloc[0]}")
-                st.write(f"**Key MAs:** {stock_summary['KeyMAs'].iloc[0]}")
-                st.write(f"**RSI Status:** {stock_summary['RSI_Status'].iloc[0]}")
-                st.markdown('</div>', unsafe_allow_html=True)
+                # Metrics in top row
+                metric_cols = st.columns(3)
+                
+                with metric_cols[0]:
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<p style="font-weight:600; margin-bottom:10px;">Price Data</p>', unsafe_allow_html=True)
+                    
+                    price_status = stock_summary['Price_Vwap'].iloc[0]
+                    price_class = "metric-bullish" if price_status == "Bullish" else "metric-bearish" if price_status == "Bearish" else "metric-neutral"
+                    
+                    st.markdown(f'''
+                        <div class="metric-label">Current Price</div>
+                        <div class="metric-value">${stock_summary['Current Price'].iloc[0]:.2f}</div>
+                        <div class="metric-label" style="margin-top:10px;">VWAP</div>
+                        <div class="metric-value">${stock_summary['VWAP'].iloc[0]:.2f}</div>
+                        <div class="metric-label" style="margin-top:10px;">Price vs VWAP</div>
+                        <div class="metric-value {price_class}">{price_status}</div>
+                    ''', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with metric_cols[1]:
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<p style="font-weight:600; margin-bottom:10px;">Key Indicators</p>', unsafe_allow_html=True)
+                    
+                    mas_status = stock_summary['KeyMAs'].iloc[0]
+                    mas_class = "metric-bullish" if mas_status == "Bullish" else "metric-bearish" if mas_status == "Bearish" else "metric-neutral"
+                    
+                    rsi_status = stock_summary['RSI_Status'].iloc[0]
+                    rsi_class = "metric-bullish" if rsi_status in ["Strong", "Overbought"] else "metric-bearish" if rsi_status in ["Weak", "Oversold"] else "metric-neutral"
+                    
+                    st.markdown(f'''
+                        <div class="metric-label">EMA21</div>
+                        <div class="metric-value">${stock_summary['EMA21'].iloc[0]:.2f}</div>
+                        <div class="metric-label" style="margin-top:10px;">Key Moving Averages</div>
+                        <div class="metric-value {mas_class}">{mas_status}</div>
+                        <div class="metric-label" style="margin-top:10px;">RSI Status</div>
+                        <div class="metric-value {rsi_class}">{rsi_status}</div>
+                    ''', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with metric_cols[2]:
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<p style="font-weight:600; margin-bottom:10px;">Market Context</p>', unsafe_allow_html=True)
+                    
+                    rs_status = stock_summary['Rel Strength SPY'].iloc[0]
+                    rs_class = "metric-bullish" if rs_status == "Strong" else "metric-bearish" if rs_status == "Weak" else "metric-neutral"
+                    
+                    st.markdown(f'''
+                        <div class="metric-label">Daily Pivot</div>
+                        <div class="metric-value">${stock_summary['Daily Pivot'].iloc[0]:.2f}</div>
+                        <div class="metric-label" style="margin-top:10px;">Relative Strength (vs SPY)</div>
+                        <div class="metric-value {rs_class}">{rs_status}</div>
+                    ''', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Chart in a nice container
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
                 fig = plot_candlestick(stock_hist, ticker)
+                # Enhance the chart styling
+                fig.update_layout(
+                    title=f'{ticker} Intraday Price Action',
+                    template='plotly_white',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(230,230,230,0.5)'
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(230,230,230,0.5)',
+                        title='Price ($)'
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    font=dict(
+                        family="Segoe UI, sans-serif",
+                        size=12,
+                        color="#2c3e50"
+                    ),
+                    height=500,
+                    margin=dict(l=40, r=40, t=80, b=40)
+                )
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No data available for Intraday Analysis.")
-
-        with col2:
-            st.markdown(f'<h2 class="subheader">Trend Oscillator ({timeframe_setup})</h2>', unsafe_allow_html=True)
-            if "error" not in oscillator_data:
-                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-                st.write(f"**Trend Oscillator:** {oscillator_data['trend_oscillator']:.2f}" if oscillator_data['trend_oscillator'] is not None else "N/A")
-                st.write(f"**Signal Line:** {oscillator_data['signal_line']:.2f}" if oscillator_data['signal_line'] is not None else "N/A")
-                st.write(f"**Current Trend:** {oscillator_data['trend']}")
-                st.markdown('</div>', unsafe_allow_html=True)
-                if oscillator_data["chart"]:
-                    st.plotly_chart(oscillator_data["chart"], use_container_width=True)
-            else:
-                st.warning(f"No oscillator data available: {oscillator_data['error']}")
-
-        # Additional Insights Section
-        st.markdown('<h2 class="subheader">🔍 Explore More Insights</h2>', unsafe_allow_html=True)
-        tabs = st.tabs(["Momentum Signals", "Seasonality", "Block Trades"])
-
-        with tabs[0]:
-            if isinstance(momentum_data, dict) and "error" not in momentum_data:
-                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-                st.write(f"**1D Signal:** {momentum_data.get('1D_signal', 'No Data')}")
-                st.write(f"**5D Signal:** {momentum_data.get('5D_signal', 'No Data')}")
-                st.write(f"**Latest Price:** ${momentum_data.get('price', 'N/A')}" if momentum_data.get('price') is not None else "N/A")
-                st.write(f"**EMA 9:** ${momentum_data.get('EMA_9', 'N/A')}" if momentum_data.get('EMA_9') is not None else "N/A")
-                st.write(f"**EMA 21:** ${momentum_data.get('EMA_21', 'N/A')}" if momentum_data.get('EMA_21') is not None else "N/A")
-                st.write(f"**EMA 50:** ${momentum_data.get('EMA_50', 'N/A')}" if momentum_data.get('EMA_50') is not None else "N/A")
-                st.write(f"**EMA 200:** ${momentum_data.get('EMA_200', 'N/A')}" if momentum_data.get('EMA_200') is not None else "N/A")
-                st.write(f"**Daily Pivot:** ${momentum_data.get('daily_pivot', 'N/A')}" if momentum_data.get('daily_pivot') is not None else "N/A")
-                st.write(f"**Weekly Pivot:** ${momentum_data.get('weekly_pivot', 'N/A')}" if momentum_data.get('weekly_pivot') is not None else "N/A")
-                st.write(f"**Monthly Pivot:** ${momentum_data.get('monthly_pivot', 'N/A')}" if momentum_data.get('monthly_pivot') is not None else "N/A")
-                st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.warning("No momentum data available" + (f": {momentum_data.get('error', '')}" if isinstance(momentum_data, dict) and 'error' in momentum_data else ""))
-
-        with tabs[1]:
-            if "error" not in seasonality_data:
-                month_name = list(MONTHS.keys())[datetime.now().month - 1]
-                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-                st.write(f"**Historical Avg Return ({month_name}):** {seasonality_data['historical_avg_return']:.2%}" if seasonality_data['historical_avg_return'] is not None else "N/A")
-                if seasonality_data['current_year_return'] is not None:
-                    st.write(f"**Current Year Return ({month_name}):** {seasonality_data['current_year_return']:.2%}")
-                st.write(f"**Statistical Significance (p-value):** {seasonality_data['p_value']:.3f}" if seasonality_data['p_value'] is not None else "N/A")
-                st.markdown('</div>', unsafe_allow_html=True)
-                if seasonality_data["chart"]:
-                    st.plotly_chart(seasonality_data["chart"], use_container_width=True)
-            else:
-                st.warning(f"No seasonality data available: {seasonality_data['error']}")
-
-        with tabs[2]:
-            if "error" not in block_trade_data:
-                st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-                st.write(f"**Current Price:** ${block_trade_data['current_price']:.2f}" if block_trade_data['current_price'] is not None else "N/A")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                if block_trade_data["block_trades"] is not None:
-                    st.subheader(f"Detected Block Trades for {ticker}")
-                    st.dataframe(block_trade_data["block_trades"][[
-                        'Volume', 'Price_Change_1D', 'Price_Change_5D', 'Trade_Type', 'Current_Price'
-                    ]].reset_index())
-                    if block_trade_data["chart"]:
-                        st.plotly_chart(block_trade_data["chart"], use_container_width=True)
+                # Moving averages table in clean format
+                st.markdown('<h3 class="section-header">Moving Averages on Daily Timeframe</h3>', unsafe_allow_html=True)
+                ma_cols = st.columns(3)
+                
+                if isinstance(momentum_data, dict) and "error" not in momentum_data:
+                    with ma_cols[0]:
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Short-Term</p>', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <div class="metric-label">EMA 9</div>
+                            <div class="metric-value">${momentum_data.get('EMA_9', 'N/A')}</div>
+                            <div class="metric-label" style="margin-top:10px;">EMA 21</div>
+                            <div class="metric-value">${momentum_data.get('EMA_21', 'N/A')}</div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with ma_cols[1]:
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Long-Term</p>', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <div class="metric-label">EMA 50</div>
+                            <div class="metric-value">${momentum_data.get('EMA_50', 'N/A')}</div>
+                            <div class="metric-label" style="margin-top:10px;">EMA 200</div>
+                            <div class="metric-value">${momentum_data.get('EMA_200', 'N/A')}</div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with ma_cols[2]:
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Key Levels</p>', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <div class="metric-label">Daily Pivot</div>
+                            <div class="metric-value">${momentum_data.get('daily_pivot', 'N/A')}</div>
+                            <div class="metric-label" style="margin-top:10px;">Weekly Pivot</div>
+                            <div class="metric-value">${momentum_data.get('weekly_pivot', 'N/A')}</div>
+                            <div class="metric-label" style="margin-top:10px;">Monthly Pivot</div>
+                            <div class="metric-value">${momentum_data.get('monthly_pivot', 'N/A')}</div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
             else:
-                st.warning(f"No block trade data available: {block_trade_data['error']}")
-
-        # Quick Snapshot
-        st.markdown('<h2 class="subheader">📝 Quick Snapshot</h2>', unsafe_allow_html=True)
-        st.write(f"Explore {ticker}'s detailed insights above!")
+                st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                st.markdown('No technical data available for this ticker. Please try a different symbol.', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Trend Oscillator Tab
+        with main_tabs[1]:
+            st.markdown(f'<h3 class="section-header">Trend Oscillator ({timeframe_setup})</h3>', unsafe_allow_html=True)
+            
+            if "error" not in oscillator_data:
+                oscillator_cols = st.columns([1, 2])
+                
+                with oscillator_cols[0]:
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    
+                    trend = oscillator_data.get('trend', 'N/A')
+                    trend_class = "metric-bullish" if trend == "Bullish" else "metric-bearish" if trend == "Bearish" else "metric-neutral"
+                    
+                    st.markdown(f'''
+                        <p style="font-weight:600; margin-bottom:15px;">Oscillator Signals</p>
+                        <div class="metric-label">Trend Oscillator</div>
+                        <div class="metric-value">{oscillator_data.get('trend_oscillator', 'N/A'):.2f}</div>
+                        <div class="metric-label" style="margin-top:15px;">Signal Line</div>
+                        <div class="metric-value">{oscillator_data.get('signal_line', 'N/A'):.2f}</div>
+                        <div class="metric-label" style="margin-top:15px;">Current Trend</div>
+                        <div class="metric-value {trend_class}">
+                            <span class="status-indicator status-{trend_class.split('-')[1]}"></span>
+                            {trend}
+                        </div>
+                        <div style="margin-top:20px;">
+                            <p style="margin-bottom:5px; font-size:0.85rem; color:#7f8c8d;">Interpretation Guide:</p>
+                            <ul style="font-size:0.8rem; color:#7f8c8d; padding-left:15px;">
+                                <li>Above 65: Strong bullish trend</li>
+                                <li>Between 50-65: Moderate bullish trend</li>
+                                <li>Between 30-50: Moderate bearish trend</li>
+                                <li>Below 30: Strong bearish trend</li>
+                            </ul>
+                        </div>
+                    ''', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with oscillator_cols[1]:
+                    if oscillator_data["chart"]:
+                        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                        # Enhance chart styling for oscillator chart
+                        oscillator_data["chart"].update_layout(
+                            template='plotly_white',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            font=dict(
+                                family="Segoe UI, sans-serif",
+                                size=12,
+                                color="#2c3e50"
+                            ),
+                            height=600,
+                            margin=dict(l=40, r=40, t=60, b=40)
+                        )
+                        st.plotly_chart(oscillator_data["chart"], use_container_width=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                st.markdown(f'No oscillator data available: {oscillator_data["error"]}', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Insights Tab (Seasonality & Block Trades)
+        with main_tabs[2]:
+            insight_tabs = st.tabs(["Seasonality", "Block Trades"])
+            
+            # Seasonality subtab
+            with insight_tabs[0]:
+                st.markdown('<h3 class="section-header">Seasonality Analysis</h3>', unsafe_allow_html=True)
+                
+                if "error" not in seasonality_data:
+                    seasonality_cols = st.columns([1, 3])
+                    
+                    with seasonality_cols[0]:
+                        month_name = list(MONTHS.keys())[datetime.now().month - 1]
+                        historical_return = seasonality_data.get('historical_avg_return')
+                        current_return = seasonality_data.get('current_year_return')
+                        p_value = seasonality_data.get('p_value')
+                        
+                        historical_class = "metric-bullish" if historical_return and historical_return > 0 else "metric-bearish" if historical_return and historical_return < 0 else "metric-neutral"
+                        current_class = "metric-bullish" if current_return and current_return > 0 else "metric-bearish" if current_return and current_return < 0 else "metric-neutral"
+                        
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <p style="font-weight:600; margin-bottom:10px;">{month_name} Seasonality</p>
+                            <div class="metric-label">Historical Average Return</div>
+                            <div class="metric-value {historical_class}">
+                                {f"{historical_return:.2%}" if historical_return is not None else "N/A"}
+                            </div>
+                            
+                            <div class="metric-label" style="margin-top:15px;">Current Year Return</div>
+                            <div class="metric-value {current_class}">
+                                {f"{current_return:.2%}" if current_return is not None else "N/A"}
+                            </div>
+                            
+                            <div class="metric-label" style="margin-top:15px;">Statistical Significance</div>
+                            <div class="metric-value">
+                                {f"p-value: {p_value:.3f}" if p_value is not None else "N/A"}
+                            </div>
+                            
+                            <div style="margin-top:20px;">
+                                <p style="margin-bottom:5px; font-size:0.85rem; color:#7f8c8d;">Interpretation:</p>
+                                <p style="font-size:0.8rem; color:#7f8c8d;">
+                                    {f"The historical pattern for {ticker} in {month_name} is {'statistically significant' if p_value and p_value < 0.05 else 'not statistically significant'}." if p_value is not None else ""}
+                                </p>
+                            </div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with seasonality_cols[1]:
+                        if seasonality_data["chart"]:
+                            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                            # Enhance seasonality chart
+                            seasonality_data["chart"].update_layout(
+                                template='plotly_white',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                font=dict(
+                                    family="Segoe UI, sans-serif",
+                                    size=12,
+                                    color="#2c3e50"
+                                ),
+                                height=400,
+                                margin=dict(l=40, r=40, t=60, b=40)
+                            )
+                            st.plotly_chart(seasonality_data["chart"], use_container_width=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                    st.markdown(f'No seasonality data available: {seasonality_data["error"]}', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Block Trades subtab
+            with insight_tabs[1]:
+                st.markdown('<h3 class="section-header">Institutional Block Trades</h3>', unsafe_allow_html=True)
+                
+                if "error" not in block_trade_data:
+                    block_cols = st.columns([1, 2])
+                    
+                    with block_cols[0]:
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <p style="font-weight:600; margin-bottom:10px;">Block Trade Analysis</p>
+                            <div class="metric-label">Current Price</div>
+                            <div class="metric-value">${f"{block_trade_data['current_price']:.2f}" if block_trade_data['current_price'] is not None else "N/A"}</div>
+                            
+                            <div style="margin-top:20px;">
+                                <p style="margin-bottom:5px; font-size:0.85rem; color:#7f8c8d;">What are block trades?</p>
+                                <p style="font-size:0.8rem; color:#7f8c8d;">
+                                    Block trades are large transactions typically executed by institutional investors.
+                                    They often signal significant market interest and can precede major price moves.
+                                </p>
+                            </div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with block_cols[1]:
+                        if block_trade_data["block_trades"] is not None:
+                            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                            
+                            # Display the block trades data in a nice table format first
+                            if not block_trade_data["block_trades"].empty:
+                                cols_to_show = ['Volume', 'Price_Change_1D', 'Price_Change_5D', 'Trade_Type']
+                                
+                                # Format dataframe for display
+                                display_df = block_trade_data["block_trades"][cols_to_show].copy()
+                                display_df = display_df.reset_index()
+                                display_df.columns = ['Date', 'Volume', '1-Day Change (%)', '5-Day Change (%)', 'Type']
+                                
+                                # Format the date column
+                                display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
+                                
+                                # Format percentage columns
+                                display_df['1-Day Change (%)'] = display_df['1-Day Change (%)'].apply(lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A")
+                                display_df['5-Day Change (%)'] = display_df['5-Day Change (%)'].apply(lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A")
+                                
+                                # Apply custom styling with HTML
+                                st.markdown('<p style="font-weight:600; margin-bottom:10px;">Recent Block Trades</p>', unsafe_allow_html=True)
+                                st.dataframe(display_df, use_container_width=True, height=200)
+                            
+                            # Then display the chart
+                            if block_trade_data["chart"]:
+                                # Enhance block trades chart
+                                block_trade_data["chart"].update_layout(
+                                    template='plotly_white',
+                                    plot_bgcolor='rgba(0,0,0,0)',
+                                    paper_bgcolor='rgba(0,0,0,0)',
+                                    font=dict(
+                                        family="Segoe UI, sans-serif",
+                                        size=12,
+                                        color="#2c3e50"
+                                    ),
+                                    height=400,
+                                    margin=dict(l=40, r=40, t=60, b=40)
+                                )
+                                st.plotly_chart(block_trade_data["chart"], use_container_width=True)
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                    st.markdown(f'No block trade data available: {block_trade_data["error"]}', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Footer section with summary and disclaimer
+        st.markdown('<hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
+        st.markdown(f'''
+            <div style="background-color: white; border-radius: 8px; padding: 1.2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                <h3 style="color: #2c3e50; font-size: 1.3rem; margin-bottom: 1rem;">Summary for {ticker}</h3>
+                <p style="color: #2c3e50; margin-bottom: 1rem;">
+                    This analysis combines technical indicators, trend oscillators, and historical patterns to provide a comprehensive view of {ticker}'s market position.
+                </p>
+                <p style="font-size: 0.8rem; color: #7f8c8d; margin-top: 1rem;">
+                    <em>Disclaimer: This tool provides analysis based on historical data and technical indicators. It is not financial advice. 
+                    Always conduct your own research and consider consulting with a financial advisor before making investment decisions.</em>
+                </p>
+            </div>
+        ''', unsafe_allow_html=True)
+    
     else:
-        st.info("Enter a stock ticker to unlock insights!")
+        # Show welcome message when no ticker is entered
+        st.markdown('''
+            <div style="background-color: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; margin: 2rem 0;">
+                <h2 style="color: #2c3e50; margin-bottom: 1.5rem;">Welcome to Stock Insights Hub</h2>
+                <p style="color: #7f8c8d; font-size: 1.1rem; margin-bottom: 2rem;">
+                    Enter a stock ticker symbol above to access comprehensive market analysis tools including:
+                </p>
+                <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
+                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Technical Analysis</h3>
+                        <p style="color: #7f8c8d; font-size: 0.9rem;">Price action, key indicators, and moving averages</p>
+                    </div>
+                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Trend Oscillator</h3>
+                        <p style="color: #7f8c8d; font-size: 0.9rem;">Advanced trend analysis with custom timeframes</p>
+                    </div>
+                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Market Insights</h3>
+                        <p style="color: #7f8c8d; font-size: 0.9rem;">Seasonality patterns and institutional block trades</p>
+                    </div>
+                </div>
+                <p style="color: #7f8c8d; font-size: 0.9rem;">
+                    Example tickers: AAPL, MSFT, AMZN, TSLA, NVDA, GOOGL
+                </p>
+            </div>
+        ''', unsafe_allow_html=True)
 
-    # Sidebar
+    # Enhanced sidebar
     with st.sidebar:
-        st.markdown('<h2 class="subheader">Options</h2>', unsafe_allow_html=True)
-        if st.button("Refresh Data", help="Clear cache and refresh all data"):
-            st.cache_data.clear()
-            st.rerun()
-        st.markdown("---")
-        st.write("Built with 💡 by Learn2Trade")
-        st.write(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.markdown('''
+            <div style="padding: 1rem 0; margin-bottom: 1rem; border-bottom: 1px solid #e0e0e0;">
+                <h3 style="color: #2c3e50; font-size: 1.3rem; margin-bottom: 0.5rem;">Options</h3>
+            </div>
+        ''', unsafe_allow_html=True)
+        
+        st.button("Refresh Data", help="Clear cache and reload all market data", use_container_width=True)
+        
+        st.markdown('''
+            <div style="padding: 1rem 0; margin-top: 2rem; border-top: 1px solid #e0e0e0;">
+                <h3 style="color: #2c3e50; font-size: 1.3rem; margin-bottom: 1rem;">About</h3>
+                <p style="color: #7f8c8d; font-size: 0.9rem; margin-bottom: 0.5rem;">
+                    Stock Insights Hub combines multiple technical analysis methods to provide traders with comprehensive market insights.
+                </p>
+            </div>
+        ''', unsafe_allow_html=True)
+        
+        st.markdown(f'''
+            <div style="padding: 1rem 0; margin-top: 2rem; font-size: 0.8rem; color: #95a5a6; border-top: 1px solid #e0e0e0;">
+                <p style="margin-bottom: 0.5rem;">Developed by Learn2Trade</p>
+                <p>Last updated: {datetime.now().strftime('%Y-%m-%d')}</p>
+                <p>Version 2.0</p>
+            </div>
+        ''', unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    run()
