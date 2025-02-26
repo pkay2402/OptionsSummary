@@ -641,7 +641,7 @@ def get_finra_data(ticker):
 
 # Main App 
 def run():
-    st.set_page_config(page_title="Stock Insights Hub", layout="wide", initial_sidebar_state="expanded")
+    #st.set_page_config(page_title="Stock Insights Hub", layout="wide", initial_sidebar_state="expanded")
 
     st.markdown("""
         <style>
