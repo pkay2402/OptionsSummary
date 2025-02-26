@@ -12,10 +12,11 @@ from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator
 from modules.GannSwing import run as GannSwing_run
-from modules.GannCycleAnalysis import run as GannCycle_run  # New import
+from modules.GannCycleAnalysis import run as GannCycle_run
 from modules.CFTC import cftc_analyzer_module
 from modules.BlockTrade import Blocktrade_run
 from modules.WhalePositioning import run as WhalePositioning_run
+from modules.StockInsights import run as StockInsights_run  # New import
 
 def add_buymeacoffee():
     try:
@@ -48,7 +49,8 @@ def main():
     add_buymeacoffee()
     
     app_selection = st.sidebar.selectbox("Choose the app:",
-                                      ["FINRA Dashboard",
+                                      ["Stock Insights",
+                                       "FINRA Dashboard",
                                        "Block Trades",
                                        "Stock Trend Oscillator",
                                        "Flow Summary", 
@@ -58,11 +60,11 @@ def main():
                                        "Stock Analysis",
                                        "TOS Scanner",
                                        "Gann Swing Analysis",
-                                       "Gann Cycle Analysis",  # New option
+                                       "Gann Cycle Analysis",
                                        "Seasonality",
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer",
-                                       "Whale Positioning"])
+                                       "Whale Positioning"])  # New option
 
     if app_selection == "Stock Trend Oscillator":
         show_trend_oscillator()
@@ -84,7 +86,7 @@ def main():
         StockAnalysis_run()
     elif app_selection == "Gann Swing Analysis":
         GannSwing_run()
-    elif app_selection == "Gann Cycle Analysis":  # New condition
+    elif app_selection == "Gann Cycle Analysis":
         GannCycle_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
@@ -94,6 +96,8 @@ def main():
         cftc_analyzer_module()
     elif app_selection == "Whale Positioning":
         WhalePositioning_run()
+    elif app_selection == "Stock Insights":  # New condition
+        StockInsights_run()
 
 if __name__ == "__main__":
     main()
