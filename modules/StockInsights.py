@@ -8,6 +8,8 @@ import numpy as np
 from math import ceil
 from datetime import datetime, timedelta, date
 from scipy import stats
+import requests
+import io
 
 # StockAnalysis Functions
 def calculate_rsi(data, periods=14):
@@ -635,9 +637,66 @@ def get_gex(ticker):
 def get_whale_positions(ticker):
     return {"net_buy": "TBD"}
 
+# FINRA Short Sale Functions for Individual Symbol Analysis
+def download_finra_short_sale_data(date):
+    url = f"https://cdn.finra.org/equity/regsho/daily/CNMSshvol{date}.txt"
+    response = requests.get(url)
+    return response.text if response.status_code == 200 else None
+
+def process_finra_short_sale_data(data):
+    if not data:
+        return pd.DataFrame()
+    df = pd.read_csv(io.StringIO(data), delimiter="|")
+    return df[df["Symbol"].str.len() <= 4]
+
+def calculate_metrics(row, total_volume):
+    short_volume = row.get('ShortVolume', 0)
+    short_exempt_volume = row.get('ShortExemptVolume', 0)
+    
+    bought_volume = short_volume + short_exempt_volume
+    sold_volume = total_volume - bought_volume
+    
+    buy_to_sell_ratio = bought_volume / sold_volume if sold_volume > 0 else float('inf')
+    short_volume_ratio = bought_volume / total_volume if total_volume > 0 else 0
+    
+    return {
+        'total_volume': total_volume,
+        'bought_volume': bought_volume,
+        'sold_volume': sold_volume,
+        'buy_to_sell_ratio': round(buy_to_sell_ratio, 2),
+        'short_volume_ratio': round(short_volume_ratio, 4)
+    }
+
 @st.cache_data
-def get_finra_data(ticker):
-    return {"short_volume": "TBD"}
+def analyze_symbol_finra(symbol, lookback_days=20, threshold=1.5):
+    results = []
+    significant_days = 0
+    
+    for i in range(lookback_days * 2):  # Double to account for non-trading days
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        
+        if data:
+            df = process_finra_short_sale_data(data)
+            symbol_data = df[df['Symbol'] == symbol]
+            
+            if not symbol_data.empty:
+                row = symbol_data.iloc[0]
+                total_volume = row.get('TotalVolume', 0)
+                metrics = calculate_metrics(row, total_volume)
+                
+                if metrics['buy_to_sell_ratio'] > threshold:
+                    significant_days += 1
+                
+                metrics['date'] = date
+                results.append(metrics)
+    
+    df_results = pd.DataFrame(results)
+    if not df_results.empty:
+        df_results['date'] = pd.to_datetime(df_results['date'], format='%Y%m%d')
+        df_results = df_results.sort_values('date', ascending=False)
+    
+    return df_results, significant_days
 
 # Main App 
 def run():
@@ -1140,7 +1199,7 @@ def run():
         
         # Insights Tab (Seasonality & Block Trades)
         with main_tabs[2]:
-            insight_tabs = st.tabs(["Seasonality", "Block Trades"])
+            insight_tabs = st.tabs(["Seasonality", "Block Trades","FINRA Analysis"])
             
             # Seasonality subtab
             with insight_tabs[0]:
@@ -1293,6 +1352,103 @@ def run():
                 </p>
             </div>
         ''', unsafe_allow_html=True)
+
+        with insight_tabs[2]:
+                        st.markdown('<h3 class="section-header">FINRA Short Sale Analysis</h3>', unsafe_allow_html=True)
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            # Use the same ticker as the main app
+                            finra_lookback_days = st.slider("Lookback Days", 1, 30, 20, key="finra_lookback")
+                        with col2:
+                            finra_threshold = st.number_input("Buy/Sell Ratio Threshold", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
+
+                        if ticker:  # Only run if a ticker is entered
+                            with st.spinner("Analyzing FINRA short sale data..."):
+                                results_df, significant_days = analyze_symbol_finra(ticker, finra_lookback_days, finra_threshold)
+
+                                if not results_df.empty:
+                                    finra_cols = st.columns(3)
+                                    with finra_cols[0]:
+                                        avg_ratio = results_df['buy_to_sell_ratio'].mean()
+                                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Buy/Sell Ratio</p>', unsafe_allow_html=True)
+                                        ratio_class = "metric-bullish" if avg_ratio > 1.0 else "metric-bearish"
+                                        st.markdown(f'''
+                                            <div class="metric-label">Average Ratio</div>
+                                            <div class="metric-value {ratio_class}">{avg_ratio:.2f}</div>
+                                        ''', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+
+                                    with finra_cols[1]:
+                                        max_ratio = results_df['buy_to_sell_ratio'].max()
+                                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Maximum Ratio</p>', unsafe_allow_html=True)
+                                        st.markdown(f'''
+                                            <div class="metric-label">Highest Recorded</div>
+                                            <div class="metric-value">{max_ratio:.2f}</div>
+                                        ''', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+
+                                    with finra_cols[2]:
+                                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                                        st.markdown('<p style="font-weight:600; margin-bottom:10px;">Buying Pressure</p>', unsafe_allow_html=True)
+                                        pressure_class = "metric-bullish" if significant_days > finra_lookback_days/4 else "metric-neutral"
+                                        st.markdown(f'''
+                                            <div class="metric-label">Days Above Threshold</div>
+                                            <div class="metric-value {pressure_class}">{significant_days} of {min(len(results_df), finra_lookback_days)}</div>
+                                        ''', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+
+                                    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+
+                                    # Create a buy/sell ratio chart
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Bar(
+                                        x=results_df['date'],
+                                        y=results_df['buy_to_sell_ratio'],
+                                        marker_color=['green' if x > finra_threshold else 'gray' for x in results_df['buy_to_sell_ratio']],
+                                        name='Buy/Sell Ratio'
+                                    ))
+                                    fig.add_hline(y=finra_threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold: {finra_threshold}")
+                                    fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Neutral: 1.0")
+
+                                    fig.update_layout(
+                                        title=f'FINRA Short Sale Buy/Sell Ratio for {ticker}',
+                                        xaxis_title='Date',
+                                        yaxis_title='Buy/Sell Ratio',
+                                        template='plotly_white',
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        height=400,
+                                        margin=dict(l=40, r=40, t=60, b=40)
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    st.markdown('</div>', unsafe_allow_html=True)
+
+                                    st.subheader("Daily FINRA Short Sale Data")
+                                    st.markdown('''
+                                        <div style="background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                                            <p style="font-size: 0.9rem; color: #666;">
+                                                <strong>Understanding the data:</strong> The Buy/Sell Ratio represents the relationship between short volume (buying pressure) 
+                                                and regular volume (selling pressure). A ratio > 1.0 indicates net buying, while < 1.0 indicates net selling. 
+                                                Days with ratios above the threshold are highlighted in green.
+                                            </p>
+                                        </div>
+                                    ''', unsafe_allow_html=True)
+
+                                    def highlight_significant(row):
+                                        return ['background-color: rgba(144, 238, 144, 0.3)' if row['buy_to_sell_ratio'] > finra_threshold else ''] * len(row)
+
+                                    display_df = results_df.copy()
+                                    for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                                        display_df[col] = display_df[col].astype(int)
+
+                                    styled_df = display_df.style.apply(highlight_significant, axis=1)
+                                    st.dataframe(styled_df, use_container_width=True)
+                                else:
+                                    st.warning(f"No FINRA short sale data available for {ticker}. This could be because the symbol is not found in FINRA's database.")
+                        else:
+                            st.info("Enter a ticker symbol to view FINRA short sale analysis.")
     
     else:
         # Show welcome message when no ticker is entered
@@ -1321,6 +1477,8 @@ def run():
                 </p>
             </div>
         ''', unsafe_allow_html=True)
+
+        
 
     # Enhanced sidebar
     with st.sidebar:
