@@ -10,6 +10,18 @@ from datetime import datetime, timedelta, date
 from scipy import stats
 import requests
 import io
+import pytz
+
+STOCK_LISTS = {
+    "Index": ["SPY", "QQQ", "IWM", "DIA", "SMH", "XLF", "XLE", "XLV", "XLY", "XLC", "XLI", "XLB", "XLRE", "XLU", "XLP", "XBI", "XOP", "XME", "XRT", "XHB","UVXY"],
+    "Tech Giants": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSM", "AVGO", "ADBE", 
+               "CRM", "ORCL", "CSCO", "AMD", "INTC", "IBM", "TXN", "QCOM", "AMAT", "MU", "NOW"],
+    "Dow Components": ["AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW", "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT"],
+    "Financial Sector": ["JPM", "BAC", "WFC", "C", "GS", "MS", "BLK", "AXP", "USB", "PNC"],
+    "Healthcare Leaders": ["JNJ", "PFE", "MRK", "ABBV", "BMY", "LLY", "AMGN", "GILD", "REGN", "BIIB"],
+    "Energy Stocks": ["XOM", "CVX", "COP", "EOG", "SLB", "PXD", "OXY", "DVN", "MPC", "PSX"],
+    "Retail Giants": ["WMT", "TGT", "COST", "HD", "LOW", "AMZN", "EBAY", "ETSY", "BBY", "DG"]
+}
 
 # StockAnalysis Functions
 def calculate_rsi(data, periods=14):
@@ -628,14 +640,446 @@ def get_block_trades(ticker):
         st.error(f"Error in get_block_trades for {ticker}: {e}")
         return {"error": str(e), "block_trades": None, "chart": None}
 
-# Placeholder Functions (Hidden in UI)
-@st.cache_data
-def get_gex(ticker):
-    return {"gamma_exposure": "TBD"}
+# GEX Analysis Functions
+def calculate_gamma(S, K, T, r, sigma, option_type='call'):
+    if T <= 0.001:
+        T = 0.001
+    
+    d1 = (np.log(S/K) + (r + sigma**2/2)*T) / (sigma*np.sqrt(T))
+    gamma = np.exp(-d1**2/2) / (S*sigma*np.sqrt(2*np.pi*T))
+    return gamma
+
+def get_all_expirations(ticker_symbol, max_days=365):
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        expirations = ticker.options
+        
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        expiration_data = []
+        for exp in expirations:
+            try:
+                exp_date = datetime.strptime(exp, '%Y-%m-%d')
+                exp_date = eastern.localize(exp_date)
+                days_to_exp = (exp_date.date() - today_start.date()).days
+                
+                if days_to_exp > max_days or days_to_exp < 0:
+                    continue
+                    
+                opt = ticker.option_chain(exp)
+                calls_oi = opt.calls['openInterest'].sum() if not opt.calls.empty else 0
+                puts_oi = opt.puts['openInterest'].sum() if not opt.puts.empty else 0
+                total_oi = calls_oi + puts_oi
+                
+                if total_oi > 0:
+                    expiration_data.append({
+                        'date': exp,
+                        'days': days_to_exp,
+                        'oi': total_oi,
+                        'calls_oi': calls_oi,
+                        'puts_oi': puts_oi
+                    })
+            except Exception as e:
+                st.warning(f"Skipping expiration {exp}: {str(e)}")
+                continue
+                
+        if not expiration_data:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(expiration_data)
+        df = df.sort_values('days')
+        return df
+        
+    except Exception as e:
+        st.error(f"Error fetching expirations for {ticker_symbol}: {str(e)}")
+        return pd.DataFrame()
 
 @st.cache_data
-def get_whale_positions(ticker):
-    return {"net_buy": "TBD"}
+def get_gex(ticker_symbol, expiration=None, price_range_pct=15, threshold=5.0, 
+            strike_spacing_override=None, risk_free_rate=0.05, bar_width=2.0, show_labels=True):
+    try:
+        exp_data = get_all_expirations(ticker_symbol)
+        if exp_data.empty:
+            return {"error": "No valid expirations found", "exp_data": None, "gex_data": None, "chart": None}
+        
+        if expiration is None:
+            expiration = exp_data['date'].iloc[0]
+            
+        ticker = yf.Ticker(ticker_symbol)
+        hist = ticker.history(period='5d')
+        if hist.empty:
+            raise ValueError(f"No price data available for {ticker_symbol}")
+        
+        current_price = hist['Close'].iloc[-1]
+        
+        exp_date = datetime.strptime(expiration, '%Y-%m-%d')
+        today = datetime.now()
+        T = max((exp_date - today).days / 365, 0.001)
+        
+        opt = ticker.option_chain(expiration)
+        
+        if strike_spacing_override:
+            strike_spacing = strike_spacing_override
+        else:
+            is_index = ticker_symbol in ['SPY', 'QQQ', 'IWM']
+            if is_index:
+                strike_spacing = 1.0 if current_price > 200 else 0.5
+            else:
+                if current_price > 500:
+                    strike_spacing = 5.0
+                elif current_price > 100:
+                    strike_spacing = 2.5
+                else:
+                    strike_spacing = 1.0
+                    
+        calls = opt.calls[['strike', 'openInterest', 'impliedVolatility']].copy()
+        calls['type'] = 'call'
+        
+        puts = opt.puts[['strike', 'openInterest', 'impliedVolatility']].copy()
+        puts['type'] = 'put'
+        
+        price_range = current_price * (price_range_pct / 100)
+        calls = calls[
+            (calls['strike'] >= current_price - price_range) & 
+            (calls['strike'] <= current_price + price_range)
+        ]
+        puts = puts[
+            (puts['strike'] >= current_price - price_range) & 
+            (puts['strike'] <= current_price + price_range)
+        ]
+        
+        calls = calls[calls['openInterest'] > 0].dropna()
+        puts = puts[puts['openInterest'] > 0].dropna()
+        
+        options_data = pd.concat([calls, puts])
+        
+        if options_data.empty:
+            return {
+                "error": "No options with open interest",
+                "exp_data": exp_data,
+                "gex_data": None,
+                "chart": None,
+                "current_price": current_price
+            }
+        
+        gex_data = []
+        for _, row in options_data.iterrows():
+            K = row['strike']
+            sigma = row['impliedVolatility']
+            oi = row['openInterest']
+            
+            gamma = calculate_gamma(current_price, K, T, risk_free_rate, sigma)
+            gex = gamma * oi * current_price / 10000
+            if row['type'] == 'put':
+                gex = -gex
+            
+            gex_data.append({
+                'strike': K,
+                'gex': gex,
+                'oi': oi,
+                'type': row['type']
+            })
+        
+        df = pd.DataFrame(gex_data)
+        if df.empty:
+            return {
+                "error": "No GEX data calculated",
+                "exp_data": exp_data,
+                "gex_data": None,
+                "chart": None,
+                "current_price": current_price
+            }
+        
+        dynamic_threshold = max(np.percentile(df['gex'].abs(), 25), 0.01)
+        final_threshold = min(threshold, dynamic_threshold)
+        df['abs_gex'] = abs(df['gex'])
+        filtered_df = df[df['abs_gex'] > final_threshold].drop('abs_gex', axis=1)
+        
+        if not filtered_df.empty:
+            filtered_df = filtered_df.sort_values('strike')
+            fig = go.Figure()
+            
+            fig.add_trace(go.Bar(
+                x=filtered_df['strike'],
+                y=filtered_df['gex'],
+                marker_color=['green' if x >= 0 else 'red' for x in filtered_df['gex']],
+                opacity=0.6,
+                width=bar_width,
+                text=[f'{x:.1f}' if abs(x) >= filtered_df['gex'].abs().max() * 0.1 and show_labels else '' 
+                      for x in filtered_df['gex']],
+                textposition='auto'
+            ))
+            
+            fig.add_vline(
+                x=current_price,
+                line_color='blue',
+                line_dash='dash',
+                annotation_text=f'Current Price: {current_price:.2f}',
+                annotation_position='top right'
+            )
+            
+            stats_text = (f"Total GEX: {filtered_df['gex'].sum():.1f}<br>"
+                         f"Max +GEX: {filtered_df['gex'].max():.1f}<br>"
+                         f"Max -GEX: {filtered_df['gex'].min():.1f}")
+            
+            fig.update_layout(
+                title=f'Gamma Exposure (GEX) for {ticker_symbol}',
+                xaxis_title='Strike Price',
+                yaxis_title='GEX',
+                showlegend=False,
+                template='plotly_white',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(family="Segoe UI, sans-serif", size=12, color="#2c3e50"),
+                height=400,
+                annotations=[dict(
+                    x=0.02,
+                    y=0.98,
+                    xref="paper",
+                    yref="paper",
+                    text=stats_text,
+                    showarrow=False,
+                    bgcolor="white",
+                    opacity=0.8
+                )],
+                xaxis=dict(showgrid=True, gridcolor='rgba(230,230,230,0.5)'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(230,230,230,0.5)')
+            )
+        else:
+            fig = None
+            
+        return {
+            "exp_data": exp_data,
+            "gex_data": filtered_df,
+            "chart": fig,
+            "current_price": current_price,
+            "total_gex": filtered_df['gex'].sum() if not filtered_df.empty else 0,
+            "max_positive_gex": filtered_df['gex'].max() if not filtered_df.empty else 0,
+            "max_negative_gex": filtered_df['gex'].min() if not filtered_df.empty else 0,
+            "strongest_gex_strike": filtered_df.loc[filtered_df['gex'].abs().idxmax(), 'strike'] 
+                if not filtered_df.empty else None
+        }
+        
+    except Exception as e:
+        st.error(f"Error in GEX calculation for {ticker_symbol}: {e}")
+        return {"error": str(e), "exp_data": None, "gex_data": None, "chart": None}
+
+        # Whale Positioning Functions
+def get_weekly_expirations(ticker_symbol, num_weeks=8):
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        expirations = ticker.options
+        eastern = pytz.timezone('US/Eastern')
+        now = datetime.now(eastern)
+        today = now.date()
+        
+        weekly_exps = []
+        for exp in expirations:
+            exp_date = datetime.strptime(exp, '%Y-%m-%d').date()
+            days_to_exp = (exp_date - today).days
+            if 0 <= days_to_exp <= (num_weeks * 7 + 7):
+                weekly_exps.append({'date': exp, 'days': days_to_exp})
+        
+        return sorted(weekly_exps, key=lambda x: x['days'])[:num_weeks]
+    except Exception as e:
+        st.error(f"Error fetching weekly expirations: {str(e)}")
+        return []
+
+def fetch_whale_positions(ticker_symbol, expirations, price_range_pct=10):
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        hist = ticker.history(period='1d', interval='1m')
+        current_price = hist['Close'].iloc[-1] if not hist.empty else None
+        
+        if not current_price:
+            raise ValueError("Unable to fetch current price")
+            
+        last_hour = hist.tail(60)
+        price_trend = (last_hour['Close'].iloc[-1] - last_hour['Close'].iloc[0]) / last_hour['Close'].iloc[0] * 100
+        
+        whale_data = []
+        price_min = current_price * (1 - price_range_pct/100)
+        price_max = current_price * (1 + price_range_pct/100)
+        
+        for exp in expirations:
+            opt = ticker.option_chain(exp['date'])
+            calls = opt.calls[
+                (opt.calls['strike'] >= price_min) & 
+                (opt.calls['strike'] <= price_max)
+            ][['strike', 'openInterest', 'volume']].copy()
+            calls['type'] = 'call'
+            calls['days_to_exp'] = exp['days']
+            calls['expiry_date'] = exp['date']
+            
+            puts = opt.puts[
+                (opt.puts['strike'] >= price_min) & 
+                (opt.puts['strike'] <= price_max)
+            ][['strike', 'openInterest', 'volume']].copy()
+            puts['type'] = 'put'
+            puts['days_to_exp'] = exp['days']
+            puts['expiry_date'] = exp['date']
+            
+            whale_data.append(calls)
+            whale_data.append(puts)
+        
+        df = pd.concat(whale_data)
+        
+        df['price_weight'] = 1 - (abs(df['strike'] - current_price) / (current_price * price_range_pct/100))
+        df['time_weight'] = 1 / (df['days_to_exp'] + 1)
+        df['weighted_volume'] = df['volume'] * df['price_weight'] * df['time_weight']
+        
+        agg_df = df.groupby(['strike', 'type', 'expiry_date']).agg({
+            'openInterest': 'sum',
+            'volume': 'sum',
+            'weighted_volume': 'sum'
+        }).reset_index()
+        
+        pivot_df = agg_df.pivot(index=['strike', 'expiry_date'], columns='type', 
+                              values=['openInterest', 'volume', 'weighted_volume']).fillna(0)
+        pivot_df.columns = ['call_oi', 'put_oi', 'call_vol', 'put_vol', 'call_wv', 'put_wv']
+        
+        pivot_df['total_oi'] = pivot_df['call_oi'] + pivot_df['put_oi']
+        pivot_df['net_vol'] = pivot_df['call_vol'] - pivot_df['put_vol']
+        pivot_df['net_wv'] = pivot_df['call_wv'] - pivot_df['put_wv']
+        
+        strike_df = pivot_df.groupby(level='strike').sum()
+        
+        return pivot_df, strike_df, current_price, price_trend
+    except Exception as e:
+        st.error(f"Error fetching whale positions: {str(e)}")
+        return pd.DataFrame(), pd.DataFrame(), None, None
+
+def predict_price_direction(current_price, whale_df, price_trend):
+    if whale_df.empty:
+        return "Insufficient data", None, None, "gray"
+    
+    call_wv_score = whale_df['call_wv'].sum()
+    put_wv_score = whale_df['put_wv'].sum()
+    net_wv_score = call_wv_score - put_wv_score
+    
+    call_oi_concentration = whale_df[whale_df.index.get_level_values('strike') > current_price]['call_oi'].sum()
+    put_oi_concentration = whale_df[whale_df.index.get_level_values('strike') < current_price]['put_oi'].sum()
+    
+    direction_score = (
+        (net_wv_score / max(abs(net_wv_score), 1)) * 0.4 +
+        (price_trend / max(abs(price_trend), 0.1)) * 0.3 +
+        ((call_oi_concentration - put_oi_concentration) / 
+         max(call_oi_concentration + put_oi_concentration, 1)) * 0.3
+    )
+    
+    if direction_score > 0:
+        target_df = whale_df[whale_df.index.get_level_values('strike') > current_price]
+        if not target_df.empty:
+            target_row = target_df.loc[target_df['call_wv'].idxmax()]
+            target_strike = target_row.name[0]
+            target_expiry = target_row.name[1]
+        else:
+            target_strike = current_price
+            target_expiry = whale_df.index.get_level_values('expiry_date')[0]
+    else:
+        target_df = whale_df[whale_df.index.get_level_values('strike') < current_price]
+        if not target_df.empty:
+            target_row = target_df.loc[target_df['put_wv'].idxmax()]
+            target_strike = target_row.name[0]
+            target_expiry = target_row.name[1]
+        else:
+            target_strike = current_price
+            target_expiry = whale_df.index.get_level_values('expiry_date')[0]
+    
+    if direction_score > 0.3:
+        direction = "Bullish"
+        color = "green"
+    elif direction_score < -0.3:
+        direction = "Bearish"
+        color = "red"
+    else:
+        direction = "Neutral"
+        color = "gray"
+    
+    confidence = min(abs(direction_score) * 100, 100)
+    
+    return (f"{direction} toward ${target_strike:.2f} for {target_expiry} "
+            f"(Confidence: {confidence:.0f}%)"), target_strike, target_expiry, color
+
+# Placeholder Functions
+@st.cache_data
+def get_whale_positions(ticker_symbol):
+    try:
+        weekly_exps = get_weekly_expirations(ticker_symbol)
+        if not weekly_exps:
+            return {"error": "No weekly expirations found", "chart": None, "details": None}
+        
+        whale_df, strike_df, current_price, price_trend = fetch_whale_positions(ticker_symbol, weekly_exps)
+        if whale_df.empty or current_price is None:
+            return {"error": "No data within price range", "chart": None, "details": None}
+        
+        direction, target_strike, target_expiry, color = predict_price_direction(current_price, whale_df, price_trend)
+        
+        # Convert to Plotly
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=strike_df.index - 0.2,
+            y=strike_df['call_wv'],
+            width=0.4,
+            name='Call Weighted Volume',
+            marker_color='green',
+            opacity=0.7
+        ))
+        fig.add_trace(go.Bar(
+            x=strike_df.index + 0.2,
+            y=strike_df['put_wv'],
+            width=0.4,
+            name='Put Weighted Volume',
+            marker_color='red',
+            opacity=0.7
+        ))
+        fig.add_vline(
+            x=current_price,
+            line_color='blue',
+            line_dash='dash',
+            annotation_text=f'Current Price: ${current_price:.2f}',
+            annotation_position='top right'
+        )
+        stats_text = f"Call WV: {strike_df['call_wv'].sum():,.0f}<br>Put WV: {strike_df['put_wv'].sum():,.0f}"
+        fig.update_layout(
+            title=f"Weighted Volume Trend Analysis for {ticker_symbol} (±10% Price Range)",
+            xaxis_title="Strike Price",
+            yaxis_title="Weighted Volume",
+            template='plotly_white',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Segoe UI, sans-serif", size=12, color="#2c3e50"),
+            height=400,
+            annotations=[dict(
+                x=0.02,
+                y=0.98,
+                xref="paper",
+                yref="paper",
+                text=stats_text,
+                showarrow=False,
+                bgcolor="white",
+                opacity=0.8
+            )],
+            xaxis=dict(showgrid=True, gridcolor='rgba(230,230,230,0.5)'),
+            yaxis=dict(showgrid=True, gridcolor='rgba(230,230,230,0.5)')
+        )
+        
+        return {
+            "whale_df": whale_df,
+            "strike_df": strike_df,
+            "current_price": current_price,
+            "price_trend": price_trend,
+            "direction": direction,
+            "target_strike": target_strike,
+            "target_expiry": target_expiry,
+            "color": color,
+            "chart": fig
+        }
+    except Exception as e:
+        st.error(f"Error in whale positions for {ticker_symbol}: {str(e)}")
+        return {"error": str(e), "chart": None, "details": None}
 
 # FINRA Short Sale Functions for Individual Symbol Analysis
 def download_finra_short_sale_data(date):
@@ -666,6 +1110,137 @@ def calculate_metrics(row, total_volume):
         'buy_to_sell_ratio': round(buy_to_sell_ratio, 2),
         'short_volume_ratio': round(short_volume_ratio, 4)
     }
+def analyze_stock_list(stock_list, timeframe_setup='1H/1D'):
+    """
+    Analyzes a list of stocks and suggests long/short trades based on app signals.
+    
+    Parameters:
+    - stock_list: List of stock ticker symbols (e.g., ["AAPL", "MSFT", ...])
+    - timeframe_setup: Oscillator timeframe (e.g., '1H/1D' or '1D/5D')
+    
+    Returns:
+    - DataFrame with trade recommendations and key metrics
+    """
+    
+    # Initialize result storage
+    results = []
+    
+    # Fetch SPY data once for relative strength calculations
+    _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
+    
+    # Process each stock
+    for ticker in stock_list:
+        try:
+            # Fetch key data from existing functions
+            stock_summary, _ = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
+            momentum_data = get_momentum(ticker)
+            oscillator_data = get_oscillator(ticker, timeframe_setup)
+            
+            # Skip if critical data is missing
+            if stock_summary.empty or "error" in momentum_data or "error" in oscillator_data:
+                continue
+            
+            # Extract key signals
+            current_price = stock_summary['Current Price'].iloc[0]
+            rsi_status = stock_summary['RSI_Status'].iloc[0]
+            key_mas = stock_summary['KeyMAs'].iloc[0]
+            price_vwap = stock_summary['Price_Vwap'].iloc[0]
+            rel_strength = stock_summary['Rel Strength SPY'].iloc[0]
+            momentum_1d = momentum_data.get('1D_signal', 'No Data')
+            momentum_5d = momentum_data.get('5D_signal', 'No Data')
+            trend = oscillator_data.get('trend', 'N/A')
+            
+            # Define trade recommendation logic
+            long_score = 0
+            short_score = 0
+            
+            # Momentum signals
+            if momentum_1d == "Buy":
+                long_score += 2
+            elif momentum_1d == "Sell":
+                short_score += 2
+            if momentum_5d == "Buy":
+                long_score += 1
+            elif momentum_5d == "Sell":
+                short_score += 1
+            
+            # Oscillator trend
+            if trend == "Bullish":
+                long_score += 2
+            elif trend == "Bearish":
+                short_score += 2
+            
+            # RSI status
+            if rsi_status == "Overbought":
+                short_score += 1
+            elif rsi_status == "Oversold":
+                long_score += 1
+            elif rsi_status == "Strong":
+                long_score += 1
+            elif rsi_status == "Weak":
+                short_score += 1
+            
+            # Key moving averages
+            if key_mas == "Bullish":
+                long_score += 2
+            elif key_mas == "Bearish":
+                short_score += 2
+            
+            # Price vs VWAP
+            if price_vwap == "Bullish":
+                long_score += 1
+            elif price_vwap == "Bearish":
+                short_score += 1
+            
+            # Relative strength vs SPY
+            if rel_strength == "Strong":
+                long_score += 1
+            elif rel_strength == "Weak":
+                short_score += 1
+            
+            # Determine trade recommendation
+            if long_score >= 5 and long_score > short_score + 2:
+                recommendation = "Long"
+                confidence = min((long_score / 10) * 100, 95)  # Cap confidence at 95%
+            elif short_score >= 5 and short_score > long_score + 2:
+                recommendation = "Short"
+                confidence = min((short_score / 10) * 100, 95)
+            else:
+                recommendation = "Hold"
+                confidence = 50
+            
+            # Compile results
+            results.append({
+                "Ticker": ticker,
+                "Current Price": current_price,
+                "Recommendation": recommendation,
+                "Long Score": long_score,
+                "Short Score": short_score,
+                "Confidence (%)": round(confidence, 1),
+                "RSI Status": rsi_status,
+                "Key MAs": key_mas,
+                "Price vs VWAP": price_vwap,
+                "Rel Strength SPY": rel_strength,
+                "1D Momentum": momentum_1d,
+                "5D Momentum": momentum_5d,
+                "Oscillator Trend": trend
+            })
+            
+        except Exception as e:
+            st.warning(f"Error processing {ticker}: {str(e)}")
+            continue
+    
+    # Convert to DataFrame
+    result_df = pd.DataFrame(results)
+    
+    # Sort by confidence and recommendation strength
+    if not result_df.empty:
+        result_df = result_df.sort_values(
+            by=["Recommendation", "Confidence (%)"],
+            ascending=[False, False]
+        )
+    
+    return result_df
 
 @st.cache_data
 def analyze_symbol_finra(symbol, lookback_days=20, threshold=1.5):
@@ -921,118 +1496,241 @@ def run():
         st.markdown('<p>Stock analysis tools for informed trading decisions</p>', unsafe_allow_html=True)
 
     # Main layout with input section
-    input_container = st.container()
-    with input_container:
-        col1, col2, col3 = st.columns([3, 2, 3])
-        with col1:
+    with st.container() as input_container:
+        st.write("### Stock Selection")
+        
+        # Add tabs for selection methods
+        selection_method = st.radio(
+            "Choose analysis method:",
+            ["Single Stock", "Pre-defined Lists", "Custom List"],
+            horizontal=True
+        )
+        
+        if selection_method == "Single Stock":
             ticker = st.text_input("Enter Stock Ticker", "").upper()
-        with col2:
+            stock_list_input = ""
+            selected_list = None
+        
+        elif selection_method == "Pre-defined Lists":
+            ticker = ""
+            stock_list_input = ""
+            selected_list = st.selectbox(
+                "Select a pre-defined list of stocks",
+                options=list(STOCK_LISTS.keys())
+            )
+            
+            if selected_list:
+                stocks = STOCK_LISTS[selected_list]
+                st.write(f"Selected {len(stocks)} stocks: {', '.join(stocks)}")
+        
+        else:  # Custom List
+            ticker = ""
+            selected_list = None
+            stock_list_input = st.text_area(
+                "Enter Custom Stock List (comma-separated)",
+                "",
+                height=100,
+                help="Example: AAPL, MSFT, GOOGL, AMZN"
+            )
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
             timeframe_setup = st.selectbox("Oscillator Timeframe", ['1H/1D', '1D/5D'], index=0)
-        with col3:
+        with col2:
             analyze_button = st.button("Analyze", use_container_width=True)
 
-    # Display a clean divider
     st.markdown('<hr style="margin: 1rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
-    
-    # Process if ticker is provided
-    if ticker:
-        # Initialize data containers
-        stock_summary = pd.DataFrame()
-        stock_hist = pd.DataFrame()
-        oscillator_data = {}
-        momentum_data = {}
-        seasonality_data = {}
-        block_trade_data = {}
-        
-        with st.spinner("Analyzing market data..."):
-            try:
-                # Fetch all required data (same as original)
-                _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
-                stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
-                oscillator_data = get_oscillator(ticker, timeframe_setup)
-                momentum_data = get_momentum(ticker)
-                seasonality_data = get_seasonality(ticker)
-                block_trade_data = get_block_trades(ticker)
-            except Exception as e:
-                st.error(f"Error retrieving data for {ticker}: {str(e)}")
-                st.stop()
 
-        # Quick overview - Summary card at the top
-        st.markdown(f'<h2 class="section-header">{ticker} Momentum Signals</h2>', unsafe_allow_html=True)
-        overview_cols = st.columns(4)
+    # Process inputs and run analysis
+    if analyze_button:
+        # Handle pre-defined list selection
+        if selected_list:
+            stock_list = STOCK_LISTS[selected_list]
+        # Handle custom list input
+        elif stock_list_input:
+            stock_list = [s.strip().upper() for s in stock_list_input.split(",") if s.strip()]
+        # Handle single ticker
+        elif ticker:
+            stock_list = None
+        else:
+            st.warning("Please enter a ticker symbol or select a list of stocks to analyze.")
+            st.stop()
+            
+        # Process the stock list (either pre-defined or custom)
+        if stock_list:
+            if len(stock_list) > 0:
+                with st.spinner(f"Analyzing {len(stock_list)} stocks..."):
+                    trade_recommendations = analyze_stock_list(stock_list, timeframe_setup)
+                
+                if not trade_recommendations.empty:
+                    st.markdown('<h2 class="section-header">Trade Recommendations</h2>', unsafe_allow_html=True)
+                    
+                    # Add filter controls
+                    filter_cols = st.columns(3)
+                    with filter_cols[0]:
+                        show_only = st.multiselect(
+                            "Filter by Recommendation",
+                            options=["Long", "Short", "Hold"],
+                            default=["Long", "Short", "Hold"]
+                        )
+                    with filter_cols[1]:
+                        min_confidence = st.slider("Minimum Confidence (%)", 0, 100, 0)
+                    with filter_cols[2]:
+                        sort_by = st.selectbox(
+                            "Sort by",
+                            options=["Confidence (%)", "Ticker"],
+                            index=0
+                        )
+                    
+                    # Apply filters
+                    filtered_df = trade_recommendations[
+                        (trade_recommendations["Recommendation"].isin(show_only)) &
+                        (trade_recommendations["Confidence (%)"] >= min_confidence)
+                    ]
+                    
+                    # Sort the data
+                    if sort_by == "Confidence (%)":
+                        filtered_df = filtered_df.sort_values("Confidence (%)", ascending=False)
+                    else:
+                        filtered_df = filtered_df.sort_values("Ticker")
+                    
+                    # Style the DataFrame for better readability
+                    def highlight_recommendation(row):
+                        color = '#90ee90' if row['Recommendation'] == 'Long' else '#ffcccb' if row['Recommendation'] == 'Short' else '#f0f0f0'
+                        return [f'background-color: {color}' if col == 'Recommendation' else '' for col in row.index]
+                    
+                    styled_df = filtered_df.style.apply(highlight_recommendation, axis=1).format({
+                        'Current Price': '${:.2f}',
+                        'Confidence (%)': '{:.1f}%'
+                    })
+                    
+                    st.dataframe(styled_df, use_container_width=True, height=600)
+                    
+                    # Summary stats
+                    st.markdown('<h3 class="section-header">Summary</h3>', unsafe_allow_html=True)
+                    summary_cols = st.columns(3)
+                    with summary_cols[0]:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Long Recommendations</div><div class="metric-value metric-bullish">{len(filtered_df[filtered_df["Recommendation"] == "Long"])}</div></div>', unsafe_allow_html=True)
+                    with summary_cols[1]:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Short Recommendations</div><div class="metric-value metric-bearish">{len(filtered_df[filtered_df["Recommendation"] == "Short"])}</div></div>', unsafe_allow_html=True)
+                    with summary_cols[2]:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">Hold Recommendations</div><div class="metric-value metric-neutral">{len(filtered_df[filtered_df["Recommendation"] == "Hold"])}</div></div>', unsafe_allow_html=True)
+                    
+                    # Option to download results
+                    csv = filtered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Recommendations as CSV",
+                        data=csv,
+                        file_name=f"trade_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                    )
+                else:
+                    st.warning("No valid trade recommendations could be generated from the provided stock list.")
+            else:
+                st.error("Please enter a valid list of stock tickers separated by commas.")
         
-        # Only show if we have momentum data
-        if isinstance(momentum_data, dict) and "error" not in momentum_data:
-            with overview_cols[0]:
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-label">Current Price</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value">${momentum_data.get("price", "N/A")}</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+        elif ticker:
+            # Initialize data containers
+            stock_summary = pd.DataFrame()
+            stock_hist = pd.DataFrame()
+            oscillator_data = {}
+            momentum_data = {}
+            seasonality_data = {}
+            block_trade_data = {}
+            gex_data = {"error": "Data not yet loaded"}
+            whale_data = {"error": "Data not yet loaded"}
             
-            with overview_cols[1]:
-                signal_1d = momentum_data.get('1D_signal', 'No Data')
-                signal_class = "metric-bullish" if signal_1d == "Buy" else "metric-bearish" if signal_1d == "Sell" else "metric-neutral"
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-label">1D Signal</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value {signal_class}">{signal_1d}</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with overview_cols[2]:
-                signal_5d = momentum_data.get('5D_signal', 'No Data')
-                signal_class = "metric-bullish" if signal_5d == "Buy" else "metric-bearish" if signal_5d == "Sell" else "metric-neutral"
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-label">5D Signal</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value {signal_class}">{signal_5d}</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with overview_cols[3]:
-                trend = "N/A"
-                if isinstance(oscillator_data, dict) and "trend" in oscillator_data:
-                    trend = oscillator_data["trend"]
-                trend_class = "metric-bullish" if trend == "Bullish" else "metric-bearish" if trend == "Bearish" else "metric-neutral"
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-label">Trend</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value {trend_class}">{trend}</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+            with st.spinner("Analyzing market data..."):
+                try:
+                    # Fetch all required data (same as original)
+                    _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
+                    stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
+                    oscillator_data = get_oscillator(ticker, timeframe_setup)
+                    momentum_data = get_momentum(ticker)
+                    seasonality_data = get_seasonality(ticker)
+                    block_trade_data = get_block_trades(ticker)
+                except Exception as e:
+                    st.error(f"Error retrieving data for {ticker}: {str(e)}")
+                    st.stop()
+
+            # Quick overview - Summary card at the top
+            st.markdown(f'<h2 class="section-header">{ticker} Momentum Signals</h2>', unsafe_allow_html=True)
+            overview_cols = st.columns(4)
+        
+            # Only show if we have momentum data
+            if isinstance(momentum_data, dict) and "error" not in momentum_data:
+                with overview_cols[0]:
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-label">Current Price</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-value">${momentum_data.get("price", "N/A")}</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with overview_cols[1]:
+                    signal_1d = momentum_data.get('1D_signal', 'No Data')
+                    signal_class = "metric-bullish" if signal_1d == "Buy" else "metric-bearish" if signal_1d == "Sell" else "metric-neutral"
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-label">1D Signal</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-value {signal_class}">{signal_1d}</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with overview_cols[2]:
+                    signal_5d = momentum_data.get('5D_signal', 'No Data')
+                    signal_class = "metric-bullish" if signal_5d == "Buy" else "metric-bearish" if signal_5d == "Sell" else "metric-neutral"
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-label">5D Signal</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-value {signal_class}">{signal_5d}</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                with overview_cols[3]:
+                    trend = "N/A"
+                    if isinstance(oscillator_data, dict) and "trend" in oscillator_data:
+                        trend = oscillator_data["trend"]
+                    trend_class = "metric-bullish" if trend == "Bullish" else "metric-bearish" if trend == "Bearish" else "metric-neutral"
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-label">Trend</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-value {trend_class}">{trend}</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
         # Main analysis section
-        main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights"])
+        main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights Seasonality ,Block Trades, GEX Analysis,Whale Positions"])
         
         # Technical Analysis Tab
         with main_tabs[0]:
             st.markdown('<h3 class="section-header">Intraday Price Action & Indicators</h3>', unsafe_allow_html=True)
-            
-            if not stock_summary.empty:
+    
+            # Only proceed with technical analysis if we're analyzing a single ticker
+            # and stock_summary has been defined and isn't empty
+            if 'stock_summary' in locals() and ticker and not stock_summary.empty:
                 # Metrics in top row
                 metric_cols = st.columns(3)
-                
+        
                 with metric_cols[0]:
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                     st.markdown('<p style="font-weight:600; margin-bottom:10px;">Price Data</p>', unsafe_allow_html=True)
-                    
+            
                     price_status = stock_summary['Price_Vwap'].iloc[0]
                     price_class = "metric-bullish" if price_status == "Bullish" else "metric-bearish" if price_status == "Bearish" else "metric-neutral"
-                    
+            
                     st.markdown(f'''
                         <div class="metric-label">Current Price</div>
                         <div class="metric-value">${stock_summary['Current Price'].iloc[0]:.2f}</div>
                         <div class="metric-label" style="margin-top:10px;">VWAP</div>
-                        <div class="metric-value">${stock_summary['VWAP'].iloc[0]:.2f}</div>
+                        <div class="metric-value">${stock_summary['VWAP'].iloc[0]::.2f}</div>
                         <div class="metric-label" style="margin-top:10px;">Price vs VWAP</div>
                         <div class="metric-value {price_class}">{price_status}</div>
                     ''', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-                
+        
                 with metric_cols[1]:
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                     st.markdown('<p style="font-weight:600; margin-bottom:10px;">Key Indicators</p>', unsafe_allow_html=True)
-                    
+            
                     mas_status = stock_summary['KeyMAs'].iloc[0]
                     mas_class = "metric-bullish" if mas_status == "Bullish" else "metric-bearish" if mas_status == "Bearish" else "metric-neutral"
-                    
+            
                     rsi_status = stock_summary['RSI_Status'].iloc[0]
                     rsi_class = "metric-bullish" if rsi_status in ["Strong", "Overbought"] else "metric-bearish" if rsi_status in ["Weak", "Oversold"] else "metric-neutral"
-                    
+            
                     st.markdown(f'''
                         <div class="metric-label">EMA21</div>
                         <div class="metric-value">${stock_summary['EMA21'].iloc[0]:.2f}</div>
@@ -1042,14 +1740,14 @@ def run():
                         <div class="metric-value {rsi_class}">{rsi_status}</div>
                     ''', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-                
+        
                 with metric_cols[2]:
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                     st.markdown('<p style="font-weight:600; margin-bottom:10px;">Market Context</p>', unsafe_allow_html=True)
-                    
+            
                     rs_status = stock_summary['Rel Strength SPY'].iloc[0]
                     rs_class = "metric-bullish" if rs_status == "Strong" else "metric-bearish" if rs_status == "Weak" else "metric-neutral"
-                    
+            
                     st.markdown(f'''
                         <div class="metric-label">Daily Pivot</div>
                         <div class="metric-value">${stock_summary['Daily Pivot'].iloc[0]:.2f}</div>
@@ -1057,7 +1755,7 @@ def run():
                         <div class="metric-value {rs_class}">{rs_status}</div>
                     ''', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-                
+        
                 # Chart in a nice container
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
                 fig = plot_candlestick(stock_hist, ticker)
@@ -1093,11 +1791,11 @@ def run():
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-                
+        
                 # Moving averages table in clean format
                 st.markdown('<h3 class="section-header">Moving Averages on Daily Timeframe</h3>', unsafe_allow_html=True)
                 ma_cols = st.columns(3)
-                
+        
                 if isinstance(momentum_data, dict) and "error" not in momentum_data:
                     with ma_cols[0]:
                         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
@@ -1109,7 +1807,7 @@ def run():
                             <div class="metric-value">${momentum_data.get('EMA_21', 'N/A')}</div>
                         ''', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    
+            
                     with ma_cols[1]:
                         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                         st.markdown('<p style="font-weight:600; margin-bottom:10px;">Long-Term</p>', unsafe_allow_html=True)
@@ -1120,7 +1818,7 @@ def run():
                             <div class="metric-value">${momentum_data.get('EMA_200', 'N/A')}</div>
                         ''', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    
+            
                     with ma_cols[2]:
                         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                         st.markdown('<p style="font-weight:600; margin-bottom:10px;">Key Levels</p>', unsafe_allow_html=True)
@@ -1133,16 +1831,20 @@ def run():
                             <div class="metric-value">${momentum_data.get('monthly_pivot', 'N/A')}</div>
                         ''', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+            elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                st.markdown('Technical analysis is only available for single stock mode. Please switch to "Single Stock" mode to see detailed technical analysis.', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-                st.markdown('No technical data available for this ticker. Please try a different symbol.', unsafe_allow_html=True)
+                st.markdown('No technical data available. Please enter a valid ticker symbol.', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
         
         # Trend Oscillator Tab
         with main_tabs[1]:
             st.markdown(f'<h3 class="section-header">Trend Oscillator ({timeframe_setup})</h3>', unsafe_allow_html=True)
             
-            if "error" not in oscillator_data:
+            if 'oscillator_data' in locals() and ticker and isinstance(oscillator_data, dict) and "error" not in oscillator_data:
                 oscillator_cols = st.columns([1, 2])
                 
                 with oscillator_cols[0]:
@@ -1192,20 +1894,24 @@ def run():
                         )
                         st.plotly_chart(oscillator_data["chart"], use_container_width=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+            elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                 st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                 st.markdown('Trend Oscillator analysis is only available for single stock mode. Please switch to "Single Stock" mode to see detailed oscillator analysis.', unsafe_allow_html=True)
+                 st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-                st.markdown(f'No oscillator data available: {oscillator_data["error"]}', unsafe_allow_html=True)
+                st.markdown('No oscillator data available. Please enter a valid ticker symbol.', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
         
         # Insights Tab (Seasonality & Block Trades)
         with main_tabs[2]:
-            insight_tabs = st.tabs(["Seasonality", "Block Trades","FINRA Analysis"])
+            insight_tabs = st.tabs(["Seasonality", "Block Trades", "FINRA Analysis", "Gamma Exposure", "Whale Positioning"])
             
             # Seasonality subtab
             with insight_tabs[0]:
                 st.markdown('<h3 class="section-header">Seasonality Analysis</h3>', unsafe_allow_html=True)
                 
-                if "error" not in seasonality_data:
+                if 'seasonality_data' in locals() and ticker and isinstance(seasonality_data, dict) and "error" not in seasonality_data:
                     seasonality_cols = st.columns([1, 3])
                     
                     with seasonality_cols[0]:
@@ -1262,16 +1968,20 @@ def run():
                             )
                             st.plotly_chart(seasonality_data["chart"], use_container_width=True)
                             st.markdown('</div>', unsafe_allow_html=True)
+                elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                        st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                        st.markdown('Seasonality analysis is only available for single stock mode. Please switch to "Single Stock" mode to see detailed seasonality patterns.', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-                    st.markdown(f'No seasonality data available: {seasonality_data["error"]}', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                        st.markdown('No seasonality data available. Please enter a valid ticker symbol.', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
             
             # Block Trades subtab
             with insight_tabs[1]:
                 st.markdown('<h3 class="section-header">Institutional Block Trades</h3>', unsafe_allow_html=True)
                 
-                if "error" not in block_trade_data:
+                if 'block_trade_data' in locals() and ticker and isinstance(block_trade_data, dict) and "error" not in block_trade_data:
                     block_cols = st.columns([1, 2])
                     
                     with block_cols[0]:
@@ -1333,27 +2043,17 @@ def run():
                                 st.plotly_chart(block_trade_data["chart"], use_container_width=True)
                             
                             st.markdown('</div>', unsafe_allow_html=True)
+                elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                    st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                    st.markdown('Block trade analysis is only available for single stock mode. Please switch to "Single Stock" mode to see institutional block trades.', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.markdown('<div class="warning-box">', unsafe_allow_html=True)
                     st.markdown(f'No block trade data available: {block_trade_data["error"]}', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Footer section with summary and disclaimer
-        st.markdown('<hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
-        st.markdown(f'''
-            <div style="background-color: white; border-radius: 8px; padding: 1.2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-                <h3 style="color: #2c3e50; font-size: 1.3rem; margin-bottom: 1rem;">Summary for {ticker}</h3>
-                <p style="color: #2c3e50; margin-bottom: 1rem;">
-                    This analysis combines technical indicators, trend oscillators, and historical patterns to provide a comprehensive view of {ticker}'s market position.
-                </p>
-                <p style="font-size: 0.8rem; color: #7f8c8d; margin-top: 1rem;">
-                    <em>Disclaimer: This tool provides analysis based on historical data and technical indicators. It is not financial advice. 
-                    Always conduct your own research and consider consulting with a financial advisor before making investment decisions.</em>
-                </p>
-            </div>
-        ''', unsafe_allow_html=True)
-
-        with insight_tabs[2]:
+            
+            # FINRA Analysis subtab
+            with insight_tabs[2]:
                         st.markdown('<h3 class="section-header">FINRA Short Sale Analysis</h3>', unsafe_allow_html=True)
                         col1, col2 = st.columns(2)
                         with col1:
@@ -1449,36 +2149,186 @@ def run():
                                     st.warning(f"No FINRA short sale data available for {ticker}. This could be because the symbol is not found in FINRA's database.")
                         else:
                             st.info("Enter a ticker symbol to view FINRA short sale analysis.")
-    
-    else:
-        # Show welcome message when no ticker is entered
-        st.markdown('''
-            <div style="background-color: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; margin: 2rem 0;">
-                <h2 style="color: #2c3e50; margin-bottom: 1.5rem;">Welcome to Stock Insights Hub</h2>
-                <p style="color: #7f8c8d; font-size: 1.1rem; margin-bottom: 2rem;">
-                    Enter a stock ticker symbol above to access comprehensive market analysis tools including:
-                </p>
-                <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
-                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
-                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Technical Analysis</h3>
-                        <p style="color: #7f8c8d; font-size: 0.9rem;">Price action, key indicators, and moving averages</p>
-                    </div>
-                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
-                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Trend Oscillator</h3>
-                        <p style="color: #7f8c8d; font-size: 0.9rem;">Advanced trend analysis with custom timeframes</p>
-                    </div>
-                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
-                        <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Market Insights</h3>
-                        <p style="color: #7f8c8d; font-size: 0.9rem;">Seasonality patterns and institutional block trades</p>
-                    </div>
-                </div>
-                <p style="color: #7f8c8d; font-size: 0.9rem;">
-                    Example tickers: AAPL, MSFT, AMZN, TSLA, NVDA, GOOGL
-                </p>
-            </div>
-        ''', unsafe_allow_html=True)
+            
+            # Gamma Exposure subtab
+            with insight_tabs[3]:
+                st.markdown('<h3 class="section-header">Gamma Exposure Analysis</h3>', unsafe_allow_html=True)
+                
+                if 'gex_data' in locals() and ticker and isinstance(gex_data, dict) and "error" not in gex_data:
+                    seasonality_cols = st.columns([1, 3])    
+                    st.markdown("#### Analysis Parameters", unsafe_allow_html=True)
+                    param_cols = st.columns([2, 1, 1])
+                    with param_cols[0]:
+                        if gex_data["exp_data"] is not None and not gex_data["exp_data"].empty:
+                            selected_exp = st.selectbox(
+                                "Select Expiration Date",
+                                gex_data["exp_data"]["date"].tolist(),
+                                key="gex_exp_select"
+                            )
+                        else:
+                            selected_exp = None
+                            st.warning("No expiration dates available")
+                    with param_cols[1]:
+                        price_range = st.slider("Price Range (%)", 1, 50, 15, key="gex_price_range")
+                    with param_cols[2]:
+                        gex_threshold = st.slider("GEX Threshold", 0.1, 50.0, 5.0, key="gex_threshold")
+                    analyze_gex = st.button("Update GEX Analysis", key="gex_analyze")
+                    if analyze_gex and selected_exp:
+                        with st.spinner("Calculating GEX..."):
+                            gex_data = get_gex(
+                                ticker,
+                                expiration=selected_exp,
+                                price_range_pct=price_range,
+                                threshold=gex_threshold
+                            )
+                    if gex_data["gex_data"] is not None and not gex_data["gex_data"].empty:
+                        gex_cols = st.columns([1, 2])
+                        with gex_cols[0]:
+                            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                            total_gex = gex_data["total_gex"]
+                            market_bias = "Positive" if total_gex > 0 else "Negative"
+                            gex_strength = "Strong" if abs(total_gex) > 20 else "Moderate" if abs(total_gex) > 10 else "Weak"
+                            st.markdown(f'''
+                                <p style="font-weight:600; margin-bottom:10px;">GEX Summary</p>
+                                <div class="metric-label">Current Price</div>
+                                <div class="metric-value">${gex_data["current_price"]:.2f}</div>
+                                <div class="metric-label" style="margin-top:10px;">Total GEX</div>
+                                <div class="metric-value">{total_gex:.2f}</div>
+                                <div class="metric-label" style="margin-top:10px;">Market Bias</div>
+                                <div class="metric-value {'metric-bullish' if total_gex > 0 else 'metric-bearish'}">{market_bias}</div>
+                                <div class="metric-label" style="margin-top:10px;">GEX Strength</div>
+                                <div class="metric-value">{gex_strength}</div>
+                            ''', unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        with gex_cols[1]:
+                            if gex_data["chart"]:
+                                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                                st.plotly_chart(gex_data["chart"], use_container_width=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown('<h4 style="margin-top:20px;">Key Takeaways</h4>', unsafe_allow_html=True)
+                        strongest_strike = gex_data["strongest_gex_strike"]
+                        st.markdown(f'''
+                            <div style="background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem;">
+                                <strong>Market Structure:</strong>
+                                - Overall GEX Bias: {market_bias} with {gex_strength.lower()} strength<br>
+                                - Strongest GEX Level: ${strongest_strike:.2f}<br>
+                                - Largest Positive GEX: {gex_data["max_positive_gex"]:.2f}<br>
+                                - Largest Negative GEX: {gex_data["max_negative_gex"]:.2f}<br><br>
+                                <strong>What This Means:</strong><br>
+                                1. <strong>Price Magnetism:</strong> ${strongest_strike:.2f} is the strongest magnetic level<br>
+                                2. <strong>Market Movement:</strong> Current bias suggests {'resistance to downward moves' if total_gex > 0 else 'resistance to upward moves'}<br>
+                                3. <strong>Volatility:</strong> {'High GEX levels typically suppress volatility' if abs(total_gex) > 20 else 'Moderate GEX levels suggest normal volatility' if abs(total_gex) > 10 else 'Low GEX levels may allow larger price movements'}
+                            </div>
+                        ''', unsafe_allow_html=True)
+                        with st.expander("View Raw GEX Data"):
+                            st.dataframe(gex_data["gex_data"])
+                    else:
+                        st.warning("No significant GEX data found for the selected parameters")
 
-        
+                elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                    st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                    st.markdown('Gex analysis is only available for single stock mode. Please switch to "Single Stock" mode to see gex data.', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                    st.markdown(f'No GEX data available: {gex_data["error"]}', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Whale Positioning subtab
+            with insight_tabs[4]:
+                st.markdown('<h3 class="section-header">Whale Positioning Analysis</h3>', unsafe_allow_html=True)
+                
+                if 'whale_data' in locals() and ticker and isinstance(whale_data, dict) and "error" not in whale_data:
+                    whale_cols = st.columns([1, 2])
+                    
+                    with whale_cols[0]:
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown(f'''
+                            <p style="font-weight:600; margin-bottom:10px;">Whale Activity Summary</p>
+                            <div class="metric-label">Current Price</div>
+                            <div class="metric-value">${whale_data["current_price"]:.2f}</div>
+                            <div class="metric-label" style="margin-top:10px;">Last Hour Trend</div>
+                            <div class="metric-value">{whale_data["price_trend"]:+.2f}%</div>
+                            <div class="metric-label" style="margin-top:10px;">Predicted Direction</div>
+                            <div class="metric-value" style="background-color: {whale_data['color']}; color: white; padding: 5px; border-radius: 3px;">
+                                {whale_data["direction"]}
+                            </div>
+                        ''', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with whale_cols[1]:
+                        if whale_data["chart"]:
+                            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                            st.plotly_chart(whale_data["chart"], use_container_width=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    st.markdown('<h4 style="margin-top:20px;">Key Insights</h4>', unsafe_allow_html=True)
+                    total_call_oi = whale_data["strike_df"]['call_oi'].sum()
+                    total_put_oi = whale_data["strike_df"]['put_oi'].sum()
+                    total_call_vol = whale_data["strike_df"]['call_vol'].sum()
+                    total_put_vol = whale_data["strike_df"]['put_vol'].sum()
+                    total_call_wv = whale_data["strike_df"]['call_wv'].sum()
+                    total_put_wv = whale_data["strike_df"]['put_wv'].sum()
+                    st.markdown(f'''
+                        <div style="background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem;">
+                            - <strong>Analysis Range</strong>: Strikes between ${whale_data["current_price"]*0.9:.2f} and ${whale_data["current_price"]*1.1:.2f}<br>
+                            - <strong>Open Interest</strong>: Calls: {total_call_oi:,.0f}, Puts: {total_put_oi:,.0f}, Ratio: {total_call_oi/total_put_oi if total_put_oi > 0 else 'N/A':.2f}<br>
+                            - <strong>Today\'s Volume</strong>: Calls: {total_call_vol:,.0f}, Puts: {total_put_vol:,.0f}<br>
+                            - <strong>Weighted Volume</strong>: Calls: {total_call_wv:,.0f}, Puts: {total_put_wv:,.0f}<br>
+                            - <strong>Momentum</strong>: Price Trend: {whale_data["price_trend"]:+.2f}%, Volume Momentum: {total_call_wv - total_put_wv:+,.0f}<br>
+                            - <strong>Target</strong>: ${whale_data["target_strike"]:.2f} by {whale_data["target_expiry"]}
+                        </div>
+                    ''', unsafe_allow_html=True)
+                    
+                    with st.expander("View Detailed Whale Data"):
+                        display_df = whale_data["strike_df"][['call_oi', 'put_oi', 'total_oi', 'call_vol', 'put_vol', 'net_vol']]
+                        st.dataframe(
+                            display_df.style.format({
+                                'call_oi': '{:,.0f}',
+                                'put_oi': '{:,.0f}',
+                                'total_oi': '{:,.0f}',
+                                'call_vol': '{:,.0f}',
+                                'put_vol': '{:,.0f}',
+                                'net_vol': '{:+,.0f}'
+                            }),
+                            use_container_width=True
+                        )
+                elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                    st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                    st.markdown('Whale positioning analysis is only available for single stock mode. Please switch to "Single Stock" mode to see whale positioning.', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                    st.markdown(f'No whale positioning data available: {whale_data["error"]}', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+    
+                #else:
+                    # Show welcome message when no ticker is entered
+                    st.markdown('''
+                <div style="background-color: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; margin: 2rem 0;">
+                    <h2 style="color: #2c3e50; margin-bottom: 1.5rem;">Welcome to Stock Insights Hub</h2>
+                    <p style="color: #7f8c8d; font-size: 1.1rem; margin-bottom: 2rem;">
+                        Enter a stock ticker symbol above to access comprehensive market analysis tools including:
+                    </p>
+                    <div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
+                        <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                            <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Technical Analysis</h3>
+                            <p style="color: #7f8c8d; font-size: 0.9rem;">Price action, key indicators, and moving averages</p>
+                        </div>
+                        <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                            <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Trend Oscillator</h3>
+                            <p style="color: #7f8c8d; font-size: 0.9rem;">Advanced trend analysis with custom timeframes</p>
+                        </div>
+                        <div style="background-color: #f8f9fa; border-radius: 8px; padding: 1rem; width: 200px;">
+                            <h3 style="color: #3498db; font-size: 1.1rem; margin-bottom: 0.5rem;">Market Insights</h3>
+                            <p style="color: #7f8c8d; font-size: 0.9rem;">Seasonality patterns and institutional block trades</p>
+                        </div>
+                    </div>
+                    <p style="color: #7f8c8d; font-size: 0.9rem;">
+                        Example tickers: AAPL, MSFT, AMZN, TSLA, NVDA, GOOGL
+                    </p>
+                </div>
+            ''', unsafe_allow_html=True)
 
     # Enhanced sidebar
     with st.sidebar:
