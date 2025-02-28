@@ -1649,6 +1649,8 @@ def run():
                     momentum_data = get_momentum(ticker)
                     seasonality_data = get_seasonality(ticker)
                     block_trade_data = get_block_trades(ticker)
+                    gex_data = get_gex(ticker)
+                    whale_data = get_whale_positions(ticker)
                 except Exception as e:
                     st.error(f"Error retrieving data for {ticker}: {str(e)}")
                     st.stop()
@@ -1715,7 +1717,7 @@ def run():
                         <div class="metric-label">Current Price</div>
                         <div class="metric-value">${stock_summary['Current Price'].iloc[0]:.2f}</div>
                         <div class="metric-label" style="margin-top:10px;">VWAP</div>
-                        <div class="metric-value">${stock_summary['VWAP'].iloc[0]::.2f}</div>
+                        <div class="metric-value">${stock_summary['VWAP'].iloc[0]:.2f}</div>
                         <div class="metric-label" style="margin-top:10px;">Price vs VWAP</div>
                         <div class="metric-value {price_class}">{price_status}</div>
                     ''', unsafe_allow_html=True)
