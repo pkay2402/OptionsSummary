@@ -17,4 +17,3 @@ seaborn
 nest_asyncio
 beautifulsoup4
 plotly
-time
