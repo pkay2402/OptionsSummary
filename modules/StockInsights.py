@@ -10,7 +10,17 @@ from datetime import datetime, timedelta, date
 from scipy import stats
 import requests
 import io
+from io import StringIO
 import pytz
+import logging
+from typing import List, Optional
+
+FLOW_URLS = [
+    "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
+    "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
+    "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
+    "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
+]
 
 STOCK_LISTS = {
     "Index": ["SPY", "QQQ", "IWM", "DIA", "SMH", "XLF", "XLE", "XLV", "XLY", "XLC", "XLI", "XLB", "XLRE", "XLU", "XLP", "XBI", "XOP", "XME", "XRT", "XHB","UVXY"],
@@ -22,6 +32,87 @@ STOCK_LISTS = {
     "Energy Stocks": ["XOM", "CVX", "COP", "EOG", "SLB", "PXD", "OXY", "DVN", "MPC", "PSX"],
     "Retail Giants": ["WMT", "TGT", "COST", "HD", "LOW", "AMZN", "EBAY", "ETSY", "BBY", "DG"]
 }
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def validate_csv_content_type(response: requests.Response) -> bool:
+    """Validate if the response content type is CSV."""
+    return 'text/csv' in response.headers.get('Content-Type', '')
+
+def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
+    """Fetch and process data from a single URL."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        if validate_csv_content_type(response):
+            csv_data = StringIO(response.text)
+            df = pd.read_csv(csv_data)
+            df['Expiration'] = pd.to_datetime(df['Expiration'])
+            df = df[df['Expiration'].dt.date >= datetime.now().date()]
+            return df
+        else:
+            logger.warning(f"Data from {url} is not in CSV format. Skipping...")
+    except Exception as e:
+        logger.error(f"Error fetching data from {url}: {e}")
+    return None
+
+def fetch_options_flow_data(urls: List[str], ticker: str) -> pd.DataFrame:
+    """Fetch and combine options flow data for a specific ticker."""
+    data_frames = []
+    for url in urls:
+        df = fetch_data_from_url(url)
+        if df is not None and not df.empty:
+            df = df[df['Symbol'] == ticker]
+            if not df.empty:
+                data_frames.append(df)
+    return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
+
+def get_current_price(ticker: str) -> float:
+    """Fetch the current price of the ticker using yfinance."""
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.history(period="1d")['Close'].iloc[-1]
+    except Exception as e:
+        logger.error(f"Error fetching current price for {ticker}: {e}")
+        return None
+
+def get_top_otm_flows(ticker: str, urls: List[str], top_n: int = 10) -> pd.DataFrame:
+    """Get the top N OTM options flows ordered by transaction value."""
+    try:
+        # Fetch options flow data
+        df = fetch_options_flow_data(urls, ticker)
+        if df.empty:
+            return pd.DataFrame()
+
+        # Fetch current price
+        current_price = get_current_price(ticker)
+        if current_price is None:
+            logger.error(f"Could not determine current price for {ticker}")
+            return pd.DataFrame()
+
+        # Filter for OTM options
+        df['Transaction Value'] = df['Volume'] * df['Last Price'] * 100
+        otm_df = df[
+            ((df['Call/Put'] == 'C') & (df['Strike Price'] > current_price)) |  # OTM Calls
+            ((df['Call/Put'] == 'P') & (df['Strike Price'] < current_price))    # OTM Puts
+        ]
+
+        # Summarize and sort by transaction value
+        summary = (
+            otm_df.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
+            .agg({'Volume': 'sum', 'Transaction Value': 'sum'})
+            .reset_index()
+        )
+        summary = summary.sort_values(by='Transaction Value', ascending=False)
+
+        # Return top N
+        return summary.head(top_n)
+
+    except Exception as e:
+        logger.error(f"Error in get_top_otm_flows for {ticker}: {e}")
+        return pd.DataFrame()
 
 # StockAnalysis Functions
 def calculate_rsi(data, periods=14):
@@ -1132,7 +1223,7 @@ def analyze_stock_list(stock_list, timeframe_setup='1H/1D'):
     for ticker in stock_list:
         try:
             # Fetch key data from existing functions
-            stock_summary, _ = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
+            stock_summary, _ = fetch_stock_data(ticker, period="1y", interval="1d", spy_hist=spy_hist)
             momentum_data = get_momentum(ticker)
             oscillator_data = get_oscillator(ticker, timeframe_setup)
             
@@ -1694,7 +1785,7 @@ def run():
                     st.markdown('</div>', unsafe_allow_html=True)
 
         # Main analysis section
-        main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights Seasonality ,Block Trades, GEX Analysis,Whale Positions"])
+        main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights:Seasonality,Block Trades,GEX Analysis,Whale Positions,FINRA Short Sales,Flow Summary"])
         
         # Technical Analysis Tab
         with main_tabs[0]:
@@ -1907,7 +1998,7 @@ def run():
         
         # Insights Tab (Seasonality & Block Trades)
         with main_tabs[2]:
-            insight_tabs = st.tabs(["Seasonality", "Block Trades", "FINRA Analysis", "Gamma Exposure", "Whale Positioning"])
+            insight_tabs = st.tabs(["Seasonality", "Block Trades", "FINRA Analysis", "Gamma Exposure", "Whale Positioning", "Flow Summary"])
             
             # Seasonality subtab
             with insight_tabs[0]:
@@ -2332,6 +2423,92 @@ def run():
                 </div>
             ''', unsafe_allow_html=True)
 
+            # Flow Summary subtab
+            with insight_tabs[5]:
+                st.markdown('<h3 class="section-header">Flow Summary - Top 10 OTM Options Flows</h3>', unsafe_allow_html=True)
+
+                if ticker:  # Only run if a ticker is entered
+                    with st.spinner("Fetching options flow data..."):
+                        flow_summary = get_top_otm_flows(ticker, FLOW_URLS)
+
+                    if not flow_summary.empty:
+                        flow_cols = st.columns([1, 2])
+
+                        with flow_cols[0]:
+                            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                            current_price = get_current_price(ticker)
+                            total_value = flow_summary['Transaction Value'].sum()
+                            call_count = len(flow_summary[flow_summary['Call/Put'] == 'C'])
+                            put_count = len(flow_summary[flow_summary['Call/Put'] == 'P'])
+                            sentiment = "Bullish" if call_count > put_count else "Bearish" if put_count > call_count else "Neutral"
+                            sentiment_class = "metric-bullish" if sentiment == "Bullish" else "metric-bearish" if sentiment == "Bearish" else "metric-neutral"
+                            st.markdown(f'''
+                                <p style="font-weight:600; margin-bottom:10px;">Flow Overview</p>
+                                <div class="metric-label">Current Price</div>
+                                <div class="metric-value">${current_price:.2f if current_price else "N/A"}</div>
+                                <div class="metric-label" style="margin-top:10px;">Total Transaction Value</div>
+                                <div class="metric-value">${total_value:,.2f}</div>
+                                <div class="metric-label" style="margin-top:10px;">Call/Put Split</div>
+                                <div class="metric-value">{call_count} Calls / {put_count} Puts</div>
+                                <div class="metric-label" style="margin-top:10px;">Sentiment</div>
+                                <div class="metric-value {sentiment_class}">{sentiment}</div>
+                            ''', unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                        with flow_cols[1]:
+                            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+
+                            # Format the DataFrame for display
+                            display_df = flow_summary.copy()
+                            display_df['Expiration'] = display_df['Expiration'].dt.strftime('%Y-%m-%d')
+                            display_df['Transaction Value'] = display_df['Transaction Value'].apply(lambda x: f"${x:,.2f}")
+                            display_df['Last Price'] = display_df['Last Price'].apply(lambda x: f"${x:.2f}")
+                            display_df = display_df.rename(columns={
+                                'Call/Put': 'Type',
+                                'Strike Price': 'Strike',
+                                'Last Price': 'Price',
+                                'Transaction Value': 'Value'
+                            })
+
+                            # Style the DataFrame
+                            def highlight_type(row):
+                                color = '#90ee90' if row['Type'] == 'C' else '#ffcccb' if row['Type'] == 'P' else ''
+                                return [f'background-color: {color}' if col == 'Type' else '' for col in row.index]
+
+                            styled_df = display_df.style.apply(highlight_type, axis=1)
+                            st.dataframe(styled_df, use_container_width=True, height=400)
+
+                            # Download button
+                            csv = display_df.to_csv(index=False)
+                            st.download_button(
+                                label="Download Top 10 OTM Flows as CSV",
+                                data=csv,
+                                file_name=f"{ticker}_top_10_otm_flows_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                        st.markdown('''
+                            <div style="background-color: #f0f2f6; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+                                <strong>Flow Summary Notes:</strong><br>
+                                - Showing top 10 out-of-the-money (OTM) options flows by transaction value.<br>
+                                - OTM Calls: Strike > Current Price | OTM Puts: Strike < Current Price.<br>
+                                - Data sourced from CBOE options market statistics.<br>
+                                - Transaction Value = Volume × Last Price × 100.
+                            </div>
+                        ''', unsafe_allow_html=True)
+
+                    elif selection_method == "Pre-defined Lists" or selection_method == "Custom List":
+                        st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                        st.markdown('Flow Summary is only available for single stock mode. Please switch to "Single Stock" mode to see the top 10 OTM options flows.', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                        st.markdown(f'No OTM options flow data available for {ticker}. This may be due to unavailable data from CBOE or no qualifying OTM transactions.', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.info("Enter a ticker symbol to view the top 10 OTM options flows.")   
     # Enhanced sidebar
     with st.sidebar:
         st.markdown('''
