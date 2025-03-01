@@ -209,8 +209,8 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
         xaxis_rangeslider_visible=False,
         height=800,
         template='plotly_dark',
-        plot_bgcolor='black',  # Match ThinkScript's dark background
-        paper_bgcolor='black',  # Match ThinkScript's dark background
+        plot_bgcolor='white',  # Match ThinkScript's dark background
+        paper_bgcolor='white',  # Match ThinkScript's dark background
         xaxis=dict(  # Lower timeframe x-axis (1H or 1D)
             rangebreaks=rangebreaks,
             showgrid=False,  # Remove gridlines to match ThinkScript
