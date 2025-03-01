@@ -455,7 +455,7 @@ def plot_volume_trend(whale_df, current_price, ticker_symbol):
     
     ax2 = ax1.twinx()
     ax2.plot(strike_df.index, strike_df['net_gxoi'], color='purple', 
-             linestyle='--', label='Net Gamma Exposure')
+             linestyle='--', label='Net Gamma Exposure', linewidth=5)
     ax2.set_ylabel("Net Gamma Exposure")
     ax2.legend(loc='upper right')
     
