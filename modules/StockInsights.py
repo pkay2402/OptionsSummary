@@ -23,7 +23,8 @@ FLOW_URLS = [
 ]
 
 STOCK_LISTS = {
-    "Index": ["SPY", "QQQ", "IWM", "DIA", "SMH", "XLF", "XLE", "XLV", "XLY", "XLC", "XLI", "XLB", "XLRE", "XLU", "XLP", "XBI", "XOP", "XME", "XRT", "XHB","UVXY"],
+    "Index": ["SPY", "QQQ", "IWM", "DIA", "SMH", 'IBIT',"UVXY"],
+    "Sector ETF": ["XLF", "XLE", "XLV", "XLY", "XLC", "XLI", "XLB", "XLRE", "XLU", "XLP", "XBI", "XOP", "XME", "XRT", "XHB"],
     "Tech Giants": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSM", "AVGO", "ADBE", 
                "CRM", "ORCL", "CSCO", "AMD", "INTC", "IBM", "TXN", "QCOM", "AMAT", "MU", "NOW"],
     "Dow Components": ["AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW", "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT"],
@@ -2442,10 +2443,11 @@ def run():
                             put_count = len(flow_summary[flow_summary['Call/Put'] == 'P'])
                             sentiment = "Bullish" if call_count > put_count else "Bearish" if put_count > call_count else "Neutral"
                             sentiment_class = "metric-bullish" if sentiment == "Bullish" else "metric-bearish" if sentiment == "Bearish" else "metric-neutral"
+                            price_display = f"${current_price:.2f}" if current_price is not None else "N/A"
                             st.markdown(f'''
                                 <p style="font-weight:600; margin-bottom:10px;">Flow Overview</p>
                                 <div class="metric-label">Current Price</div>
-                                <div class="metric-value">${current_price:.2f if current_price else "N/A"}</div>
+                                <div class="metric-value">{price_display}</div>
                                 <div class="metric-label" style="margin-top:10px;">Total Transaction Value</div>
                                 <div class="metric-value">${total_value:,.2f}</div>
                                 <div class="metric-label" style="margin-top:10px;">Call/Put Split</div>
