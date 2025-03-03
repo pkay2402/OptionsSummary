@@ -762,7 +762,7 @@ def run_standard_analysis():
 
 def run():
     st.sidebar.title("Mode Selection")
-    mode = st.sidebar.radio("Select Analysis Mode", ["Standard Whale Analysis", "Intraday Prediction"])
+    mode = st.sidebar.radio("Select Analysis Mode", ["Intraday Prediction","Standard Whale Analysis"])
     
     if mode == "Standard Whale Analysis":
         run_standard_analysis()
