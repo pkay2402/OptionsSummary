@@ -4,6 +4,10 @@ import requests
 import io
 from datetime import datetime, timedelta
 import yfinance as yf
+import plotly.express as px
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # Existing functions unchanged unless noted
 def download_finra_short_sale_data(date):
@@ -39,7 +43,7 @@ def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     results = []
     significant_days = 0
     
-    for i in range(lookback_days * 2):  # Double to account for non-trading days
+    for i in range(lookback_days * 2):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
         
@@ -79,8 +83,7 @@ def validate_pattern(symbol, dates, pattern_type="accumulation"):
 
 def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulation", use_price_validation=False):
     pattern_data = {}
-    # Adjust for trading days (skip weekends)
-    for i in range(lookback_days * 2):  # Double to account for non-trading days
+    for i in range(lookback_days * 2):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
         if data:
@@ -96,14 +99,14 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
                 pattern_data[symbol]['volumes'].append(total_volume)
                 pattern_data[symbol]['ratios'].append(metrics['buy_to_sell_ratio'])
                 pattern_data[symbol]['total_volume'] += total_volume
-                if pattern_type == "accumulation" and metrics['buy_to_sell_ratio'] > 1.5:  # Match original threshold
+                if pattern_type == "accumulation" and metrics['buy_to_sell_ratio'] > 1.5:
                     pattern_data[symbol]['days_pattern'] += 1
-                elif pattern_type == "distribution" and metrics['buy_to_sell_ratio'] < 0.7:  # Match original
+                elif pattern_type == "distribution" and metrics['buy_to_sell_ratio'] < 0.7:
                     pattern_data[symbol]['days_pattern'] += 1
     
     results = []
     for symbol, data in pattern_data.items():
-        if len(data['dates']) >= 3 and data['days_pattern'] >= 2:  # Match original requirements
+        if len(data['dates']) >= 3 and data['days_pattern'] >= 2:
             if not use_price_validation or validate_pattern(symbol, data['dates'], pattern_type):
                 avg_ratio = sum(data['ratios']) / len(data['ratios'])
                 avg_volume = data['total_volume'] / len(data['dates'])
@@ -123,9 +126,8 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
         results = sorted(results, key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), reverse=True)
     return pd.DataFrame(results[:40])
 
-# New function for sector rotation
+# Enhanced Sector Rotation with ETF Performance
 def get_sector_rotation(lookback_days=10, min_volume=50000):
-    # Simplified sector mapping (expand with full S&P 500 sector data)
     sector_map = {
         'XLK': 'S&P Technology',
         'XLF': 'Financials',
@@ -139,8 +141,10 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
         'XRT': 'Retail',
         'SMH': 'Semis',
         'QQQ': 'Nasdaq 100'
-        # Add more symbols or fetch from yfinance
     }
+    sector_etfs = yf.Tickers(list(sector_map.keys()))
+    sector_performance = {ticker: ticker_obj.history(period=f"{lookback_days}d")['Close'].pct_change().mean() 
+                          for ticker, ticker_obj in sector_etfs.tickers.items()}
     
     sector_data = {}
     for i in range(lookback_days):
@@ -165,10 +169,10 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
     
     results = []
     for sector, data in sector_data.items():
-        if len(data['dates']) >= 3:  # Require data for at least 3 days
+        if len(data['dates']) >= 3:
             avg_ratio = sum(data['ratios']) / len(data['ratios'])
             avg_volume = sum(data['volumes']) / len(data['volumes'])
-            ratio_trend = (data['ratios'][0] - data['ratios'][-1]) / len(data['ratios'])  # Daily change in ratio
+            ratio_trend = (data['ratios'][0] - data['ratios'][-1]) / len(data['ratios'])
             volume_trend = 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing'
             results.append({
                 'Sector': sector,
@@ -177,10 +181,10 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
                 'Avg Daily Volume': int(avg_volume),
                 'Volume Trend': volume_trend,
                 'Symbols Count': len(data['symbols']),
-                'Latest Ratio': data['ratios'][0]
+                'Latest Ratio': data['ratios'][0],
+                'Sector Performance': round(sector_performance.get(sector.split()[0], 0) * 100, 2)
             })
     
-    # Sort by ratio trend and volume for buying/selling signals
     buying_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Up'], 
                             key=lambda x: (x['Avg Buy/Sell Ratio'], x['Avg Daily Volume']), reverse=True)
     selling_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Down'], 
@@ -188,76 +192,63 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
     
     return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
 
-    # New function for sector rotation
-def get_Mega12_rotation(lookback_days=10, min_volume=100000):
-    # Simplified sector mapping (expand with full S&P 500 sector data)
-    sector_map = {
-        'AAPL': 'AAPL',
-        'AMZN': 'AMZN',
-        'TSLA': 'TSLA',
-        'GOOG': 'GOOG',
-        'MSFT': 'MSFT',
-        'NFLX': 'NFLX',
-        'NVDA': 'NVDA',
-        'AVGO': 'AVGO',
-        'JPM': 'JPM',
-        'LLY': 'LLY',
-        'UNH': 'UNH',
-        'XOM': 'XOM',
-        'META': 'META'
-        # Add more symbols or fetch from yfinance
-    }
-    
-    sector_data = {}
-    for i in range(lookback_days):
-        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
-        data = download_finra_short_sale_data(date)
-        if data:
-            df = process_finra_short_sale_data(data)
-            df = df[df['TotalVolume'] > min_volume]
-            for _, row in df.iterrows():
-                symbol = row['Symbol']
-                if symbol in sector_map:
-                    sector = sector_map[symbol]
-                    total_volume = row.get('TotalVolume', 0)
-                    metrics = calculate_metrics(row, total_volume)
-                    
-                    if sector not in sector_data:
-                        sector_data[sector] = {'dates': [], 'ratios': [], 'volumes': [], 'symbols': set()}
-                    sector_data[sector]['dates'].append(date)
-                    sector_data[sector]['ratios'].append(metrics['buy_to_sell_ratio'])
-                    sector_data[sector]['volumes'].append(total_volume)
-                    sector_data[sector]['symbols'].add(symbol)
-    
-    results = []
-    for sector, data in sector_data.items():
-        if len(data['dates']) >= 3:  # Require data for at least 3 days
-            avg_ratio = sum(data['ratios']) / len(data['ratios'])
-            avg_volume = sum(data['volumes']) / len(data['volumes'])
-            ratio_trend = (data['ratios'][0] - data['ratios'][-1]) / len(data['ratios'])  # Daily change in ratio
-            volume_trend = 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing'
-            results.append({
-                'Sector': sector,
-                'Avg Buy/Sell Ratio': round(avg_ratio, 2),
-                'Ratio Trend': 'Up' if ratio_trend > 0 else 'Down',
-                'Avg Daily Volume': int(avg_volume),
-                'Volume Trend': volume_trend,
-                'Symbols Count': len(data['symbols']),
-                'Latest Ratio': data['ratios'][0]
+# Portfolio Analysis
+def analyze_portfolio(symbols, lookback_days=20):
+    portfolio_results = []
+    for symbol in symbols:
+        df, significant_days = analyze_symbol(symbol, lookback_days, threshold=1.5)
+        if not df.empty:
+            portfolio_results.append({
+                'Symbol': symbol,
+                'Avg Buy/Sell Ratio': round(df['buy_to_sell_ratio'].mean(), 2),
+                'Significant Days': significant_days,
+                'Latest Volume': int(df['total_volume'].iloc[0])
             })
-    
-    # Sort by ratio trend and volume for buying/selling signals
-    buying_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Up'], 
-                            key=lambda x: (x['Avg Buy/Sell Ratio'], x['Avg Daily Volume']), reverse=True)
-    selling_sectors = sorted([r for r in results if r['Ratio Trend'] == 'Down'], 
-                             key=lambda x: (x['Avg Buy/Sell Ratio'], x['Avg Daily Volume']))
-    
-    return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
+    return pd.DataFrame(portfolio_results)
+
+# Alerts
+def check_alerts(df_results, symbol, threshold=2.0):
+    if not df_results.empty and df_results['buy_to_sell_ratio'].max() > threshold:
+        st.warning(f"Alert: {symbol} has a Buy/Sell Ratio above {threshold} on {df_results['date'].iloc[0].strftime('%Y-%m-%d')}!")
+
+# Export Functionality
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
+
+# Heatmap for Correlations
+def plot_correlation_heatmap(symbols, lookback_days=20):
+    data = {}
+    for symbol in symbols:
+        df, _ = analyze_symbol(symbol, lookback_days)
+        if not df.empty:
+            data[symbol] = df['buy_to_sell_ratio']
+    corr_df = pd.DataFrame(data).corr()
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(corr_df, annot=True, cmap='coolwarm', ax=ax)
+    st.pyplot(fig)
 
 def run():
+    # Custom Styling
+    st.markdown("""
+        <style>
+        .stButton>button {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .stTabs [data-baseweb="tab"] {
+            font-size: 16px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
     st.title("FINRA Short Sale Analysis")
     
-    tab1, tab2, tab3, tab4,tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Stock Rotation"])
+    # Sidebar for Portfolio
+    with st.sidebar:
+        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, MSFT, TSLA").split(",")
+        portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Portfolio Analysis"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -268,7 +259,8 @@ def run():
             threshold = st.number_input("Buy/Sell Ratio Threshold", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
         
         if st.button("Analyze Stock"):
-            results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)  # Assume this function exists
+            with st.spinner(f"Analyzing {symbol}..."):
+                results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)
             if not results_df.empty:
                 st.subheader("Summary")
                 avg_ratio = results_df['buy_to_sell_ratio'].mean()
@@ -280,6 +272,16 @@ def run():
                     st.metric("Max Buy/Sell Ratio", f"{max_ratio:.2f}")
                 with metrics_col3:
                     st.metric(f"Days Above {threshold}", significant_days)
+                
+                # Alert Check
+                check_alerts(results_df, symbol)
+                
+                # Visualization
+                fig = px.line(results_df, x='date', y='buy_to_sell_ratio', title=f"{symbol} Buy/Sell Ratio Over Time",
+                              hover_data=['total_volume', 'short_volume_ratio'])
+                fig.add_hline(y=threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold: {threshold}")
+                st.plotly_chart(fig)
+                
                 st.subheader("Daily Analysis")
                 def highlight_significant(row):
                     return ['background-color: rgba(144, 238, 144, 0.3)' if row['buy_to_sell_ratio'] > threshold else ''] * len(row)
@@ -288,6 +290,10 @@ def run():
                     display_df[col] = display_df[col].astype(int)
                 styled_df = display_df.style.apply(highlight_significant, axis=1)
                 st.dataframe(styled_df)
+                
+                # Export
+                csv = convert_df_to_csv(results_df)
+                st.download_button("Download Results as CSV", csv, f"{symbol}_analysis.csv", "text/csv")
     
     with tab2:
         st.subheader("Top 40 Stocks Showing Accumulation")
@@ -298,12 +304,22 @@ def run():
             acc_use_validation = st.checkbox("Use Price Validation", value=False, key="acc_val")
         
         if st.button("Find Accumulation Patterns"):
-            accumulation_df = find_patterns(lookback_days=10, min_volume=acc_min_volume, pattern_type="accumulation", use_price_validation=acc_use_validation)
+            with st.spinner("Finding patterns..."):
+                accumulation_df = find_patterns(lookback_days=10, min_volume=acc_min_volume, pattern_type="accumulation", use_price_validation=acc_use_validation)
             if not accumulation_df.empty:
                 def highlight_acc_pattern(row):
                     return [f'background-color: rgba(144, 238, 144, 0.3)' if row['Volume Trend'] == 'Increasing' else ''] * len(row)
                 styled_df = accumulation_df.style.apply(highlight_acc_pattern, axis=1)
                 st.dataframe(styled_df)
+                
+                # Visualization
+                fig = px.bar(accumulation_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
+                             color='Volume Trend', title="Top 10 Accumulation Patterns")
+                st.plotly_chart(fig)
+                
+                # Export
+                csv = convert_df_to_csv(accumulation_df)
+                st.download_button("Download Accumulation Patterns as CSV", csv, "accumulation_patterns.csv", "text/csv")
             else:
                 st.write("No accumulation patterns detected with current filters.")
     
@@ -316,12 +332,22 @@ def run():
             dist_use_validation = st.checkbox("Use Price Validation", value=False, key="dist_val")
         
         if st.button("Find Distribution Patterns"):
-            distribution_df = find_patterns(lookback_days=10, min_volume=dist_min_volume, pattern_type="distribution", use_price_validation=dist_use_validation)
+            with st.spinner("Finding patterns..."):
+                distribution_df = find_patterns(lookback_days=10, min_volume=dist_min_volume, pattern_type="distribution", use_price_validation=dist_use_validation)
             if not distribution_df.empty:
                 def highlight_dist_pattern(row):
                     return [f'background-color: rgba(255, 182, 193, 0.3)' if row['Volume Trend'] == 'Increasing' else ''] * len(row)
                 styled_df = distribution_df.style.apply(highlight_dist_pattern, axis=1)
                 st.dataframe(styled_df)
+                
+                # Visualization
+                fig = px.bar(distribution_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
+                             color='Volume Trend', title="Top 10 Distribution Patterns")
+                st.plotly_chart(fig)
+                
+                # Export
+                csv = convert_df_to_csv(distribution_df)
+                st.download_button("Download Distribution Patterns as CSV", csv, "distribution_patterns.csv", "text/csv")
             else:
                 st.write("No distribution patterns detected with current filters.")
     
@@ -329,55 +355,72 @@ def run():
         st.subheader("Sector Rotation Analysis")
         col1, col2 = st.columns(2)
         with col1:
-            rot_min_volume_sector = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol_sector")
+            rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
         with col2:
-            rot_lookback_days_sector = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days_sector")
-
+            rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
+        
         if st.button("Analyze Sector Rotation"):
-            buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days_sector, min_volume=rot_min_volume_sector)
+            with st.spinner("Analyzing sector rotation..."):
+                buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
             st.write("### Sectors Being Bought (Money In)")
-            def highlight_buying(row):
-                return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
             if not buying_df.empty:
+                def highlight_buying(row):
+                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
                 styled_buying = buying_df.style.apply(highlight_buying, axis=1)
                 st.dataframe(styled_buying)
+                
+                # Visualization
+                fig = px.pie(buying_df, values='Avg Daily Volume', names='Sector', 
+                             title="Buying Sectors by Volume")
+                st.plotly_chart(fig)
+                
+                # Export
+                csv = convert_df_to_csv(buying_df)
+                st.download_button("Download Buying Sectors as CSV", csv, "buying_sectors.csv", "text/csv")
             else:
                 st.write("No sectors with clear buying trends detected.")
+            
             st.write("### Sectors Being Sold (Money Out)")
-            def highlight_selling(row):
-                return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
             if not selling_df.empty:
+                def highlight_selling(row):
+                    return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
                 styled_selling = selling_df.style.apply(highlight_selling, axis=1)
                 st.dataframe(styled_selling)
+                
+                # Export
+                csv = convert_df_to_csv(selling_df)
+                st.download_button("Download Selling Sectors as CSV", csv, "selling_sectors.csv", "text/csv")
             else:
                 st.write("No sectors with clear selling trends detected.")
-
+    
     with tab5:
-        st.subheader("Stock Rotation Analysis")
+        st.subheader("Portfolio Analysis")
         col1, col2 = st.columns(2)
         with col1:
-            rot_min_volume_stock = st.number_input("Minimum Daily Volume (Stock Rotation)", value=50000, step=10000, format="%d", key="rot_vol_stock")
+            port_lookback_days = st.slider("Lookback Days (Portfolio)", 1, 30, 20, key="port_days")
         with col2:
-            rot_lookback_days_stock = st.slider("Lookback Days (Stock Rotation)", 1, 30, 10, key="rot_days_stock")
-
-        if st.button("Analyze Stock Rotation"):
-            buying_df, selling_df = get_Mega12_rotation(lookback_days=rot_lookback_days_stock, min_volume=rot_min_volume_stock)
-            st.write("### Stocks Being Bought (Money In)")
-            def highlight_buying(row):
-                return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
-            if not buying_df.empty:
-                styled_buying = buying_df.style.apply(highlight_buying, axis=1)
-                st.dataframe(styled_buying)
+            st.write(f"Analyzing: {', '.join(portfolio_symbols)}")
+        
+        if st.button("Analyze Portfolio"):
+            with st.spinner("Analyzing portfolio..."):
+                portfolio_df = analyze_portfolio(portfolio_symbols, port_lookback_days)
+            if not portfolio_df.empty:
+                st.dataframe(portfolio_df)
+                
+                # Visualization
+                fig = px.bar(portfolio_df, x='Symbol', y='Avg Buy/Sell Ratio', 
+                             title="Portfolio Buy/Sell Ratios", color='Significant Days')
+                st.plotly_chart(fig)
+                
+                # Correlation Heatmap
+                if st.button("Show Portfolio Correlation"):
+                    plot_correlation_heatmap(portfolio_symbols, port_lookback_days)
+                
+                # Export
+                csv = convert_df_to_csv(portfolio_df)
+                st.download_button("Download Portfolio Analysis as CSV", csv, "portfolio_analysis.csv", "text/csv")
             else:
-                st.write("No stocks with clear buying trends detected.")
-            st.write("### Stocks Being Sold (Money Out)")
-            def highlight_selling(row):
-                return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
-            if not selling_df.empty:
-                styled_selling = selling_df.style.apply(highlight_selling, axis=1)
-                st.dataframe(styled_selling)
-            else:
-                st.write("No stocks with clear selling trends detected.")
+                st.write("No data available for the selected portfolio.")
 
 if __name__ == "__main__":
     run()
