@@ -245,7 +245,7 @@ def run():
     
     # Sidebar for Portfolio
     with st.sidebar:
-        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, MSFT, TSLA").split(",")
+        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, MSFT, TSLA, AMZN, GOOGL, NFLX, NVDA, CRWD, JPM, GS, ABBV").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Portfolio Analysis"])
