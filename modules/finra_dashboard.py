@@ -129,18 +129,26 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
 # Enhanced Sector Rotation with ETF Performance
 def get_sector_rotation(lookback_days=10, min_volume=50000):
     sector_map = {
-        'XLK': 'S&P Technology',
-        'XLF': 'Financials',
-        'XLE': 'Energy',
-        'XLP': 'Consumer Staples',
-        'XLY': 'Consumer Discretionary',
-        'XLV': 'Healthcare',
-        'XLI': 'Industrials',
-        'XLU': 'Utilities',
-        'XLRE': 'Real Estate',
-        'XRT': 'Retail',
-        'SMH': 'Semis',
-        'QQQ': 'Nasdaq 100'
+    'QQQ': 'Technology',
+    'VGT': 'Technology',
+    'IVW': 'Large-Cap Growth',
+    'VUG': 'Large-Cap Growth',
+    'SCHG': 'Large-Cap Growth',
+    'MGK': 'Large-Cap Growth',
+    'VOOG': 'Large-Cap Growth',
+    'IWP': 'Mid-Cap Growth',
+    'VOT': 'Mid-Cap Growth',
+    'EFG': 'International Growth',
+    'VTV': 'Large-Cap Value',
+    'IVE': 'Large-Cap Value',
+    'SCHV': 'Large-Cap Value',
+    'IWD': 'Large-Cap Value',
+    'VLUE': 'Large-Cap Value',
+    'VOE': 'Mid-Cap Value',
+    'IWS': 'Mid-Cap Value',
+    'VBR': 'Small-Cap Value',
+    'DHS': 'High Dividend Value',
+    'RPV': 'S&P Pure Value'
     }
     sector_etfs = yf.Tickers(list(sector_map.keys()))
     sector_performance = {ticker: ticker_obj.history(period=f"{lookback_days}d")['Close'].pct_change().mean() 
@@ -176,6 +184,7 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
             volume_trend = 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing'
             results.append({
                 'Sector': sector,
+                'Symbol': ', '.join(data['symbols']),
                 'Avg Buy/Sell Ratio': round(avg_ratio, 2),
                 'Ratio Trend': 'Up' if ratio_trend > 0 else 'Down',
                 'Avg Daily Volume': int(avg_volume),
@@ -245,7 +254,7 @@ def run():
     
     # Sidebar for Portfolio
     with st.sidebar:
-        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, MSFT, TSLA, AMZN, GOOGL, NFLX, NVDA, CRWD, JPM, GS, ABBV").split(",")
+        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, MSFT, TSLA, AMZN, GOOGL, NFLX, NVDA, CRWD, JPM, GS, ABBV, LLY").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Portfolio Analysis"])
