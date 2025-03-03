@@ -163,6 +163,10 @@ def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
         hist['EMA9'] = hist['Close'].ewm(span=9, adjust=False).mean()
         hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
         
+        # For longer timeframes, add more relevant MAs
+        if period in ["1y", "6mo"]:
+            hist['SMA200'] = hist['Close'].rolling(window=200).mean()
+            
         rs_value, rs_status = calculate_relative_strength(hist, spy_hist) if spy_hist is not None else (0, "N/A")
         
         today_data = hist.iloc[-1]
@@ -171,12 +175,22 @@ def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
         ema_21 = round(hist['EMA21'].iloc[-1], 2)
         daily_pivot = round((hist["High"].iloc[-1] + hist["Low"].iloc[-1] + current_price) / 3, 2)
         
-        if current_price > hist['EMA9'].iloc[-1] and current_price > ema_21 and current_price > hist['EMA50'].iloc[-1]:
-            key_mas = "Bullish"
-        elif current_price < hist['EMA9'].iloc[-1] and current_price < ema_21 and current_price < hist['EMA50'].iloc[-1]:
-            key_mas = "Bearish"
+        # Adjust MA logic based on timeframe
+        if period in ["1y", "6mo"]:
+            sma_200 = round(hist['SMA200'].iloc[-1], 2) if not pd.isna(hist['SMA200'].iloc[-1]) else None
+            if current_price > hist['EMA9'].iloc[-1] and current_price > ema_21 and current_price > hist['EMA50'].iloc[-1] and (sma_200 is None or current_price > sma_200):
+                key_mas = "Bullish"
+            elif current_price < hist['EMA9'].iloc[-1] and current_price < ema_21 and current_price < hist['EMA50'].iloc[-1] and (sma_200 is None or current_price < sma_200):
+                key_mas = "Bearish"
+            else:
+                key_mas = "Mixed"
         else:
-            key_mas = "Mixed"
+            if current_price > hist['EMA9'].iloc[-1] and current_price > ema_21 and current_price > hist['EMA50'].iloc[-1]:
+                key_mas = "Bullish"
+            elif current_price < hist['EMA9'].iloc[-1] and current_price < ema_21 and current_price < hist['EMA50'].iloc[-1]:
+                key_mas = "Bearish"
+            else:
+                key_mas = "Mixed"
             
         if current_price > vwap and current_price > today_data["Open"]:
             direction = "Bullish"
@@ -194,7 +208,8 @@ def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
             "Daily Pivot": [daily_pivot],
             "Price_Vwap": [direction],
             "KeyMAs": [key_mas],
-            "RSI_Status": [get_rsi_status(hist['RSI'].iloc[-1])]
+            "RSI_Status": [get_rsi_status(hist['RSI'].iloc[-1])],
+            "Timeframe": [f"{period} {interval}"]  # Add timeframe info for reference
         }), hist.round(2)
     except Exception as e:
         st.error(f"Error in fetch_stock_data for {symbol}: {e}")
@@ -205,6 +220,41 @@ def plot_candlestick(data, symbol):
     fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name=symbol))
     fig.add_trace(go.Scatter(x=data.index, y=data['VWAP'], name='VWAP', line=dict(color='purple', width=2)))
     fig.add_trace(go.Scatter(x=data.index, y=data['EMA21'], name='21 EMA', line=dict(color='orange', width=2)))
+    fig.add_trace(go.Scatter(x=data.index, y=data['EMA9'], name='9 EMA', line=dict(color='blue', width=1.5)))
+    
+    # Add more indicators for daily timeframes
+    if 'SMA200' in data.columns:
+        fig.add_trace(go.Scatter(x=data.index, y=data['SMA200'], name='200 SMA', line=dict(color='red', width=1.5)))
+    
+    # Apply different xaxis configurations based on the time interval
+    if len(data) > 0:
+        # Check if we're dealing with daily data by examining the time difference
+        time_diff = None
+        if len(data) > 1:
+            time_diff = data.index[1] - data.index[0]
+        
+        # Configure axis for different timeframes
+        if time_diff is not None and time_diff.days >= 1:
+            # For daily or longer timeframes, remove weekend gaps
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]),  # Hide weekends
+                    dict(values=["2023-01-02", "2023-01-16", "2023-02-20", "2023-04-07", 
+                                 "2023-05-29", "2023-06-19", "2023-07-04", "2023-09-04",
+                                 "2023-11-23", "2023-12-25",
+                                 "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29",
+                                 "2024-05-27", "2024-06-19", "2024-07-04", "2024-09-02",
+                                 "2024-11-28", "2024-12-25", "2025-01-01"])  # US market holidays
+                ]
+            )
+        elif time_diff is not None and time_diff.seconds >= 3600:  # For hourly data
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=[16, 9.5], pattern="hour"),  # Hide hours outside market (4:00-9:30)
+                    dict(bounds=["sat", "mon"]),  # Hide weekends
+                ]
+            )
+    
     fig.update_layout(
         title=f'{symbol} Chart with Indicators',
         yaxis_title='Price',
@@ -214,6 +264,7 @@ def plot_candlestick(data, symbol):
         height=600,
         xaxis_rangeslider_visible=False
     )
+    
     return fig
 
 # StockTrendOscillator Functions
@@ -1368,6 +1419,7 @@ def analyze_symbol_finra(symbol, lookback_days=20, threshold=1.5):
 # Main App 
 def run():
     # Apply custom CSS for professional styling
+    chart_title_prefix = "Intraday"
     st.markdown("""
         <style>
         /* Base styling */
@@ -1625,10 +1677,17 @@ def run():
                 help="Example: AAPL, MSFT, GOOGL, AMZN"
             )
         
-        col1, col2 = st.columns([1, 1])
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             timeframe_setup = st.selectbox("Oscillator Timeframe", ['1H/1D', '1D/5D'], index=0)
         with col2:
+            # Add new price chart timeframe selector
+            price_chart_timeframe = st.selectbox(
+                "Price Chart Timeframe",
+                ['1Y Daily', '6M Daily', '10D 30min', '1D 5min'],
+                index=3  # Default to 1D 5min
+            )
+        with col3:
             analyze_button = st.button("Analyze", use_container_width=True)
 
     st.markdown('<hr style="margin: 1rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
@@ -1721,6 +1780,8 @@ def run():
             else:
                 st.error("Please enter a valid list of stock tickers separated by commas.")
         
+        
+        
         elif ticker:
             # Initialize data containers
             stock_summary = pd.DataFrame()
@@ -1732,17 +1793,39 @@ def run():
             gex_data = {"error": "Data not yet loaded"}
             whale_data = {"error": "Data not yet loaded"}
             
+            # Convert selection to yfinance parameters
+            if price_chart_timeframe == '1Y Daily':
+                period = "1y"
+                interval = "1d"
+                chart_title_prefix = "1-Year Daily"
+            elif price_chart_timeframe == '6M Daily':
+                period = "6mo"
+                interval = "1d"
+                chart_title_prefix = "6-Month Daily"
+            elif price_chart_timeframe == '10D 30min':
+                period = "10d"
+                interval = "30m"
+                chart_title_prefix = "10-Day 30min"
+            else:  # '1D 5min'
+                period = "1d"
+                interval = "5m"
+                chart_title_prefix = "Intraday 5min"
+            
             with st.spinner("Analyzing market data..."):
                 try:
-                    # Fetch all required data (same as original)
-                    _, spy_hist = fetch_stock_data("SPY", period="1d", interval="5m")
-                    stock_summary, stock_hist = fetch_stock_data(ticker, period="1d", interval="5m", spy_hist=spy_hist)
+                    # Fetch all required data
+                    _, spy_hist = fetch_stock_data("SPY", period=period, interval=interval)
+                    stock_summary, stock_hist = fetch_stock_data(ticker, period=period, interval=interval, spy_hist=spy_hist)
                     oscillator_data = get_oscillator(ticker, timeframe_setup)
                     momentum_data = get_momentum(ticker)
                     seasonality_data = get_seasonality(ticker)
                     block_trade_data = get_block_trades(ticker)
                     gex_data = get_gex(ticker)
                     whale_data = get_whale_positions(ticker)
+                    
+                    # Add flow summary data fetch here
+                    flow_summary = get_top_otm_flows(ticker, FLOW_URLS)
+                    
                 except Exception as e:
                     st.error(f"Error retrieving data for {ticker}: {str(e)}")
                     st.stop()
@@ -1759,38 +1842,80 @@ def run():
                     st.markdown(f'<div class="metric-value">${momentum_data.get("price", "N/A")}</div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                 
-                with overview_cols[1]:
-                    signal_1d = momentum_data.get('1D_signal', 'No Data')
-                    signal_class = "metric-bullish" if signal_1d == "Buy" else "metric-bearish" if signal_1d == "Sell" else "metric-neutral"
+                # Other overview columns...
+            
+            # ADD THE FLOW SUMMARY SECTION HERE ON THE MAIN PAGE
+            st.markdown('<h3 class="section-header">Top 10 OTM Options Flows</h3>', unsafe_allow_html=True)
+            
+            if 'flow_summary' in locals() and not flow_summary.empty:
+                flow_cols = st.columns([1, 2])
+
+                with flow_cols[0]:
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-label">1D Signal</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-value {signal_class}">{signal_1d}</div>', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                with overview_cols[2]:
-                    signal_5d = momentum_data.get('5D_signal', 'No Data')
-                    signal_class = "metric-bullish" if signal_5d == "Buy" else "metric-bearish" if signal_5d == "Sell" else "metric-neutral"
-                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-label">5D Signal</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-value {signal_class}">{signal_5d}</div>', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                with overview_cols[3]:
-                    trend = "N/A"
-                    if isinstance(oscillator_data, dict) and "trend" in oscillator_data:
-                        trend = oscillator_data["trend"]
-                    trend_class = "metric-bullish" if trend == "Bullish" else "metric-bearish" if trend == "Bearish" else "metric-neutral"
-                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-label">Trend</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="metric-value {trend_class}">{trend}</div>', unsafe_allow_html=True)
+                    current_price = get_current_price(ticker)
+                    total_value = flow_summary['Transaction Value'].sum()
+                    call_count = len(flow_summary[flow_summary['Call/Put'] == 'C'])
+                    put_count = len(flow_summary[flow_summary['Call/Put'] == 'P'])
+                    sentiment = "Bullish" if call_count > put_count else "Bearish" if put_count > call_count else "Neutral"
+                    sentiment_class = "metric-bullish" if sentiment == "Bullish" else "metric-bearish" if sentiment == "Bearish" else "metric-neutral"
+                    
+                    # Fix for f-string formatting issue
+                    price_display = f"${current_price:.2f}" if current_price is not None else "N/A"
+                    
+                    st.markdown(f'''
+                        <p style="font-weight:600; margin-bottom:10px;">Flow Overview</p>
+                        <div class="metric-label">Current Price</div>
+                        <div class="metric-value">{price_display}</div>
+                        <div class="metric-label" style="margin-top:10px;">Total Transaction Value</div>
+                        <div class="metric-value">${total_value:,.2f}</div>
+                        <div class="metric-label" style="margin-top:10px;">Call/Put Split</div>
+                        <div class="metric-value">{call_count} Calls / {put_count} Puts</div>
+                        <div class="metric-label" style="margin-top:10px;">Sentiment</div>
+                        <div class="metric-value {sentiment_class}">{sentiment}</div>
+                    ''', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
 
+                with flow_cols[1]:
+                    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+
+                    # Format the DataFrame for display
+                    display_df = flow_summary.copy()
+                    display_df['Expiration'] = display_df['Expiration'].dt.strftime('%Y-%m-%d')
+                    display_df['Transaction Value'] = display_df['Transaction Value'].apply(lambda x: f"${x:,.2f}")
+                    display_df['Last Price'] = display_df['Last Price'].apply(lambda x: f"${x:.2f}")
+                    display_df = display_df.rename(columns={
+                        'Call/Put': 'Type',
+                        'Strike Price': 'Strike',
+                        'Last Price': 'Price',
+                        'Transaction Value': 'Value'
+                    })
+
+                    # Style the DataFrame
+                    def highlight_type(row):
+                        color = '#90ee90' if row['Type'] == 'C' else '#ffcccb' if row['Type'] == 'P' else ''
+                        return [f'background-color: {color}' if col == 'Type' else '' for col in row.index]
+
+                    styled_df = display_df.style.apply(highlight_type, axis=1)
+                    st.dataframe(styled_df, use_container_width=True, height=400)
+                    st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+                st.markdown(f'No OTM options flow data available for {ticker}. This may be due to unavailable data from CBOE or no qualifying OTM transactions.', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Add a horizontal separator before the tabs section
+            st.markdown('<hr style="margin: 2rem 0; border: 0; border-top: 1px solid #e0e0e0;">', unsafe_allow_html=True)
+            
+        
         # Main analysis section
         main_tabs = st.tabs(["Technical Analysis", "Trend Oscillator", "Insights:Seasonality,Block Trades,GEX Analysis,Whale Positions,FINRA Short Sales,Flow Summary"])
         
         # Technical Analysis Tab
         with main_tabs[0]:
-            st.markdown('<h3 class="section-header">Intraday Price Action & Indicators</h3>', unsafe_allow_html=True)
+            if 'chart_title_prefix' in locals() and ticker:
+               st.markdown(f'<h3 class="section-header">{chart_title_prefix} Price Action & Indicators</h3>', unsafe_allow_html=True)
+            else:
+               st.markdown('<h3 class="section-header">Price Action & Indicators</h3>', unsafe_allow_html=True)
     
             # Only proceed with technical analysis if we're analyzing a single ticker
             # and stock_summary has been defined and isn't empty
@@ -1853,9 +1978,9 @@ def run():
                 # Chart in a nice container
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
                 fig = plot_candlestick(stock_hist, ticker)
-                # Enhance the chart styling
+                # Enhance the chart styling and update title
                 fig.update_layout(
-                    title=f'{ticker} Intraday Price Action',
+                    title=f'{ticker} {chart_title_prefix} Price Action',
                     template='plotly_white',
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
