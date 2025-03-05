@@ -1,3 +1,11 @@
+# Instructions for integrating the DeMark Sequential module into your Trading Tools Hub
+
+# Step 1: Save the DeMark Sequential module
+# Save the provided code as a file named "DemarkSequential.py" in your "modules" directory
+
+# Step 2: Update your main app.py file
+# Add the import statement for the new module:
+
 import streamlit as st  # This MUST be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Trading Tools Hub")
 
@@ -16,7 +24,8 @@ from modules.GannCycleAnalysis import run as GannCycle_run
 from modules.CFTC import cftc_analyzer_module
 from modules.BlockTrade import Blocktrade_run
 from modules.WhalePositioning import run as WhalePositioning_run
-from modules.StockInsights import run as StockInsights_run  # New import
+from modules.StockInsights import run as StockInsights_run
+from modules.DemarkSequential import run as DemarkSequential_run  # Add this line
 
 def add_buymeacoffee():
     try:
@@ -64,7 +73,8 @@ def main():
                                        "Seasonality",
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer",
-                                       "Whale Positioning"])  # New option
+                                       "Whale Positioning",
+                                       "DeMark Sequential"])  # Add this option
 
     if app_selection == "Stock Trend Oscillator":
         show_trend_oscillator()
@@ -96,8 +106,10 @@ def main():
         cftc_analyzer_module()
     elif app_selection == "Whale Positioning":
         WhalePositioning_run()
-    elif app_selection == "Stock Insights":  # New condition
+    elif app_selection == "Stock Insights":
         StockInsights_run()
+    elif app_selection == "DeMark Sequential":  # Add this condition
+        DemarkSequential_run()
 
 if __name__ == "__main__":
     main()
