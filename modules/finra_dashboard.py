@@ -406,7 +406,7 @@ def run():
         st.subheader("Portfolio Analysis")
         col1, col2 = st.columns(2)
         with col1:
-            port_lookback_days = st.slider("Lookback Days (Portfolio)", 1, 30, 20, key="port_days")
+            port_lookback_days = st.slider("Lookback Days (Portfolio)", 1, 30, 1, key="port_days")
         with col2:
             st.write(f"Analyzing: {', '.join(portfolio_symbols)}")
         
