@@ -15,6 +15,15 @@ import pytz
 import logging
 from typing import List, Optional
 
+last_fetch_time = datetime.now()
+
+if st.sidebar.button("Refresh Data", help="Clear cache and reload all market data", use_container_width=True):
+    st.cache_data.clear()
+    last_fetch_time = datetime.now()
+    st.rerun()
+
+st.sidebar.markdown(f"Last data fetch: {last_fetch_time.strftime('%H:%M:%S')}")
+
 FLOW_URLS = [
     "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
     "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
@@ -328,7 +337,7 @@ def create_chart(df_lower, df_higher, symbol, timeframe_lower, timeframe_higher)
         st.error(f"Error in create_chart: {e}")
         return None
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_oscillator(ticker, timeframe_setup='1H/1D'):
     try:
         end_date = datetime.now()
@@ -413,7 +422,7 @@ def calculate_pivots(data, timeframe='D'):
         st.error(f"Error in calculate_pivots: {e}")
         return None
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def fetch_momentum_data(symbol, interval, period="6mo"):
     try:
         data = yf.download(symbol, period=period, interval=interval)
@@ -492,7 +501,7 @@ def calculate_indicators(data):
         st.error(f"Error in calculate_indicators: {e}")
         return data, None, None, None
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_momentum(ticker):
     try:
         timeframes = ["1d", "5d"]
@@ -644,7 +653,7 @@ def plot_seasonality_with_current(seasonality_results, stock, month_name):
         st.error(f"Error in plot_seasonality_with_current: {e}")
         return None
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_seasonality(ticker, month_name=None):
     try:
         if month_name is None:
@@ -672,7 +681,7 @@ def get_seasonality(ticker, month_name=None):
         return {"error": str(e), "chart": None}
 
 # Block Trades Functions
-@st.cache_data
+@st.cache_data(ttl=300)
 def fetch_block_trade_data(ticker, start_date, end_date):
     try:
         stock = yf.Ticker(ticker)
@@ -726,7 +735,7 @@ def analyze_block_trade_reaction(df, days_after=5):
         st.error(f"Error analyzing block trade reaction: {e}")
         return pd.DataFrame()
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_block_trades(ticker):
     try:
         end_date = datetime.now()
@@ -839,7 +848,7 @@ def get_all_expirations(ticker_symbol, max_days=365):
         st.error(f"Error fetching expirations for {ticker_symbol}: {str(e)}")
         return pd.DataFrame()
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_gex(ticker_symbol, expiration=None, price_range_pct=15, threshold=5.0, 
             strike_spacing_override=None, risk_free_rate=0.05, bar_width=2.0, show_labels=True):
     try:
@@ -1147,7 +1156,7 @@ def predict_price_direction(current_price, whale_df, price_trend):
             f"(Confidence: {confidence:.0f}%)"), target_strike, target_expiry, color
 
 # Placeholder Functions
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_whale_positions(ticker_symbol):
     try:
         weekly_exps = get_weekly_expirations(ticker_symbol)
@@ -1385,7 +1394,7 @@ def analyze_stock_list(stock_list, timeframe_setup='1H/1D'):
     
     return result_df
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def analyze_symbol_finra(symbol, lookback_days=20, threshold=1.5):
     results = []
     significant_days = 0
@@ -2644,7 +2653,7 @@ def run():
             </div>
         ''', unsafe_allow_html=True)
         
-        st.button("Refresh Data", help="Clear cache and reload all market data", use_container_width=True)
+        #st.button("Refresh Data", help="Clear cache and reload all market data", use_container_width=True, key="refresh_data_button")
         
         st.markdown('''
             <div style="padding: 1rem 0; margin-top: 2rem; border-top: 1px solid #e0e0e0;">
