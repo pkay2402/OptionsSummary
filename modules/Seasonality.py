@@ -731,7 +731,7 @@ def create_yearly_heatmap(data, stock_symbol):
         ],
         colorbar=dict(
             title="Return (%)",
-            titleside="right",
+            #titleside="right",
             tickformat=".1f"
         ),
         hovertemplate="Year: %{y}<br>Month: %{x}<br>Return: %{z:.2f}%<extra></extra>"
