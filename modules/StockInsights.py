@@ -14,6 +14,7 @@ from io import StringIO
 import pytz
 import logging
 from typing import List, Optional
+import holidays
 
 last_fetch_time = datetime.now()
 
@@ -157,7 +158,7 @@ def get_rsi_status(rsi):
     else:
         return "Oversold"
 
-def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
+def fetch_stock_data(symbol, period="1y", interval="1d", spy_hist=None):
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period, interval=interval)
@@ -224,7 +225,25 @@ def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
         st.error(f"Error in fetch_stock_data for {symbol}: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-def plot_candlestick(data, symbol):
+def get_us_market_holidays(start_year, end_year):
+    us_holidays = holidays.US(years=range(start_year, end_year + 1))
+    return [date for date in us_holidays.keys()]
+
+def calculate_swing_levels(data, look_forward=10, look_backward=10):
+    data['fLow'] = data['Low'].rolling(window=look_forward).min().shift(-look_forward)
+    data['bLow'] = data['Low'].rolling(window=look_backward).min().shift(1)
+    data['sLow'] = (data['Low'] < data['fLow']) & (data['Low'] <= data['bLow'])
+
+    data['fHigh'] = data['High'].rolling(window=look_forward).max().shift(-look_forward)
+    data['bHigh'] = data['High'].rolling(window=look_backward).max().shift(1)
+    data['sHigh'] = (data['High'] > data['fHigh']) & (data['High'] >= data['bHigh'])
+
+    data['priorSL'] = data['Low'].where(data['sLow']).ffill()
+    data['priorSH'] = data['High'].where(data['sHigh']).ffill()
+
+    return data
+
+def plot_candlestick(data, symbol, price_chart_timeframe):
     fig = go.Figure()
     fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name=symbol))
     fig.add_trace(go.Scatter(x=data.index, y=data['VWAP'], name='VWAP', line=dict(color='purple', width=2)))
@@ -235,6 +254,13 @@ def plot_candlestick(data, symbol):
     if 'SMA200' in data.columns:
         fig.add_trace(go.Scatter(x=data.index, y=data['SMA200'], name='200 SMA', line=dict(color='red', width=1.5)))
     
+    # Calculate swing levels
+    data = calculate_swing_levels(data)
+    
+    # Plot swing highs and lows as horizontal lines
+    fig.add_trace(go.Scatter(x=data.index, y=data['priorSH'], mode='lines', name='Swing High', line=dict(color='green', width=2, dash='dash')))
+    fig.add_trace(go.Scatter(x=data.index, y=data['priorSL'], mode='lines', name='Swing Low', line=dict(color='red', width=2, dash='dash')))
+    
     # Apply different xaxis configurations based on the time interval
     if len(data) > 0:
         # Check if we're dealing with daily data by examining the time difference
@@ -244,24 +270,26 @@ def plot_candlestick(data, symbol):
         
         # Configure axis for different timeframes
         if time_diff is not None and time_diff.days >= 1:
-            # For daily or longer timeframes, remove weekend gaps
+            # For daily or longer timeframes, remove weekend gaps and holidays
+            start_year = data.index.min().year
+            end_year = data.index.max().year
+            us_market_holidays = get_us_market_holidays(start_year, end_year)
             fig.update_xaxes(
                 rangebreaks=[
                     dict(bounds=["sat", "mon"]),  # Hide weekends
-                    dict(values=["2023-01-02", "2023-01-16", "2023-02-20", "2023-04-07", 
-                                 "2023-05-29", "2023-06-19", "2023-07-04", "2023-09-04",
-                                 "2023-11-23", "2023-12-25",
-                                 "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29",
-                                 "2024-05-27", "2024-06-19", "2024-07-04", "2024-09-02",
-                                 "2024-11-28", "2024-12-25", "2025-01-01"])  # US market holidays
+                    dict(values=us_market_holidays)  # Hide US market holidays
                 ]
             )
         elif time_diff is not None and time_diff.seconds >= 3600:  # For hourly data
+            # Filter out None values from rangebreaks
+            rangebreaks = [
+                dict(bounds=["sat", "mon"]) if price_chart_timeframe == '1D 5min' else None,  # Hide weekends for 1H
+                dict(bounds=[16, 9.5], pattern="hour") if price_chart_timeframe == '1D 5min' else None  # Hide non-trading hours for 1H
+            ]
+            rangebreaks = [rb for rb in rangebreaks if rb is not None]
+            
             fig.update_xaxes(
-                rangebreaks=[
-                    dict(bounds=[16, 9.5], pattern="hour"),  # Hide hours outside market (4:00-9:30)
-                    dict(bounds=["sat", "mon"]),  # Hide weekends
-                ]
+                rangebreaks=rangebreaks
             )
     
     fig.update_layout(
@@ -271,7 +299,11 @@ def plot_candlestick(data, symbol):
         plot_bgcolor='white',
         paper_bgcolor='white',
         height=600,
-        xaxis_rangeslider_visible=False
+        xaxis_rangeslider_visible=False,
+        xaxis=dict(  # Lower timeframe x-axis (1H or 1D)
+            showgrid=False,  # Remove gridlines to match ThinkScript
+            zeroline=False
+        )
     )
     
     return fig
@@ -1693,8 +1725,8 @@ def run():
             # Add new price chart timeframe selector
             price_chart_timeframe = st.selectbox(
                 "Price Chart Timeframe",
-                ['1Y Daily', '6M Daily', '10D 30min', '1D 5min'],
-                index=3  # Default to 1D 5min
+                ['1Y Daily','1D 5min'],
+                index=0  # Default to 1D 5min
             )
         with col3:
             analyze_button = st.button("Analyze", use_container_width=True)
@@ -1986,7 +2018,7 @@ def run():
         
                 # Chart in a nice container
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-                fig = plot_candlestick(stock_hist, ticker)
+                fig = plot_candlestick(stock_hist, ticker, price_chart_timeframe)
                 # Enhance the chart styling and update title
                 fig.update_layout(
                     title=f'{ticker} {chart_title_prefix} Price Action',
