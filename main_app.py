@@ -20,7 +20,7 @@ from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
 from modules.StockTrendOscillator import show_trend_oscillator
 from modules.GannSwing import run as GannSwing_run
-from modules.GannCycleAnalysis import run as GannCycle_run
+#from modules.GannCycleAnalysis import run as GannCycle_run
 from modules.CFTC import cftc_analyzer_module
 from modules.BlockTrade import Blocktrade_run
 #from modules.WhalePositioning import run as WhalePositioning_run
@@ -69,7 +69,7 @@ def main():
                                        "Stock Analysis",
                                        "TOS Scanner",
                                        "Gann Swing Analysis",
-                                       "Gann Cycle Analysis",
+                                       #"Gann Cycle Analysis",
                                        "Seasonality",
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer",
@@ -96,8 +96,8 @@ def main():
         StockAnalysis_run()
     elif app_selection == "Gann Swing Analysis":
         GannSwing_run()
-    elif app_selection == "Gann Cycle Analysis":
-        GannCycle_run()
+    #elif app_selection == "Gann Cycle Analysis":
+        #GannCycle_run()
     elif app_selection == "Seasonality":
         Seasonality_run()
     elif app_selection == "S&P 500 Performance":
