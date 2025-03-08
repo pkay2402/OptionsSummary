@@ -17,3 +17,4 @@ seaborn
 nest_asyncio
 beautifulsoup4
 plotly
+holidays
