@@ -23,7 +23,7 @@ from modules.GannSwing import run as GannSwing_run
 from modules.GannCycleAnalysis import run as GannCycle_run
 from modules.CFTC import cftc_analyzer_module
 from modules.BlockTrade import Blocktrade_run
-from modules.WhalePositioning import run as WhalePositioning_run
+#from modules.WhalePositioning import run as WhalePositioning_run
 from modules.StockInsights import run as StockInsights_run
 from modules.DemarkSequential import run as DemarkSequential_run  # Add this line
 
@@ -73,7 +73,7 @@ def main():
                                        "Seasonality",
                                        "S&P 500 Performance",
                                        "CFTC Data Analyzer",
-                                       "Whale Positioning",
+                                       #"Whale Positioning",
                                        "DeMark Sequential"])  # Add this option
 
     if app_selection == "Stock Trend Oscillator":
@@ -104,8 +104,8 @@ def main():
         SP500Performance_run()
     elif app_selection == "CFTC Data Analyzer":
         cftc_analyzer_module()
-    elif app_selection == "Whale Positioning":
-        WhalePositioning_run()
+    #elif app_selection == "Whale Positioning":
+        #WhalePositioning_run()
     elif app_selection == "Stock Insights":
         StockInsights_run()
     elif app_selection == "DeMark Sequential":  # Add this condition
