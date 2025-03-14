@@ -427,11 +427,23 @@ def run():
                 portfolio_df = analyze_portfolio(portfolio_symbols, port_lookback_days)
             if not portfolio_df.empty:
                 st.dataframe(portfolio_df)
+
+                # Summary of total bought and sold volume
+                total_bought_volume = portfolio_df['Bought Volume'].sum()
+                total_sold_volume = portfolio_df['Sold Volume'].sum()
+                st.write(f"Total Bought Volume: {total_bought_volume}")
+                st.write(f"Total Sold Volume: {total_sold_volume}")
+                if total_bought_volume > total_sold_volume:
+                    st.write("Dark Pools: Bullish")
+                else:
+                    st.write("Dark Pools: Bearish")
                 
                 # Visualization
                 fig = px.bar(portfolio_df, x='Symbol', y='Avg Buy/Sell Ratio', 
                              title="Portfolio Buy/Sell Ratios", color='Significant Days')
                 st.plotly_chart(fig)
+                
+                
                 
                 # Correlation Heatmap
                 if st.button("Show Portfolio Correlation"):
