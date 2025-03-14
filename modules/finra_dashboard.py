@@ -207,13 +207,20 @@ def analyze_portfolio(symbols, lookback_days=20):
     for symbol in symbols:
         df, significant_days = analyze_symbol(symbol, lookback_days, threshold=1.5)
         if not df.empty:
-            portfolio_results.append({
-                'Symbol': symbol,
-                'Avg Buy/Sell Ratio': round(df['buy_to_sell_ratio'].mean(), 2),
-                'Significant Days': significant_days,
-                'Latest Volume': int(df['total_volume'].iloc[0])
-            })
-    return pd.DataFrame(portfolio_results)
+            for _, row in df.iterrows():
+                portfolio_results.append({
+                    'Symbol': symbol,
+                    'Date': row['date'],
+                    'Avg Buy/Sell Ratio': row['buy_to_sell_ratio'],
+                    'Bought Volume': int(row['bought_volume']),
+                    'Sold Volume': int(row['sold_volume']),
+                    'Significant Days': significant_days,
+                    'Latest Volume': int(row['total_volume'])
+                })
+    portfolio_df = pd.DataFrame(portfolio_results)
+    if not portfolio_df.empty:
+        portfolio_df = portfolio_df.sort_values(by=['Avg Buy/Sell Ratio', 'Bought Volume'], ascending=[False, False])
+    return portfolio_df
 
 # Alerts
 def check_alerts(df_results, symbol, threshold=2.0):
@@ -254,7 +261,12 @@ def run():
     
     # Sidebar for Portfolio
     with st.sidebar:
-        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", "AAPL, ABBV, ABT, ACN, ADBE, AIG, AMD, AMGN, AMT, AMZN, AVGO, AXP, BA, BAC, BK, BKNG, BLK, BMY, BRK.B, C, CAT, CHTR, CL, CMCSA, COF, COP, COST, CRM, CSCO, CVS, CVX, DE, DHR, DIS, DOW, DUK, EMR, F, FDX, GD, GE, GILD, GM, GOOG, GOOGL, GS, HD, HON, IBM, INTC, INTU, JNJ, JPM, KHC, KO, LIN, LLY, LMT, LOW, MA, MCD, MDLZ, MDT, MET, META, MMM, MO, MRK, MS, MSFT, NEE, NFLX, NKE, NVDA, ORCL, PEP, PFE, PG, PM, PYPL, QCOM, RTX, SBUX, SCHW, SO, SPG, T, TGT, TMO, TMUS, TSLA, TXN, UNH, UNP, UPS, USB, V, VZ, WFC, WMT, XOM").split(",")
+        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", 
+                                         "AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, PLTR, LLY, JPM, AVGO, UNH, V, WMT, XOM, MA, JNJ, PG, HD, COST, ORCL, CVX, BAC, KO, PEP, ABBV, "
+                                         "MRK, AMD, NFLX, ADBE, CRM, INTC, CSCO, PFE, TMO, MCD, DIS, WFC, QCOM, LIN, GE, AXP, CAT, IBM, VZ, GS, MS, PM, LOW, NEE, RTX, BA, HON, UNP, "
+                                         "T, BLK, MDT, SBUX, LMT, AMGN, GILD, CVS, DE, TGT, AMT, BKNG, SO, DUK, PYPL, UPS, C, COP, MMM, ACN, ABT, DHR, TMUS, TXN, MDLZ, BMY, INTU, NKE, "
+                                         "CL, MO, KHC, EMR, GM, F, FDX, "
+                                         "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Portfolio Analysis"])
