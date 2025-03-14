@@ -9,7 +9,204 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# Existing functions unchanged unless noted
+# Sector mapping
+sector_mapping = {
+    'Index/Sectors': [
+        'SPY',  # SPY
+        'QQQ',  # QQQ
+        'DIA',  # DIA
+        'IWM',  # IWM
+        'VXX',  # VXX
+        'SMH',  # SMH
+        'IVV',  # IVV
+        'VTI',  # VTI
+        'VOO',  # VOO
+        'XLK',  # XLK
+        'VUG',  # VUG
+        'XLF',  # XLF
+        'XLV',  # XLV
+        'XLY',  # XLY
+        'XLC',  # XLC
+        'XLI',  # XLI
+        'XLE',  # XLE
+        'XLB',  # XLB
+        'XLU',  # XLU
+        'XLRE', # XLRE
+        'XLP',  # XLP
+        'XBI',  # XBI
+        'XOP',  # XOP
+        'XME',  # XME
+        'XRT',  # XRT
+        'XHB',  # XHB
+        'XWEB', # XWEB
+        'XLC',  # XLC
+        'RSP',  # RSP
+    ],
+    'Technology': [
+        'AAPL',  # Apple
+        'MSFT',  # Microsoft
+        'NVDA',  # NVIDIA
+        'AMZN',  # Amazon
+        'GOOGL', # Alphabet Class A
+        'META',  # Meta Platforms
+        'TSLA',  # Tesla
+        'PLTR',  # Palantir
+        'ORCL',  # Oracle
+        'AMD',   # Advanced Micro Devices
+        'NFLX',  # Netflix
+        'ADBE',  # Adobe
+        'CRM',   # Salesforce
+        'INTC',  # Intel
+        'CSCO',  # Cisco Systems
+        'QCOM',  # Qualcomm
+        'TXN',   # Texas Instruments
+        'INTU',  # Intuit
+        'IBM',   # IBM
+        'NOW',   # ServiceNow
+        'AVGO',  # Broadcom
+        'UBER',  # Uber Technologies
+        'SNOW',  # Snowflake
+        'DELL',  # Dell Technologies
+        'PANW'   # Palo Alto Networks
+    ],
+    'Financials': [
+        'JPM',   # JPMorgan Chase
+        'V',     # Visa
+        'MA',    # Mastercard
+        'BAC',   # Bank of America
+        'WFC',   # Wells Fargo
+        'GS',    # Goldman Sachs
+        'MS',    # Morgan Stanley
+        'C',     # Citigroup
+        'AXP',   # American Express
+        'SCHW',  # Charles Schwab
+        'COF',   # Capital One
+        'MET',   # MetLife
+        'AIG',   # American International Group
+        'BK',    # Bank of New York Mellon
+        'BLK',   # BlackRock
+        'TFC',   # Truist Financial
+        'USB',   # U.S. Bancorp
+        'PNC',   # PNC Financial Services
+        'CME',   # CME Group
+        'SPGI',  # S&P Global
+        'ICE',   # Intercontinental Exchange
+        'MCO',   # Moody's
+        'AON',   # Aon
+        'PYPL',  # PayPal
+        'SQ'     # Square (Block)
+    ],
+    'Healthcare': [
+        'LLY',   # Eli Lilly
+        'UNH',   # UnitedHealth Group
+        'JNJ',   # Johnson & Johnson
+        'PFE',   # Pfizer
+        'MRK',   # Merck
+        'ABBV',  # AbbVie
+        'TMO',   # Thermo Fisher Scientific
+        'AMGN',  # Amgen
+        'GILD',  # Gilead Sciences
+        'CVS',   # CVS Health
+        'MDT',   # Medtronic
+        'BMY',   # Bristol Myers Squibb
+        'ABT',   # Abbott Laboratories
+        'DHR',   # Danaher
+        'ISRG',  # Intuitive Surgical
+        'SYK',   # Stryker
+        'REGN',  # Regeneron Pharmaceuticals
+        'VRTX',  # Vertex Pharmaceuticals
+        'CI',    # Cigna
+        'ZTS',   # Zoetis
+        'BDX',   # Becton Dickinson
+        'HCA',   # HCA Healthcare
+        'EW',    # Edwards Lifesciences
+        'DXCM',  # DexCom
+        'BIIB'   # Biogen
+    ],
+    'Consumer': [
+        'WMT',   # Walmart
+        'PG',    # Procter & Gamble
+        'KO',    # Coca-Cola
+        'PEP',   # PepsiCo
+        'COST',  # Costco
+        'MCD',   # McDonald's
+        'DIS',   # Walt Disney
+        'NKE',   # Nike
+        'SBUX',  # Starbucks
+        'LOW',   # Lowe's
+        'TGT',   # Target
+        'HD',    # Home Depot
+        'CL',    # Colgate-Palmolive
+        'MO',    # Altria Group
+        'KHC',   # Kraft Heinz
+        'PM',    # Philip Morris
+        'TJX',   # TJX Companies
+        'DG',    # Dollar General
+        'DLTR',  # Dollar Tree
+        'YUM',   # Yum! Brands
+        'GIS',   # General Mills
+        'KMB',   # Kimberly-Clark
+        'MNST',  # Monster Beverage
+        'EL',    # Estee Lauder
+        'CMG'    # Chipotle Mexican Grill
+    ],
+    'Energy': [
+        'XOM',   # Exxon Mobil
+        'CVX',   # Chevron
+        'COP',   # ConocoPhillips
+        'SLB',   # Schlumberger
+        'EOG',   # EOG Resources
+        'MPC',   # Marathon Petroleum
+        'PSX',   # Phillips 66
+        'OXY',   # Occidental Petroleum
+        'VLO',   # Valero Energy
+        'PXD',   # Pioneer Natural Resources
+        'HES',   # Hess
+        'WMB',   # Williams Companies
+        'KMI',   # Kinder Morgan
+        'OKE',   # ONEOK
+        'HAL',   # Halliburton
+        'BKR',   # Baker Hughes
+        'FANG',  # Diamondback Energy
+        'DVN',   # Devon Energy
+        'TRGP',  # Targa Resources
+        'APA',   # APA Corporation
+        'EQT',   # EQT Corporation
+        'MRO',   # Marathon Oil
+        'NOV',   # NOV Inc.
+        'FTI',   # TechnipFMC
+        'RRC'    # Range Resources
+    ],
+    'Industrials': [
+        'CAT',   # Caterpillar
+        'DE',    # Deere & Company
+        'UPS',   # United Parcel Service
+        'FDX',   # FedEx
+        'BA',    # Boeing
+        'HON',   # Honeywell
+        'UNP',   # Union Pacific
+        'MMM',   # 3M
+        'GE',    # General Electric
+        'LMT',   # Lockheed Martin
+        'RTX',   # RTX Corporation
+        'GD',    # General Dynamics
+        'CSX',   # CSX Corporation
+        'NSC',   # Norfolk Southern
+        'WM',    # Waste Management
+        'ETN',   # Eaton
+        'ITW',   # Illinois Tool Works
+        'EMR',   # Emerson Electric
+        'PH',    # Parker-Hannifin
+        'ROK',   # Rockwell Automation
+        'CARR',  # Carrier Global
+        'OTIS',  # Otis Worldwide
+        'IR',    # Ingersoll Rand
+        'CMI',   # Cummins
+        'FAST'   # Fastenal
+    ],
+    'User Defined': []  # Catch-all for unmapped symbols
+}
+
 def download_finra_short_sale_data(date):
     url = f"https://cdn.finra.org/equity/regsho/daily/CNMSshvol{date}.txt"
     response = requests.get(url)
@@ -43,7 +240,7 @@ def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     results = []
     significant_days = 0
     
-    for i in range(lookback_days * 2):
+    for i in range(lookback_days):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
         
@@ -83,7 +280,7 @@ def validate_pattern(symbol, dates, pattern_type="accumulation"):
 
 def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulation", use_price_validation=False):
     pattern_data = {}
-    for i in range(lookback_days * 2):
+    for i in range(lookback_days):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
         if data:
@@ -126,29 +323,28 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
         results = sorted(results, key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), reverse=True)
     return pd.DataFrame(results[:40])
 
-# Enhanced Sector Rotation with ETF Performance
 def get_sector_rotation(lookback_days=10, min_volume=50000):
     sector_map = {
-    'QQQ': 'Technology',
-    'VGT': 'Technology',
-    'IVW': 'Large-Cap Growth',
-    'VUG': 'Large-Cap Growth',
-    'SCHG': 'Large-Cap Growth',
-    'MGK': 'Large-Cap Growth',
-    'VOOG': 'Large-Cap Growth',
-    'IWP': 'Mid-Cap Growth',
-    'VOT': 'Mid-Cap Growth',
-    'EFG': 'International Growth',
-    'VTV': 'Large-Cap Value',
-    'IVE': 'Large-Cap Value',
-    'SCHV': 'Large-Cap Value',
-    'IWD': 'Large-Cap Value',
-    'VLUE': 'Large-Cap Value',
-    'VOE': 'Mid-Cap Value',
-    'IWS': 'Mid-Cap Value',
-    'VBR': 'Small-Cap Value',
-    'DHS': 'High Dividend Value',
-    'RPV': 'S&P Pure Value'
+        'QQQ': 'Technology',
+        'VGT': 'Technology',
+        'IVW': 'Large-Cap Growth',
+        'VUG': 'Large-Cap Growth',
+        'SCHG': 'Large-Cap Growth',
+        'MGK': 'Large-Cap Growth',
+        'VOOG': 'Large-Cap Growth',
+        'IWP': 'Mid-Cap Growth',
+        'VOT': 'Mid-Cap Growth',
+        'EFG': 'International Growth',
+        'VTV': 'Large-Cap Value',
+        'IVE': 'Large-Cap Value',
+        'SCHV': 'Large-Cap Value',
+        'IWD': 'Large-Cap Value',
+        'VLUE': 'Large-Cap Value',
+        'VOE': 'Mid-Cap Value',
+        'IWS': 'Mid-Cap Value',
+        'VBR': 'Small-Cap Value',
+        'DHS': 'High Dividend Value',
+        'RPV': 'S&P Pure Value'
     }
     sector_etfs = yf.Tickers(list(sector_map.keys()))
     sector_performance = {ticker: ticker_obj.history(period=f"{lookback_days}d")['Close'].pct_change().mean() 
@@ -201,7 +397,6 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
     
     return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
 
-# Portfolio Analysis
 def analyze_portfolio(symbols, lookback_days=20):
     portfolio_results = []
     for symbol in symbols:
@@ -222,16 +417,13 @@ def analyze_portfolio(symbols, lookback_days=20):
         portfolio_df = portfolio_df.sort_values(by=['Avg Buy/Sell Ratio', 'Bought Volume'], ascending=[False, False])
     return portfolio_df
 
-# Alerts
 def check_alerts(df_results, symbol, threshold=2.0):
     if not df_results.empty and df_results['buy_to_sell_ratio'].max() > threshold:
         st.warning(f"Alert: {symbol} has a Buy/Sell Ratio above {threshold} on {df_results['date'].iloc[0].strftime('%Y-%m-%d')}!")
 
-# Export Functionality
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# Heatmap for Correlations
 def plot_correlation_heatmap(symbols, lookback_days=20):
     data = {}
     for symbol in symbols:
@@ -244,7 +436,6 @@ def plot_correlation_heatmap(symbols, lookback_days=20):
     st.pyplot(fig)
 
 def run():
-    # Custom Styling
     st.markdown("""
         <style>
         .stButton>button {
@@ -259,9 +450,8 @@ def run():
     
     st.title("FINRA Short Sale Analysis")
     
-    # Sidebar for Portfolio
     with st.sidebar:
-        portfolio_symbols = st.text_area("Enter Portfolio Symbols (comma-separated)", 
+        portfolio_symbols = st.text_area("User Defined Symbols for Multi Stock Analysis (comma-separated)", 
                                          "AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, PLTR, LLY, JPM, AVGO, UNH, V, WMT, XOM, MA, JNJ, PG, HD, COST, ORCL, CVX, BAC, KO, PEP, ABBV, "
                                          "MRK, AMD, NFLX, ADBE, CRM, INTC, CSCO, PFE, TMO, MCD, DIS, WFC, QCOM, LIN, GE, AXP, CAT, IBM, VZ, GS, MS, PM, LOW, NEE, RTX, BA, HON, UNP, "
                                          "T, BLK, MDT, SBUX, LMT, AMGN, GILD, CVS, DE, TGT, AMT, BKNG, SO, DUK, PYPL, UPS, C, COP, MMM, ACN, ABT, DHR, TMUS, TXN, MDLZ, BMY, INTU, NKE, "
@@ -269,7 +459,7 @@ def run():
                                          "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Portfolio Analysis"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Multi Stock Analysis"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -294,10 +484,8 @@ def run():
                 with metrics_col3:
                     st.metric(f"Days Above {threshold}", significant_days)
                 
-                # Alert Check
                 check_alerts(results_df, symbol)
                 
-                # Visualization
                 fig = px.line(results_df, x='date', y='buy_to_sell_ratio', title=f"{symbol} Buy/Sell Ratio Over Time",
                               hover_data=['total_volume', 'short_volume_ratio'])
                 fig.add_hline(y=threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold: {threshold}")
@@ -312,7 +500,6 @@ def run():
                 styled_df = display_df.style.apply(highlight_significant, axis=1)
                 st.dataframe(styled_df)
                 
-                # Export
                 csv = convert_df_to_csv(results_df)
                 st.download_button("Download Results as CSV", csv, f"{symbol}_analysis.csv", "text/csv")
     
@@ -333,12 +520,10 @@ def run():
                 styled_df = accumulation_df.style.apply(highlight_acc_pattern, axis=1)
                 st.dataframe(styled_df)
                 
-                # Visualization
                 fig = px.bar(accumulation_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
                              color='Volume Trend', title="Top 10 Accumulation Patterns")
                 st.plotly_chart(fig)
                 
-                # Export
                 csv = convert_df_to_csv(accumulation_df)
                 st.download_button("Download Accumulation Patterns as CSV", csv, "accumulation_patterns.csv", "text/csv")
             else:
@@ -361,12 +546,10 @@ def run():
                 styled_df = distribution_df.style.apply(highlight_dist_pattern, axis=1)
                 st.dataframe(styled_df)
                 
-                # Visualization
                 fig = px.bar(distribution_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
                              color='Volume Trend', title="Top 10 Distribution Patterns")
                 st.plotly_chart(fig)
                 
-                # Export
                 csv = convert_df_to_csv(distribution_df)
                 st.download_button("Download Distribution Patterns as CSV", csv, "distribution_patterns.csv", "text/csv")
             else:
@@ -390,12 +573,10 @@ def run():
                 styled_buying = buying_df.style.apply(highlight_buying, axis=1)
                 st.dataframe(styled_buying)
                 
-                # Visualization
                 fig = px.pie(buying_df, values='Avg Daily Volume', names='Sector', 
                              title="Buying Sectors by Volume")
                 st.plotly_chart(fig)
                 
-                # Export
                 csv = convert_df_to_csv(buying_df)
                 st.download_button("Download Buying Sectors as CSV", csv, "buying_sectors.csv", "text/csv")
             else:
@@ -408,50 +589,89 @@ def run():
                 styled_selling = selling_df.style.apply(highlight_selling, axis=1)
                 st.dataframe(styled_selling)
                 
-                # Export
                 csv = convert_df_to_csv(selling_df)
                 st.download_button("Download Selling Sectors as CSV", csv, "selling_sectors.csv", "text/csv")
             else:
                 st.write("No sectors with clear selling trends detected.")
     
     with tab5:
-        st.subheader("Portfolio Analysis")
+        st.subheader("Multi Stock Analysis")
         col1, col2 = st.columns(2)
         with col1:
             port_lookback_days = st.slider("Lookback Days (Portfolio)", 1, 30, 1, key="port_days")
         with col2:
-            st.write(f"Analyzing: {', '.join(portfolio_symbols)}")
+            #st.write(f"Analyzing: {', '.join(portfolio_symbols)}")
+            st.write(f"Analyzing: ")
         
         if st.button("Analyze Portfolio"):
-            with st.spinner("Analyzing portfolio..."):
+            with st.spinner("Analyzing stocks..."):
                 portfolio_df = analyze_portfolio(portfolio_symbols, port_lookback_days)
+            
             if not portfolio_df.empty:
-                st.dataframe(portfolio_df)
-
-                # Summary of total bought and sold volume
+                # Assign sectors to each symbol
+                def get_sector(symbol):
+                    for sector, symbols in sector_mapping.items():
+                        if symbol in symbols:
+                            return sector
+                    return 'User Defined'
+                
+                portfolio_df['Sector'] = portfolio_df['Symbol'].apply(get_sector)
+                
+                # Create tabs for each sector
+                sector_tabs = st.tabs(list(sector_mapping.keys()))
+                
+                for tab, sector in zip(sector_tabs, sector_mapping.keys()):
+                    with tab:
+                        sector_df = portfolio_df[portfolio_df['Sector'] == sector]
+                        if not sector_df.empty:
+                            st.dataframe(sector_df)
+                            
+                            # Sector-specific summary
+                            sector_bought = sector_df['Bought Volume'].sum()
+                            sector_sold = sector_df['Sold Volume'].sum()
+                            st.write(f"Total Bought Volume: {sector_bought:,}")
+                            st.write(f"Total Sold Volume: {sector_sold:,}")
+                            st.write("Dark Pools: " + 
+                                   ("Bullish" if sector_bought > sector_sold else "Bearish"))
+                            
+                            # Sector visualization
+                            fig = px.bar(sector_df, x='Symbol', y='Avg Buy/Sell Ratio',
+                                       title=f"{sector} Buy/Sell Ratios",
+                                       color='Significant Days')
+                            st.plotly_chart(fig)
+                            
+                            # Export option for sector
+                            csv = convert_df_to_csv(sector_df)
+                            st.download_button(f"Download {sector} Analysis",
+                                            csv, 
+                                            f"portfolio_{sector.lower()}_analysis.csv",
+                                            "text/csv")
+                
+                # Overall portfolio summary
+                st.write("### Overall Portfolio Summary")
                 total_bought_volume = portfolio_df['Bought Volume'].sum()
                 total_sold_volume = portfolio_df['Sold Volume'].sum()
-                st.write(f"Total Bought Volume: {total_bought_volume}")
-                st.write(f"Total Sold Volume: {total_sold_volume}")
-                if total_bought_volume > total_sold_volume:
-                    st.write("Dark Pools: Bullish")
-                else:
-                    st.write("Dark Pools: Bearish")
+                st.write(f"Total Bought Volume: {total_bought_volume:,}")
+                st.write(f"Total Sold Volume: {total_sold_volume:,}")
+                st.write("Dark Pools: " + 
+                       ("Bullish" if total_bought_volume > total_sold_volume else "Bearish"))
                 
-                # Visualization
-                fig = px.bar(portfolio_df, x='Symbol', y='Avg Buy/Sell Ratio', 
-                             title="Portfolio Buy/Sell Ratios", color='Significant Days')
+                # Overall visualization
+                fig = px.bar(portfolio_df, x='Symbol', y='Avg Buy/Sell Ratio',
+                            title="Portfolio Buy/Sell Ratios by Sector",
+                            color='Sector')
                 st.plotly_chart(fig)
-                
-                
                 
                 # Correlation Heatmap
                 if st.button("Show Portfolio Correlation"):
                     plot_correlation_heatmap(portfolio_symbols, port_lookback_days)
                 
-                # Export
+                # Export full portfolio
                 csv = convert_df_to_csv(portfolio_df)
-                st.download_button("Download Portfolio Analysis as CSV", csv, "portfolio_analysis.csv", "text/csv")
+                st.download_button("Download Full Multi Stock Analysis",
+                                csv,
+                                "portfolio_analysis.csv",
+                                "text/csv")
             else:
                 st.write("No data available for the selected portfolio.")
 
