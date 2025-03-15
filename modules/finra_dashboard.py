@@ -8,6 +8,7 @@ import plotly.express as px
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import concurrent.futures
 
 # Sector mapping
 sector_mapping = {
@@ -236,6 +237,7 @@ def calculate_metrics(row, total_volume):
         'short_volume_ratio': round(short_volume_ratio, 4)
     }
 
+@st.cache_data
 def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     results = []
     significant_days = 0
@@ -399,19 +401,27 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
 
 def analyze_portfolio(symbols, lookback_days=20):
     portfolio_results = []
-    for symbol in symbols:
-        df, significant_days = analyze_symbol(symbol, lookback_days, threshold=1.5)
-        if not df.empty:
-            for _, row in df.iterrows():
-                portfolio_results.append({
-                    'Symbol': symbol,
-                    'Date': row['date'],
-                    'Avg Buy/Sell Ratio': row['buy_to_sell_ratio'],
-                    'Bought Volume': int(row['bought_volume']),
-                    'Sold Volume': int(row['sold_volume']),
-                    'Significant Days': significant_days,
-                    'Latest Volume': int(row['total_volume'])
-                })
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(analyze_symbol, symbol, lookback_days, 1.5): symbol for symbol in symbols}
+        for future in concurrent.futures.as_completed(futures):
+            symbol = futures[future]
+            try:
+                df, significant_days = future.result()
+                if not df.empty:
+                    for _, row in df.iterrows():
+                        portfolio_results.append({
+                            'Symbol': symbol,
+                            'Date': row['date'],
+                            'Avg Buy/Sell Ratio': row['buy_to_sell_ratio'],
+                            'Bought Volume': int(row['bought_volume']),
+                            'Sold Volume': int(row['sold_volume']),
+                            'Significant Days': significant_days,
+                            'Latest Volume': int(row['total_volume'])
+                        })
+            except Exception as exc:
+                print(f'{symbol} generated an exception: {exc}')
+    
     portfolio_df = pd.DataFrame(portfolio_results)
     if not portfolio_df.empty:
         portfolio_df = portfolio_df.sort_values(by=['Avg Buy/Sell Ratio', 'Bought Volume'], ascending=[False, False])
@@ -435,6 +445,16 @@ def plot_correlation_heatmap(symbols, lookback_days=20):
     sns.heatmap(corr_df, annot=True, cmap='coolwarm', ax=ax)
     st.pyplot(fig)
 
+def get_latest_data():
+    for i in range(7):  # Check the last 7 days
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        if data:
+            df = process_finra_short_sale_data(data)
+            if not df.empty:
+                return df, date
+    return pd.DataFrame(), None
+
 def run():
     st.markdown("""
         <style>
@@ -451,7 +471,7 @@ def run():
     st.title("FINRA Short Sale Analysis")
     
     with st.sidebar:
-        portfolio_symbols = st.text_area("User Defined Symbols for Multi Stock Analysis (comma-separated)", 
+        portfolio_symbols = st.text_area("User Defined Symbols for Multi Stock (comma-separated)", 
                                          "AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, PLTR, LLY, JPM, AVGO, UNH, V, WMT, XOM, MA, JNJ, PG, HD, COST, ORCL, CVX, BAC, KO, PEP, ABBV, "
                                          "MRK, AMD, NFLX, ADBE, CRM, INTC, CSCO, PFE, TMO, MCD, DIS, WFC, QCOM, LIN, GE, AXP, CAT, IBM, VZ, GS, MS, PM, LOW, NEE, RTX, BA, HON, UNP, "
                                          "T, BLK, MDT, SBUX, LMT, AMGN, GILD, CVS, DE, TGT, AMT, BKNG, SO, DUK, PYPL, UPS, C, COP, MMM, ACN, ABT, DHR, TMUS, TXN, MDLZ, BMY, INTU, NKE, "
@@ -459,7 +479,7 @@ def run():
                                          "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Single Stock Analysis", "Accumulation Patterns", "Distribution Patterns", "Sector Rotation", "Multi Stock Analysis"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Single Stock", "Accumulation", "Distribution", "Sector Rotation", "Multi Stock", "Latest Day"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -499,9 +519,7 @@ def run():
                     display_df[col] = display_df[col].astype(int)
                 styled_df = display_df.style.apply(highlight_significant, axis=1)
                 st.dataframe(styled_df)
-                
-                csv = convert_df_to_csv(results_df)
-                st.download_button("Download Results as CSV", csv, f"{symbol}_analysis.csv", "text/csv")
+
     
     with tab2:
         st.subheader("Top 40 Stocks Showing Accumulation")
@@ -511,7 +529,7 @@ def run():
         with col2:
             acc_use_validation = st.checkbox("Use Price Validation", value=False, key="acc_val")
         
-        if st.button("Find Accumulation Patterns"):
+        if st.button("Find Accumulation"):
             with st.spinner("Finding patterns..."):
                 accumulation_df = find_patterns(lookback_days=10, min_volume=acc_min_volume, pattern_type="accumulation", use_price_validation=acc_use_validation)
             if not accumulation_df.empty:
@@ -521,13 +539,11 @@ def run():
                 st.dataframe(styled_df)
                 
                 fig = px.bar(accumulation_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
-                             color='Volume Trend', title="Top 10 Accumulation Patterns")
+                             color='Volume Trend', title="Top 10 Accumulation")
                 st.plotly_chart(fig)
                 
-                csv = convert_df_to_csv(accumulation_df)
-                st.download_button("Download Accumulation Patterns as CSV", csv, "accumulation_patterns.csv", "text/csv")
             else:
-                st.write("No accumulation patterns detected with current filters.")
+                st.write("No Accumulation detected with current filters.")
     
     with tab3:
         st.subheader("Top 40 Stocks Showing Distribution")
@@ -537,7 +553,7 @@ def run():
         with col2:
             dist_use_validation = st.checkbox("Use Price Validation", value=False, key="dist_val")
         
-        if st.button("Find Distribution Patterns"):
+        if st.button("Find Distribution"):
             with st.spinner("Finding patterns..."):
                 distribution_df = find_patterns(lookback_days=10, min_volume=dist_min_volume, pattern_type="distribution", use_price_validation=dist_use_validation)
             if not distribution_df.empty:
@@ -547,13 +563,11 @@ def run():
                 st.dataframe(styled_df)
                 
                 fig = px.bar(distribution_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
-                             color='Volume Trend', title="Top 10 Distribution Patterns")
+                             color='Volume Trend', title="Top 10 Distribution")
                 st.plotly_chart(fig)
                 
-                csv = convert_df_to_csv(distribution_df)
-                st.download_button("Download Distribution Patterns as CSV", csv, "distribution_patterns.csv", "text/csv")
             else:
-                st.write("No distribution patterns detected with current filters.")
+                st.write("No Distribution detected with current filters.")
     
     with tab4:
         st.subheader("Sector Rotation Analysis")
@@ -577,8 +591,6 @@ def run():
                              title="Buying Sectors by Volume")
                 st.plotly_chart(fig)
                 
-                csv = convert_df_to_csv(buying_df)
-                st.download_button("Download Buying Sectors as CSV", csv, "buying_sectors.csv", "text/csv")
             else:
                 st.write("No sectors with clear buying trends detected.")
             
@@ -589,91 +601,150 @@ def run():
                 styled_selling = selling_df.style.apply(highlight_selling, axis=1)
                 st.dataframe(styled_selling)
                 
-                csv = convert_df_to_csv(selling_df)
-                st.download_button("Download Selling Sectors as CSV", csv, "selling_sectors.csv", "text/csv")
             else:
                 st.write("No sectors with clear selling trends detected.")
     
     with tab5:
         st.subheader("Multi Stock Analysis")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            port_lookback_days = st.slider("Lookback Days (Portfolio)", 1, 30, 1, key="port_days")
+            start_date = st.date_input("Start Date", datetime.now().date() - timedelta(days=7))
         with col2:
-            #st.write(f"Analyzing: {', '.join(portfolio_symbols)}")
-            st.write(f"Analyzing: ")
+            end_date = st.date_input("End Date", datetime.now().date())
+        with col3:
+            min_buy_sell_ratio = st.number_input("Min Buy/Sell Ratio", min_value=0.2, max_value=100.0, value=1.5, step=0.1)
         
-        if st.button("Analyze Portfolio"):
+        col4, col5 = st.columns(2)
+        with col4:
+            min_total_volume = st.number_input("Min Total Volume", min_value=0, value=2000000, step=100000, format="%d")
+        
+        if st.button("Analyze Stocks"):
             with st.spinner("Analyzing stocks..."):
-                portfolio_df = analyze_portfolio(portfolio_symbols, port_lookback_days)
+                start_datetime = datetime.combine(start_date, datetime.min.time())
+                portfolio_df = analyze_portfolio(portfolio_symbols, (datetime.now() - start_datetime).days)
             
             if not portfolio_df.empty:
-                # Assign sectors to each symbol
-                def get_sector(symbol):
-                    for sector, symbols in sector_mapping.items():
-                        if symbol in symbols:
-                            return sector
-                    return 'User Defined'
+                # Filter the DataFrame based on the selected criteria
+                portfolio_df['Date'] = pd.to_datetime(portfolio_df['Date'])
+                filtered_df = portfolio_df[
+                    (portfolio_df['Date'] >= pd.to_datetime(start_date)) &
+                    (portfolio_df['Date'] <= pd.to_datetime(end_date)) &
+                    (portfolio_df['Avg Buy/Sell Ratio'] >= min_buy_sell_ratio) &
+                    (portfolio_df['Latest Volume'] >= min_total_volume)
+                ]
                 
-                portfolio_df['Sector'] = portfolio_df['Symbol'].apply(get_sector)
-                
-                # Create tabs for each sector
-                sector_tabs = st.tabs(list(sector_mapping.keys()))
-                
-                for tab, sector in zip(sector_tabs, sector_mapping.keys()):
-                    with tab:
-                        sector_df = portfolio_df[portfolio_df['Sector'] == sector]
-                        if not sector_df.empty:
-                            st.dataframe(sector_df)
-                            
-                            # Sector-specific summary
-                            sector_bought = sector_df['Bought Volume'].sum()
-                            sector_sold = sector_df['Sold Volume'].sum()
-                            st.write(f"Total Bought Volume: {sector_bought:,}")
-                            st.write(f"Total Sold Volume: {sector_sold:,}")
-                            st.write("Dark Pools: " + 
-                                   ("Bullish" if sector_bought > sector_sold else "Bearish"))
-                            
-                            # Sector visualization
-                            fig = px.bar(sector_df, x='Symbol', y='Avg Buy/Sell Ratio',
-                                       title=f"{sector} Buy/Sell Ratios",
-                                       color='Significant Days')
-                            st.plotly_chart(fig)
-                            
-                            # Export option for sector
-                            csv = convert_df_to_csv(sector_df)
-                            st.download_button(f"Download {sector} Analysis",
-                                            csv, 
-                                            f"portfolio_{sector.lower()}_analysis.csv",
-                                            "text/csv")
-                
-                # Overall portfolio summary
-                st.write("### Overall Portfolio Summary")
-                total_bought_volume = portfolio_df['Bought Volume'].sum()
-                total_sold_volume = portfolio_df['Sold Volume'].sum()
-                st.write(f"Total Bought Volume: {total_bought_volume:,}")
-                st.write(f"Total Sold Volume: {total_sold_volume:,}")
-                st.write("Dark Pools: " + 
-                       ("Bullish" if total_bought_volume > total_sold_volume else "Bearish"))
-                
-                # Overall visualization
-                fig = px.bar(portfolio_df, x='Symbol', y='Avg Buy/Sell Ratio',
-                            title="Portfolio Buy/Sell Ratios by Sector",
-                            color='Sector')
-                st.plotly_chart(fig)
-                
-                # Correlation Heatmap
-                if st.button("Show Portfolio Correlation"):
-                    plot_correlation_heatmap(portfolio_symbols, port_lookback_days)
-                
-                # Export full portfolio
-                csv = convert_df_to_csv(portfolio_df)
-                st.download_button("Download Full Multi Stock Analysis",
-                                csv,
-                                "portfolio_analysis.csv",
-                                "text/csv")
+                if not filtered_df.empty:
+                    # Assign sectors to each symbol
+                    def get_sector(symbol):
+                        for sector, symbols in sector_mapping.items():
+                            if symbol in symbols:
+                                return sector
+                        return 'User Defined'
+                    
+                    filtered_df['Sector'] = filtered_df['Symbol'].apply(get_sector)
+                    
+                    # Create tabs for each sector
+                    sector_tabs = st.tabs(list(sector_mapping.keys()))
+                    
+                    for tab, sector in zip(sector_tabs, sector_mapping.keys()):
+                        with tab:
+                            sector_df = filtered_df[filtered_df['Sector'] == sector]
+                            if not sector_df.empty:
+                                st.dataframe(sector_df)
+                                
+                                # Sector-specific summary
+                                sector_bought = sector_df['Bought Volume'].sum()
+                                sector_sold = sector_df['Sold Volume'].sum()
+                                st.write(f"Total Bought Volume: {sector_bought:,}")
+                                st.write(f"Total Sold Volume: {sector_sold:,}")
+                                st.write("Dark Pools: " + 
+                                       ("Bullish" if sector_bought > sector_sold else "Bearish"))
+                                
+                                # Sector visualization
+                                fig = px.bar(sector_df, x='Symbol', y='Avg Buy/Sell Ratio',
+                                           title=f"{sector} Buy/Sell Ratios",
+                                           color='Significant Days',
+                                           hover_data=['Bought Volume', 'Sold Volume'])
+                                fig.update_layout(barmode='group', xaxis_tickangle=-45)
+                                st.plotly_chart(fig)
+                                
+                    
+                    # Overall portfolio summary
+                    st.write("### Overall Summary")
+                    total_bought_volume = filtered_df['Bought Volume'].sum()
+                    total_sold_volume = filtered_df['Sold Volume'].sum()
+                    st.write(f"Total Bought Volume: {total_bought_volume:,}")
+                    st.write(f"Total Sold Volume: {total_sold_volume:,}")
+                    st.write("Dark Pools: " + 
+                           ("Bullish" if total_bought_volume > total_sold_volume else "Bearish"))
+                    
+                    # Overall visualization
+                    fig = px.bar(filtered_df, x='Symbol', y='Avg Buy/Sell Ratio',
+                                title="Buy/Sell Ratios by Sector",
+                                color='Sector',
+                                hover_data=['Bought Volume', 'Sold Volume'])
+                    fig.update_layout(barmode='group', xaxis_tickangle=-45)
+                    st.plotly_chart(fig)
+                    
+                else:
+                    st.write("No data available for the selected filters.")
             else:
                 st.write("No data available for the selected portfolio.")
+    
+    with tab6:
+        st.subheader("Latest Day")
+        latest_df, latest_date = get_latest_data()
+    
+        # Add checkbox for the optional filter
+        col1, col2 = st.columns(2)
+        with col1:
+          volume_filter = st.checkbox("Filter: Bought Volume > 2x Sold Volume", value=False)
+    
+        if latest_df.empty:
+            st.write("No data available for the latest day.")
+        else:
+            st.write(f"Showing data for: {latest_date}")
+        
+        # Calculate metrics for each row and add them to the DataFrame
+        metrics_list = []
+        for _, row in latest_df.iterrows():
+            total_volume = row.get('TotalVolume', 0)
+            metrics = calculate_metrics(row, total_volume)
+            metrics['Symbol'] = row['Symbol']
+            metrics['TotalVolume'] = total_volume
+            metrics_list.append(metrics)
+        
+        # Convert the list of metrics to a DataFrame
+        latest_df_processed = pd.DataFrame(metrics_list)
+        
+        # Apply base filters
+        latest_df_processed = latest_df_processed[latest_df_processed['total_volume'] >= 2000000]
+        latest_df_processed = latest_df_processed[latest_df_processed['buy_to_sell_ratio'] > 2]
+        
+        # Apply optional filter if checkbox is selected
+        if volume_filter:
+            latest_df_processed = latest_df_processed[latest_df_processed['bought_volume'] > 2 * latest_df_processed['sold_volume']]
+        
+        # Sort by buy_to_sell_ratio and TotalVolume
+        latest_df_processed = latest_df_processed.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+        
+        if not latest_df_processed.empty:
+            # Reorder columns with 'Symbol' as the first column
+            column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio']
+            latest_df_processed = latest_df_processed[column_order]
+            
+            # Display the DataFrame
+            st.dataframe(latest_df_processed)
+            
+            # Visualization
+            fig = px.bar(latest_df_processed, x='Symbol', y='buy_to_sell_ratio',
+                        title="Latest Day Buy/Sell Ratios",
+                        hover_data=['total_volume', 'bought_volume', 'sold_volume'])
+            fig.update_layout(barmode='group', xaxis_tickangle=-45)
+            st.plotly_chart(fig)
+            
+        else:
+            st.write("No records found with current filters.")
 
 if __name__ == "__main__":
     run()
