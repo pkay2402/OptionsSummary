@@ -719,7 +719,7 @@ def run():
         
         # Apply base filters
         latest_df_processed = latest_df_processed[latest_df_processed['total_volume'] >= 2000000]
-        latest_df_processed = latest_df_processed[latest_df_processed['buy_to_sell_ratio'] > 2]
+        latest_df_processed = latest_df_processed[latest_df_processed['buy_to_sell_ratio'] > 1.5]
         
         # Apply optional filter if checkbox is selected
         if volume_filter:
