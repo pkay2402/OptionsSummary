@@ -30,10 +30,10 @@ def load_csv(uploaded_file):
                 'Is Unusual': 15,
                 'Is Golden Sweep': 16,
                 'Is Opening Position': 17,
-                'Money Type': 18
+                'Money Type': 18,
+                'Side Code': 19  # Added Side Code to mapping
             }
             
-            # Create a new DataFrame with renamed columns
             new_columns = df.columns.tolist()
             renamed_df = df.copy()
             renamed_df.columns = [positional_mapping.get(i, col) for i, col in enumerate(new_columns)]
@@ -44,19 +44,20 @@ def load_csv(uploaded_file):
         
         # Ensure numeric columns are properly converted
         numeric_columns = ['Days Until Expiration', 'Strike Price', 'Reference Price', 
-                          'Size', 'Option Price', 'Premium Price']
+                         'Size', 'Option Price', 'Premium Price']
         
         for col in numeric_columns:
             if col in df.columns:
-                # If column is object type, clean currency symbols and commas
                 if df[col].dtype == 'object':
                     df[col] = df[col].astype(str).str.replace('$', '').str.replace(',', '')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Ensure categorical columns are strings
-        for col in ['Trade Type', 'Ticker', 'Contract Type', 'Is Unusual', 'Is Golden Sweep', 'Is Opening Position', 'Money Type']:
+        # Ensure categorical columns are strings and handle Side Code
+        categorical_columns = ['Trade Type', 'Ticker', 'Contract Type', 'Is Unusual', 
+                             'Is Golden Sweep', 'Is Opening Position', 'Money Type', 'Side Code']
+        for col in categorical_columns:
             if col in df.columns:
-                df[col] = df[col].astype(str).str.strip()
+                df[col] = df[col].fillna('N/A').astype(str).str.strip()
                 if col == 'Ticker':
                     df[col] = df[col].str.upper()
         
@@ -68,41 +69,52 @@ def load_csv(uploaded_file):
         st.error(f"Failed to load CSV: {e}")
         return None
 
+# Function to split content for Discord
+def split_message(content: str, max_length: int = 2000) -> list:
+    """
+    Split content into parts under max_length characters while preserving line breaks.
+    """
+    if len(content) <= max_length:
+        return [content]
+    
+    messages = []
+    current_part = ""
+    
+    for line in content.split('\n'):
+        if len(current_part) + len(line) + 1 > max_length:
+            if current_part:
+                messages.append(current_part.strip())
+            current_part = line
+        else:
+            current_part += f"\n{line}" if current_part else line
+            
+    if current_part:
+        messages.append(current_part.strip())
+        
+    # Handle case where a single line is too long
+    final_messages = []
+    for msg in messages:
+        if len(msg) > max_length:
+            for i in range(0, len(msg), max_length):
+                final_messages.append(msg[i:i + max_length])
+        else:
+            final_messages.append(msg)
+            
+    return final_messages
+
 # Function to send content to Discord with splitting
 def send_to_discord(content, webhook_url):
     DISCORD_CHAR_LIMIT = 2000
     try:
-        if len(content) <= DISCORD_CHAR_LIMIT:
-            data = {"content": content}
+        parts = split_message(content, DISCORD_CHAR_LIMIT)
+        
+        for i, part in enumerate(parts, 1):
+            data = {"content": f"Part {i}/{len(parts)}:\n{part}"}
             response = requests.post(webhook_url, json=data)
-            if response.status_code == 204:
-                return "Newsletter sent successfully to Discord."
-            else:
-                return f"Failed to send newsletter to Discord: {response.status_code} {response.text}"
-        else:
-            # Split content into parts
-            parts = []
-            current_part = ""
-            lines = content.split("\n")
-            
-            for line in lines:
-                if len(current_part) + len(line) + 1 > DISCORD_CHAR_LIMIT:
-                    parts.append(current_part.strip())
-                    current_part = line + "\n"
-                else:
-                    current_part += line + "\n"
-            
-            if current_part.strip():
-                parts.append(current_part.strip())
-            
-            # Send each part
-            for i, part in enumerate(parts, 1):
-                data = {"content": f"Part {i}/{len(parts)}:\n{part}"}
-                response = requests.post(webhook_url, json=data)
-                if response.status_code != 204:
-                    return f"Failed to send part {i} to Discord: {response.status_code} {response.text}"
-            
-            return f"Newsletter sent successfully to Discord in {len(parts)} parts."
+            if response.status_code != 204:
+                return f"Failed to send part {i} to Discord: {response.status_code} {response.text}"
+        
+        return f"Newsletter sent successfully to Discord in {len(parts)} parts."
     except Exception as e:
         return f"Error sending to Discord: {e}"
 
@@ -116,10 +128,8 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
     current_date = pd.to_datetime("today")
     current_date_str = current_date.strftime("%b %d, %Y")
     
-    # Define exclude tickers
     exclude_tickers = ['SPX', 'SPY', 'IWM', 'QQQ']
     
-    # Newsletter Header
     newsletter = f"📈 OUT-THE-MONEY OPTIONS FLOW SUMMARY - {current_date_str} 📈\n\n"
     
     # Section 1: Market Update (SPY & QQQ)
@@ -152,14 +162,11 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
             newsletter += "Key Market Flows:\n"
             for idx, flow in key_flows.iterrows():
                 move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                side = ("AA" if flow.get('Side Code') == 'AA' else 
-                        "BB" if flow.get('Side Code') == 'BB' else 
-                        "A" if flow.get('Side Code') == 'A' else 
-                        "B" if flow.get('Side Code') == 'B' else "N/A")
+                side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
                 sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                             "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                             "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                             "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
+                            "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
+                            "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
+                            "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
                 flags = []
                 if flow['Is Unusual'] == 'Yes':
                     flags.append("UNUSUAL")
@@ -173,36 +180,29 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
                              f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
         newsletter += "\n"
     
-    # Section 2: Aggressive Flows (Premium $100K+, Side = AA or BB)
+    # Section 2: Aggressive Flows
     newsletter += "=== OTM FLOWS ===\n"
-    if 'Side Code' in df.columns:
-        aggressive_df = df[
-            (df['Expiration Date'] > current_date) &
-            (df['Premium Price'] >= premium_price) &
-            (df['Side Code'].isin(side_codes)) &
-            (df['Ticker'].isin(tickers)) &
-            (~df['Ticker'].isin(exclude_tickers))
-        ]
-        
-        if sort_by == "Premium Price":
-            aggressive_df = aggressive_df.sort_values(by=["Premium Price", "Ticker"], ascending=[False, True])
-        else:
-            aggressive_df = aggressive_df.sort_values(['Ticker', 'Premium Price'], ascending=[True, False])
-    else:
-        aggressive_df = pd.DataFrame()  # Empty DataFrame if 'Side Code' column is not present
+    aggressive_df = df[
+        (df['Expiration Date'] > current_date) &
+        (df['Premium Price'] >= premium_price) &
+        (df['Side Code'].isin(side_codes)) &
+        (df['Ticker'].isin(tickers)) &
+        (~df['Ticker'].isin(exclude_tickers))
+    ]
     
     if aggressive_df.empty:
         newsletter += "No aggressive OTM flows detected after applying the filters.\n\n"
     else:
         if sort_by == "Premium Price":
+            aggressive_df = aggressive_df.sort_values(by=["Premium Price", "Ticker"], ascending=[False, True])
             newsletter += "Top Aggressive Flows (Sorted by Premium Price):\n"
             for idx, flow in aggressive_df.head(top_n_aggressive_flows).iterrows():
                 move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                side = "AA" if flow['Side Code'] == 'AA' else "BB" if flow['Side Code'] == 'BB' else "N/A"
+                side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
                 sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                             "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                             "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                             "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
+                            "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
+                            "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
+                            "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
                 flags = []
                 if flow['Is Unusual'] == 'Yes':
                     flags.append("UNUSUAL")
@@ -215,17 +215,18 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
                              f"exp {flow['Expiration Date'].date()} - ${flow['Premium Price']:,.2f} "
                              f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
         else:
+            aggressive_df = aggressive_df.sort_values(['Ticker', 'Premium Price'], ascending=[True, False])
             newsletter += "Top Aggressive Flows (Grouped by Ticker):\n"
             grouped_aggressive_df = aggressive_df.groupby('Ticker')
             for ticker, group in grouped_aggressive_df:
                 newsletter += f"\nTicker: {ticker}\n"
                 for idx, flow in group.head(top_n_aggressive_flows).iterrows():
                     move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                    side = "AA" if flow['Side Code'] == 'AA' else "BB" if flow['Side Code'] == 'BB' else "N/A"
+                    side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
                     sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                                 "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                                 "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                                 "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
+                                "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
+                                "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
+                                "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
                     flags = []
                     if flow['Is Unusual'] == 'Yes':
                         flags.append("UNUSUAL")
@@ -239,10 +240,7 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
                                  f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
         newsletter += "\n"
     
-    # Footer
-    #newsletter += "Generated by Smart Options Flow Analyzer\n"
     newsletter += "Only for education purpose!"
-    
     return newsletter
 
 # Main function
@@ -268,12 +266,12 @@ def main():
                 st.subheader("Options Flow Newsletter")
                 st.markdown("Generate a newsletter summarizing today's OUT-THE-MONEY flows for your Discord group")
                 
-                top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=100, value=50)
-                premium_price = st.number_input("Minimum Premium Price", min_value=0, value=100000)
+                top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=200, value=100)
+                premium_price = st.number_input("Minimum Premium Price", min_value=0, value=150000)
                 side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'BB'])
                 with st.expander("Select Tickers", expanded=False):
                     tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
-                sort_by = st.selectbox("Sort By", options=["Premium Price", "Ticker"])
+                sort_by = st.selectbox("Sort By", options=["Ticker", "Premium Price"])
                 
                 with st.expander("Discord Integration"):
                     webhook_url = st.text_input(
