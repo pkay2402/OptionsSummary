@@ -237,7 +237,7 @@ def calculate_metrics(row, total_volume):
         'short_volume_ratio': round(short_volume_ratio, 4)
     }
 
-@st.cache_data
+@st.cache_data(ttl=11520)
 def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     results = []
     significant_days = 0
