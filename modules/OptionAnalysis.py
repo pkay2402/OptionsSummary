@@ -243,7 +243,62 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
     newsletter += "Only for education purpose!"
     return newsletter
 
-# Main function
+def display_symbol_flows(df, symbol):
+    """Display flows for a specific symbol with opening positions, premium > 250000, and expiration date > today's date"""
+    if df is None or df.empty:
+        st.warning("No data available to display symbol flows.")
+        return
+    
+    # Filter for specific symbol, opening positions, premium > 250000, and expiration date > today's date
+    today = pd.to_datetime("today")
+    symbol_df = df[
+        (df['Ticker'] == symbol.upper()) &
+        (df['Is Opening Position'] == 'Yes') &
+        (df['Premium Price'] > 250000) &
+        (df['Expiration Date'] > today)
+    ].copy()
+    
+    if symbol_df.empty:
+        st.warning(f"No opening position flows found for {symbol} with premium > $250,000 and expiration date > today")
+        return
+    
+    # Sort by Expiration Date (ascending) and Premium Price (descending)
+    symbol_df = symbol_df.sort_values(by=['Expiration Date', 'Premium Price'], ascending=[True, False])
+    
+    st.subheader(f"Opening Position Flows for {symbol} (Premium > $250,000, Expiration Date > Today)")
+    
+    # Format the display
+    for idx, flow in symbol_df.iterrows():
+        move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
+        side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
+        sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
+                    "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
+                    "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
+                    "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
+        flags = []
+        if flow['Is Unusual'] == 'Yes':
+            flags.append("UNUSUAL")
+        if flow['Is Golden Sweep'] == 'Yes':
+            flags.append("GOLDEN SWEEP")
+        flags_str = f" [{' '.join(flags)}]" if flags else ""
+        
+        flow_str = (
+            f"• {flow['Contract Type']} | "
+            f"Strike: ${flow['Strike Price']:,.2f} | "
+            f"Exp: {flow['Expiration Date'].date()} | "
+            f"Premium: ${flow['Premium Price']:,.2f} | "
+            f"Contracts: {flow['Size']} | "
+            f"Move: {move_pct:.1f}% | "
+            f"Sentiment: {sentiment} | "
+            f"Side: {side} {flags_str}"
+        )
+        
+        st.markdown(flow_str)
+    
+    # Display raw data table as an option
+    with st.expander("View Raw Data"):
+        st.dataframe(symbol_df)
+
 def main():
     st.set_page_config(
         page_title="Smart Options Flow Analyzer",
@@ -254,7 +309,7 @@ def main():
     default_webhook = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1341974407102595082/HTKke4FEZIQe6Xd9AUv2IgVDJp0yx89Uhosv_iM-7BZBTn2jk2T-dP_TFbX2PgMuF75D")
     
     st.title("🔍 Smart Options Flow Analyzer")
-    st.markdown("Generate a newsletter summarizing today's OUT-THE-MONEY options flows")
+    st.markdown("Generate a newsletter or view specific symbol flows for OUT-THE-MONEY options")
      
     uploaded_file = st.file_uploader("Upload your options flow CSV file", type=["csv"])
     
@@ -263,34 +318,48 @@ def main():
             df = load_csv(uploaded_file)
             
             if df is not None:
-                st.subheader("Options Flow Newsletter")
-                st.markdown("Generate a newsletter summarizing today's OUT-THE-MONEY flows for your Discord group")
+                # Tabs for different views
+                tab1, tab2 = st.tabs(["Newsletter Generator", "Individual Symbol Flows"])
                 
-                top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=200, value=100)
-                premium_price = st.number_input("Minimum Premium Price", min_value=0, value=150000)
-                side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'BB'])
-                with st.expander("Select Tickers", expanded=False):
-                    tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
-                sort_by = st.selectbox("Sort By", options=["Ticker", "Premium Price"])
+                # Tab 1: Newsletter Generator (original functionality)
+                with tab1:
+                    st.subheader("Options Flow Newsletter")
+                    st.markdown("Generate a newsletter summarizing today's OUT-THE-MONEY flows for your Discord group")
+                    
+                    top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=200, value=100)
+                    premium_price = st.number_input("Minimum Premium Price", min_value=0, value=150000)
+                    side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'BB'])
+                    with st.expander("Select Tickers", expanded=False):
+                        tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
+                    sort_by = st.selectbox("Sort By", options=["Ticker", "Premium Price"])
+                    
+                    with st.expander("Discord Integration"):
+                        webhook_url = st.text_input(
+                            "Discord Webhook URL (Newsletter)",
+                            value=default_webhook,
+                            type="password",
+                            help="Enter your Discord webhook URL to send the newsletter"
+                        )
+                        send_to_discord_enabled = st.checkbox("Send newsletter to Discord", value=False)
+                    
+                    if st.button("Generate Newsletter", type="primary"):
+                        with st.spinner("Generating newsletter..."):
+                            newsletter_content = generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, tickers, sort_by)
+                            st.markdown(f"```\n{newsletter_content}\n```")
+                            
+                            if send_to_discord_enabled:
+                                with st.spinner("Sending newsletter to Discord..."):
+                                    discord_result = send_to_discord(newsletter_content, webhook_url)
+                                    st.info(discord_result)
                 
-                with st.expander("Discord Integration"):
-                    webhook_url = st.text_input(
-                        "Discord Webhook URL (Newsletter)",
-                        value=default_webhook,
-                        type="password",
-                        help="Enter your Discord webhook URL to send the newsletter"
-                    )
-                    send_to_discord_enabled = st.checkbox("Send newsletter to Discord", value=False)
-                
-                if st.button("Generate Newsletter", type="primary"):
-                    with st.spinner("Generating newsletter..."):
-                        newsletter_content = generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, tickers, sort_by)
-                        st.markdown(f"```\n{newsletter_content}\n```")
-                        
-                        if send_to_discord_enabled:
-                            with st.spinner("Sending newsletter to Discord..."):
-                                discord_result = send_to_discord(newsletter_content, webhook_url)
-                                st.info(discord_result)
+                # Tab 2: Individual Symbol Flows
+                with tab2:
+                    st.subheader("View Individual Symbol Flows")
+                    st.markdown("View opening position flows with premium > $250,000 for a specific symbol")
+                    
+                    symbol_input = st.text_input("Enter Symbol (e.g., AAPL)", "").upper()
+                    if symbol_input:
+                        display_symbol_flows(df, symbol_input)
 
 if __name__ == "__main__":
     main()
