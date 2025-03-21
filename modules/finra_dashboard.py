@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 import requests
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import yfinance as yf
 import plotly.express as px
 import numpy as np
@@ -667,6 +667,106 @@ def find_rising_ratio_stocks(lookback_days=10, min_volume=500000, max_dips=3, mi
     # Sort by ratio increase and total volume
     results = sorted(results, key=lambda x: (x['Ratio Increase'], x['Total Volume']), reverse=True)
     return pd.DataFrame(results[:40])
+def generate_evening_report(capital=10000, run_on_demand=False):
+    """
+    Collects data from key sections and generates a summary with portfolio optimization.
+    Args:
+        capital (float): Investment capital in USD (default: 10,000).
+        run_on_demand (bool): If True, runs immediately; otherwise, checks for 6:30 PM ET.
+    Returns:
+        Tuple of dataframes: (accumulation_df, distribution_df, rising_df, buying_sectors_df, selling_sectors_df)
+    """
+    now = datetime.now()
+    if not run_on_demand and (now.hour != 18 or now.minute < 30 or now.minute > 35):  # Approx 6:30 PM ET
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # Collect data from all sections
+    accumulation_df = find_patterns(
+        lookback_days=10, min_volume=1000000, pattern_type="accumulation",
+        use_price_validation=False, min_price=5.0, min_market_cap=500_000_000
+    )
+    
+    distribution_df = find_patterns(
+        lookback_days=10, min_volume=1000000, pattern_type="distribution",
+        use_price_validation=False, min_price=5.0, min_market_cap=500_000_000
+    )
+    
+    rising_df = find_rising_ratio_stocks(
+        lookback_days=10, min_volume=500000, max_dips=3, min_price=5.0,
+        min_market_cap=500_000_000, allowed_symbols=None
+    )
+    
+    buying_sectors_df, selling_sectors_df = get_sector_rotation(lookback_days=10, min_volume=50000)
+    
+    latest_df, latest_date = get_latest_data()
+    if not latest_df.empty:
+        metrics_list = [calculate_metrics(row, row.get('TotalVolume', 0)) for _, row in latest_df.iterrows()]
+        latest_df_processed = pd.DataFrame(metrics_list)
+        latest_df_processed['Symbol'] = latest_df['Symbol']
+        latest_df_processed = latest_df_processed[
+            (latest_df_processed['total_volume'] >= 2000000) &
+            (latest_df_processed['buy_to_sell_ratio'] > 1.5)
+        ].sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+        
+        # Fetch prices for latest day symbols
+        if not latest_df_processed.empty:
+            latest_df_processed['Price'] = latest_df_processed['Symbol'].apply(
+                lambda symbol: get_stock_info_from_db(symbol)['price']
+            )
+    else:
+        latest_df_processed = pd.DataFrame()
+
+    # Portfolio Optimization Logic
+    buy_candidates = []
+    if not accumulation_df.empty:
+        buy_candidates.extend(accumulation_df.head(5)[['Symbol', 'Avg Buy/Sell Ratio', 'Price']].to_dict('records'))
+    if not rising_df.empty:
+        buy_candidates.extend(rising_df.head(5)[['Symbol', 'Ending Ratio', 'Price']].to_dict('records'))
+    if not latest_df_processed.empty:
+        buy_candidates.extend(latest_df_processed.head(3)[['Symbol', 'buy_to_sell_ratio', 'Price']].to_dict('records'))
+
+    sell_candidates = []
+    if not distribution_df.empty:
+        sell_candidates.extend(distribution_df.head(5)[['Symbol', 'Avg Buy/Sell Ratio', 'Price']].to_dict('records'))
+
+    # Prepare buy dataframe for optimization
+    if buy_candidates:
+        buy_df = pd.DataFrame(buy_candidates).drop_duplicates(subset='Symbol')
+        buy_df['Reason'] = buy_df.apply(
+            lambda row: 'Accumulation' if 'Avg Buy/Sell Ratio' in row else 'Rising Ratio' if 'Ending Ratio' in row else 'Latest Day', axis=1
+        )
+        buy_df['Signal Strength'] = buy_df.apply(
+            lambda row: row.get('Avg Buy/Sell Ratio', row.get('Ending Ratio', row.get('buy_to_sell_ratio', 1.5))), axis=1
+        )
+        
+        # Allocate capital based on signal strength
+        buy_df['Weight'] = buy_df['Signal Strength'] / buy_df['Signal Strength'].sum()
+        buy_df['Shares'] = np.floor((capital * buy_df['Weight']) / buy_df['Price'].replace(0, np.nan))  # Avoid division by zero
+        buy_df['Cost'] = buy_df['Shares'] * buy_df['Price']
+        buy_df = buy_df[buy_df['Shares'] > 0]  # Filter out zero-share allocations
+        
+        total_cost = buy_df['Cost'].sum()
+        cash_remaining = capital - total_cost
+    else:
+        buy_df = pd.DataFrame()
+        total_cost = 0
+        cash_remaining = capital
+
+    # Store results in session state
+    st.session_state['evening_report'] = {
+        'accumulation_df': accumulation_df,
+        'distribution_df': distribution_df,
+        'rising_df': rising_df,
+        'buying_sectors_df': buying_sectors_df,
+        'selling_sectors_df': selling_sectors_df,
+        'buy_df': buy_df,
+        'sell_df': pd.DataFrame(sell_candidates).drop_duplicates(subset='Symbol') if sell_candidates else pd.DataFrame(),
+        'total_cost': total_cost,
+        'cash_remaining': cash_remaining,
+        'latest_date': latest_date
+    }
+
+    return accumulation_df, distribution_df, rising_df, buying_sectors_df, selling_sectors_df
 
 def run():
     st.markdown("""
@@ -692,9 +792,11 @@ def run():
                                          "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
-    tab1, tab2, tab3, tab4, tab5, tab6,tab7 = st.tabs(["Single Stock", "Accumulation", "Distribution", 
-                                                        "Sector Rotation", "Multi Stock", "Latest Day", 
-                                                        "Rising Ratios"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "Single Stock", "Accumulation", "Distribution", 
+        "Sector Rotation", "Multi Stock", "Latest Day", 
+        "Rising Ratios", "Portfolio Allocation"
+    ])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -896,7 +998,7 @@ def run():
                                    font=dict(size=18, color="rgba(0,0,150,0.7)"))
                 fig.add_annotation(x=-1, y=-20, text="LAGGING", showarrow=False, 
                                    font=dict(size=18, color="rgba(100,100,100,0.7)"))
-                fig.add_annotation(x=1, y=-20, text="WEAKENING", showarrow=False, 
+                fig.add_annotation(x=1, y=0, text="WEAKENING", showarrow=False, 
                                    font=dict(size=18, color="rgba(150,0,0,0.7)"))
 
                 # Add arrows to indicate rotation direction
@@ -1184,6 +1286,88 @@ def run():
                 #     st.plotly_chart(fig2)
             else:
                 st.write("No stocks found with rising buy/sell ratios over the specified period.")
+    with tab8:
+        st.subheader("Portfolio Allocation")
+        st.write("Generate a comprehensive report summarizing key insights and recommendations.")
 
+        if st.button("Generate Portfolio Allocation"):
+            with st.spinner("Generating Portfolio Allocation..."):
+                accumulation_df, distribution_df, rising_df, buying_sectors_df, selling_sectors_df = generate_evening_report(
+                    capital=10000, run_on_demand=True
+                )
+
+            # Display results from session state
+            report_data = st.session_state.get('evening_report', {})
+            st.write(f"### Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET")
+
+            # Split layout into two columns
+            col1, col2 = st.columns([2, 1])  # Wider left column for portfolio
+
+            with col1:
+                # Portfolio Optimization (Top Priority)
+                st.write("### Portfolio Optimization ($10,000 Capital)")
+                buy_df = report_data.get('buy_df', pd.DataFrame())
+                if not buy_df.empty:
+                    st.dataframe(buy_df[['Symbol', 'Price', 'Shares', 'Cost', 'Reason']], height=200)
+                    st.write(f"Total Invested: ${report_data['total_cost']:,.2f}")
+                    st.write(f"Cash Remaining: ${report_data['cash_remaining']:,.2f}")
+                    
+                    # Pie chart visualization
+                    fig = px.pie(buy_df, values='Cost', names='Symbol', title="Portfolio Allocation")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.write("Insufficient data for portfolio optimization.")
+
+            with col2:
+                # Detailed Data in Expanders
+                st.write("### Detailed Insights")
+                
+                with st.expander("Accumulation", expanded=False):
+                    if not report_data.get('accumulation_df', pd.DataFrame()).empty:
+                        st.dataframe(report_data['accumulation_df'])
+                    else:
+                        st.write("No accumulation patterns detected.")
+
+                with st.expander("Distribution", expanded=False):
+                    if not report_data.get('distribution_df', pd.DataFrame()).empty:
+                        st.dataframe(report_data['distribution_df'])
+                    else:
+                        st.write("No distribution patterns detected.")
+
+                with st.expander("Rising Ratios", expanded=False):
+                    if not report_data.get('rising_df', pd.DataFrame()).empty:
+                        st.dataframe(report_data['rising_df'])
+                    else:
+                        st.write("No stocks with rising buy/sell ratios detected.")
+
+                with st.expander("Sector Rotation - Buying", expanded=False):
+                    if not report_data.get('buying_sectors_df', pd.DataFrame()).empty:
+                        st.dataframe(report_data['buying_sectors_df'])
+                    else:
+                        st.write("No sectors with significant buying trends detected.")
+
+                with st.expander("Sector Rotation - Selling", expanded=False):
+                    if not report_data.get('selling_sectors_df', pd.DataFrame()).empty:
+                        st.dataframe(report_data['selling_sectors_df'])
+                    else:
+                        st.write("No sectors with significant selling trends detected.")
+
+                # Buy/Sell Recommendations (Moved Below Detailed Insights)
+                st.write("### Recommendations")
+                
+                st.write("#### Buy Recommendations")
+                if not buy_df.empty:
+                    st.dataframe(buy_df[['Symbol', 'Price', 'Reason', 'Signal Strength']], height=150)
+                else:
+                    st.write("No strong buy candidates identified.")
+
+                st.write("#### Sell/Short Recommendations")
+                sell_df = report_data.get('sell_df', pd.DataFrame())
+                if not sell_df.empty:
+                    sell_df['Reason'] = 'Distribution'
+                    st.dataframe(sell_df[['Symbol', 'Price', 'Reason']], height=150)
+                else:
+                    st.write("No strong sell/short candidates identified.")
+    
 if __name__ == "__main__":
     run()
