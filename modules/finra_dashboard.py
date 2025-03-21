@@ -1,3 +1,4 @@
+import random
 import pandas as pd
 import streamlit as st
 import requests
@@ -9,6 +10,17 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import concurrent.futures
+import logging
+
+# Configure logging at the top of your file (add this after your imports)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Output to console
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Sector mapping
 sector_mapping = {
@@ -280,7 +292,7 @@ def validate_pattern(symbol, dates, pattern_type="accumulation"):
     except Exception:
         return False
 
-def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulation", use_price_validation=False):
+def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulation", use_price_validation=False, min_price=5.0, min_market_cap=500_000_000):
     pattern_data = {}
     for i in range(lookback_days):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
@@ -306,11 +318,22 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
     results = []
     for symbol, data in pattern_data.items():
         if len(data['dates']) >= 3 and data['days_pattern'] >= 2:
+            # Fetch stock data from the database
+            stock_info = get_stock_info_from_db(symbol)
+            price = stock_info['price']
+            market_cap = stock_info['market_cap']
+            
+            # Skip stocks that don't meet the price and market cap criteria
+            if price < min_price or market_cap < min_market_cap:
+                continue
+            
             if not use_price_validation or validate_pattern(symbol, data['dates'], pattern_type):
                 avg_ratio = sum(data['ratios']) / len(data['ratios'])
                 avg_volume = data['total_volume'] / len(data['dates'])
                 results.append({
                     'Symbol': symbol,
+                    'Price': round(price, 2),
+                    'Market Cap (M)': round(market_cap / 1_000_000, 2),  # Convert to millions
                     'Avg Daily Volume': int(avg_volume),
                     'Avg Buy/Sell Ratio': round(avg_ratio, 2),
                     'Days Showing Pattern': data['days_pattern'],
@@ -454,6 +477,196 @@ def get_latest_data():
             if not df.empty:
                 return df, date
     return pd.DataFrame(), None
+import sqlite3
+
+# Function to set up the SQLite database and table
+def setup_stock_database():
+    conn = sqlite3.connect('stock_data.db')
+    cursor = conn.cursor()
+    
+    # Drop the existing table
+    cursor.execute('DROP TABLE IF EXISTS stocks')
+    print("Dropped existing `stocks` table (if it existed).")
+    
+    # Create the table
+    cursor.execute('''
+        CREATE TABLE stocks (
+            symbol TEXT PRIMARY KEY,
+            price REAL,
+            market_cap REAL,
+            last_updated TEXT
+        )
+    ''')
+    print("Created `stocks` table with correct schema.")
+    
+    conn.commit()
+    conn.close()
+
+# Check if the table exists with the correct schema
+def check_and_setup_database():
+    try:
+        conn = sqlite3.connect('stock_data.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='stocks'")
+        if not cursor.fetchone():
+            conn.close()
+            setup_stock_database()
+            return
+        
+        # Check if the schema is correct
+        cursor.execute("PRAGMA table_info(stocks)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if not all(col in columns for col in ['symbol', 'price', 'market_cap', 'last_updated']):
+            conn.close()
+            setup_stock_database()
+            return
+        
+        conn.close()
+    except Exception as e:
+        print(f"Error checking database: {e}")
+        setup_stock_database()
+
+# Call this at the start of your program
+check_and_setup_database()
+
+def inspect_database():
+    conn = sqlite3.connect('stock_data.db')
+    cursor = conn.cursor()
+    
+    # Check all tables
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor.fetchall()
+    print(f"Tables in database: {tables}")
+    
+    # Check columns in stocks table if it exists
+    cursor.execute("PRAGMA table_info(stocks)")
+    columns = cursor.fetchall()
+    print(f"Columns in stocks table: {columns}")
+    
+    conn.close()
+
+# Function to fetch stock data from yfinance and store in the database
+def update_stock_database(symbols):
+    conn = sqlite3.connect('stock_data.db')
+    cursor = conn.cursor()
+    
+    # Batch-fetch stock data using yfinance
+    try:
+        tickers = yf.Tickers(' '.join(symbols))
+        
+        for symbol in symbols:
+            try:
+                ticker = tickers.tickers[symbol]
+                info = ticker.info
+                
+                # Get current price (regularMarketPrice is more reliable)
+                price = info.get('regularMarketPrice', 0)
+                
+                # Get market cap
+                market_cap = info.get('marketCap', 0)
+                
+                # Insert or update the stock data
+                cursor.execute('''
+                    INSERT OR REPLACE INTO stocks (symbol, price, market_cap, last_updated)
+                    VALUES (?, ?, ?, ?)
+                ''', (symbol, price, market_cap, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                
+            except Exception as e:
+                print(f"Error fetching data for {symbol}: {e}")
+                # Insert a record with zeros when there's an error
+                cursor.execute('''
+                    INSERT OR REPLACE INTO stocks (symbol, price, market_cap, last_updated)
+                    VALUES (?, ?, ?, ?)
+                ''', (symbol, 0, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    
+    except Exception as e:
+        print(f"Error fetching batch data: {e}")
+    
+    finally:
+        conn.commit()
+        conn.close()
+
+# Function to query stock data from the database
+def get_stock_info_from_db(symbol):
+    conn = sqlite3.connect('stock_data.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT price, market_cap FROM stocks WHERE symbol = ?', (symbol,))
+    result = cursor.fetchone()
+    
+    conn.close()
+    
+    if result:
+        return {'price': result[0], 'market_cap': result[1]}
+    return {'price': 0, 'market_cap': 0}
+# Add this new function after the existing functions
+from scipy.stats import linregress
+
+def find_rising_ratio_stocks(lookback_days=10, min_volume=500000, max_dips=3, min_price=5.0, min_market_cap=500_000_000, allowed_symbols=None):
+    symbol_data = {}
+    
+    # Collect data for the last `lookback_days` (e.g., March 11-20, 2025)
+    for i in range(lookback_days):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        if not data:
+            continue
+        
+        df = process_finra_short_sale_data(data)
+        df = df[df['TotalVolume'] > min_volume]
+        
+        for _, row in df.iterrows():
+            symbol = row['Symbol']
+            # Pre-filter: Only include symbols in allowed_symbols (if provided)
+            if allowed_symbols and symbol not in allowed_symbols:
+                continue
+            
+            total_volume = row.get('TotalVolume', 0)
+            metrics = calculate_metrics(row, total_volume)
+            
+            if symbol not in symbol_data:
+                symbol_data[symbol] = {'ratios': [], 'volumes': [], 'dates': []}
+            symbol_data[symbol]['ratios'].append(metrics['buy_to_sell_ratio'])
+            symbol_data[symbol]['volumes'].append(total_volume)
+            symbol_data[symbol]['dates'].append(date)
+    
+    # Analyze for rising ratios with price and market cap filtering from the database
+    results = []
+    for symbol, data in symbol_data.items():
+        num_days = len(data['ratios'])
+        if num_days >= 5:  # Require at least 5 days of data
+            # Get price and market cap from the database
+            stock_info = get_stock_info_from_db(symbol)
+            price = stock_info['price']
+            market_cap = stock_info['market_cap']
+            
+            # Skip stocks with price < $5 or market cap < $500M
+            if price < min_price or market_cap < min_market_cap:
+                continue
+            
+            ratios = data['ratios'][::-1]  # Reverse to check oldest to newest
+            
+            # Allow for occasional dips
+            dips = sum(1 for i in range(len(ratios) - 1) if ratios[i+1] < ratios[i])
+            slope, _, _, _, _ = linregress(range(len(ratios)), ratios)
+            
+            if dips <= max_dips and slope > 0.005:  # Relaxed slope condition
+                avg_volume = sum(data['volumes']) / len(data['volumes'])
+                results.append({
+                    'Symbol': symbol,
+                    'Price': round(price, 2),
+                    'Market Cap (M)': round(market_cap / 1_000_000, 2),  # Convert to millions
+                    'Avg Daily Volume': int(avg_volume),
+                    'Starting Ratio': round(ratios[0], 2),
+                    'Ending Ratio': round(ratios[-1], 2),
+                    'Ratio Increase': round(ratios[-1] - ratios[0], 2),
+                    'Total Volume': int(sum(data['volumes'])),
+                    'Dips': dips,
+                    'Days of Data': num_days
+                })
+    # Sort by ratio increase and total volume
+    results = sorted(results, key=lambda x: (x['Ratio Increase'], x['Total Volume']), reverse=True)
+    return pd.DataFrame(results[:40])
 
 def run():
     st.markdown("""
@@ -479,7 +692,9 @@ def run():
                                          "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Single Stock", "Accumulation", "Distribution", "Sector Rotation", "Multi Stock", "Latest Day"])
+    tab1, tab2, tab3, tab4, tab5, tab6,tab7 = st.tabs(["Single Stock", "Accumulation", "Distribution", 
+                                                        "Sector Rotation", "Multi Stock", "Latest Day", 
+                                                        "Rising Ratios"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -523,86 +738,254 @@ def run():
     
     with tab2:
         st.subheader("Top 40 Stocks Showing Accumulation")
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             acc_min_volume = st.number_input("Minimum Daily Volume (Accumulation)", value=1000000, step=500000, format="%d", key="acc_vol")
         with col2:
+            acc_min_price = st.number_input("Minimum Price ($)", value=5.0, min_value=1.0, max_value=50.0, step=0.5, key="acc_price")
+        with col3:
+            acc_min_market_cap = st.number_input("Minimum Market Cap ($M)", value=500, min_value=100, max_value=5000, step=100, key="acc_market_cap")
+        with col4:
             acc_use_validation = st.checkbox("Use Price Validation", value=False, key="acc_val")
         
         if st.button("Find Accumulation"):
             with st.spinner("Finding patterns..."):
-                accumulation_df = find_patterns(lookback_days=10, min_volume=acc_min_volume, pattern_type="accumulation", use_price_validation=acc_use_validation)
+                accumulation_df = find_patterns(
+                    lookback_days=10,
+                    min_volume=acc_min_volume,
+                    pattern_type="accumulation",
+                    use_price_validation=acc_use_validation,
+                    min_price=acc_min_price,
+                    min_market_cap=acc_min_market_cap * 1_000_000
+                )
             if not accumulation_df.empty:
-                def highlight_acc_pattern(row):
-                    return [f'background-color: rgba(144, 238, 144, 0.3)' if row['Volume Trend'] == 'Increasing' else ''] * len(row)
-                styled_df = accumulation_df.style.apply(highlight_acc_pattern, axis=1)
-                st.dataframe(styled_df)
+                st.dataframe(accumulation_df)
                 
+                # Visualization
                 fig = px.bar(accumulation_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
-                             color='Volume Trend', title="Top 10 Accumulation")
+                             color='Volume Trend', title="Top 10 Accumulation",
+                             hover_data=['Price', 'Market Cap (M)', 'Avg Daily Volume'])
                 st.plotly_chart(fig)
-                
             else:
                 st.write("No Accumulation detected with current filters.")
-    
+
     with tab3:
         st.subheader("Top 40 Stocks Showing Distribution")
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             dist_min_volume = st.number_input("Minimum Daily Volume (Distribution)", value=1000000, step=500000, format="%d", key="dist_vol")
         with col2:
+            dist_min_price = st.number_input("Minimum Price ($)", value=5.0, min_value=1.0, max_value=50.0, step=0.5, key="dist_price")
+        with col3:
+            dist_min_market_cap = st.number_input("Minimum Market Cap ($M)", value=500, min_value=100, max_value=5000, step=100, key="dist_market_cap")
+        with col4:
             dist_use_validation = st.checkbox("Use Price Validation", value=False, key="dist_val")
         
         if st.button("Find Distribution"):
             with st.spinner("Finding patterns..."):
-                distribution_df = find_patterns(lookback_days=10, min_volume=dist_min_volume, pattern_type="distribution", use_price_validation=dist_use_validation)
+                distribution_df = find_patterns(
+                    lookback_days=10,
+                    min_volume=dist_min_volume,
+                    pattern_type="distribution",
+                    use_price_validation=dist_use_validation,
+                    min_price=dist_min_price,
+                    min_market_cap=dist_min_market_cap * 1_000_000
+                )
             if not distribution_df.empty:
-                def highlight_dist_pattern(row):
-                    return [f'background-color: rgba(255, 182, 193, 0.3)' if row['Volume Trend'] == 'Increasing' else ''] * len(row)
-                styled_df = distribution_df.style.apply(highlight_dist_pattern, axis=1)
-                st.dataframe(styled_df)
+                st.dataframe(distribution_df)
                 
+                # Visualization
                 fig = px.bar(distribution_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
-                             color='Volume Trend', title="Top 10 Distribution")
+                             color='Volume Trend', title="Top 10 Distribution",
+                             hover_data=['Price', 'Market Cap (M)', 'Avg Daily Volume'])
                 st.plotly_chart(fig)
-                
             else:
                 st.write("No Distribution detected with current filters.")
     
     with tab4:
         st.subheader("Sector Rotation Analysis")
-        col1, col2 = st.columns(2)
-        with col1:
-            rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
-        with col2:
-            rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
-        
-        if st.button("Analyze Sector Rotation"):
-            with st.spinner("Analyzing sector rotation..."):
-                buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
-            st.write("### Sectors Being Bought (Money In)")
-            if not buying_df.empty:
-                def highlight_buying(row):
-                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
-                styled_buying = buying_df.style.apply(highlight_buying, axis=1)
-                st.dataframe(styled_buying)
-                
-                fig = px.pie(buying_df, values='Avg Daily Volume', names='Sector', 
-                             title="Buying Sectors by Volume")
-                st.plotly_chart(fig)
-                
-            else:
-                st.write("No sectors with clear buying trends detected.")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
+    
+    with col2:
+        rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
+    
+    if st.button("Analyze Sector Rotation"):
+        with st.spinner("Analyzing sector rotation..."):
+            # Get sector data
+            buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
             
-            st.write("### Sectors Being Sold (Money Out)")
-            if not selling_df.empty:
-                def highlight_selling(row):
-                    return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
-                styled_selling = selling_df.style.apply(highlight_selling, axis=1)
-                st.dataframe(styled_selling)
+            # Combine dataframes for RRG
+            if not buying_df.empty or not selling_df.empty:
+                # Create a DataFrame for all sectors
+                all_sectors = pd.DataFrame()
                 
+                # First, let's print the column names to debug
+                if not buying_df.empty:
+                    #st.write("Buying DataFrame columns:", buying_df.columns.tolist())
+                    buying_df['Direction'] = 'Buying'
+                    # Use a default value for RS_Ratio if we're not sure what column to use
+                    buying_df['RS_Ratio'] = 1.0  # We'll adjust this later
+                    all_sectors = pd.concat([all_sectors, buying_df])
+                    
+                if not selling_df.empty:
+                    #st.write("Selling DataFrame columns:", selling_df.columns.tolist())
+                    selling_df['Direction'] = 'Selling'
+                    # Use a default value for RS_Ratio if we're not sure what column to use
+                    selling_df['RS_Ratio'] = -1.0  # We'll adjust this later
+                    all_sectors = pd.concat([all_sectors, selling_df])
+                
+                # Now check what columns we have in the combined dataframe
+                #st.write("Combined DataFrame columns:", all_sectors.columns.tolist())
+                
+                # For momentum, we'll use a default column if we're not sure what to use
+                if 'Avg Daily Volume' in all_sectors.columns:
+                    all_sectors['RS_Momentum'] = all_sectors['Avg Daily Volume'].fillna(0) / all_sectors['Avg Daily Volume'].max() * 100
+                else:
+                    # If we don't have volume, create a random value for now
+                    all_sectors['RS_Momentum'] = [random.uniform(-2, 2) for _ in range(len(all_sectors))]
+                
+                # Create a size column for the bubbles
+                if 'Avg Daily Volume' in all_sectors.columns:
+                    size_column = 'Avg Daily Volume'
+                else:
+                    # If we don't have volume, use a constant size
+                    all_sectors['Size'] = 30
+                    size_column = 'Size'
+                
+                # Create the Relative Rotation Graph
+                fig = px.scatter(
+                    all_sectors,
+                    x='RS_Ratio', 
+                    y='RS_Momentum',
+                    text='Sector',
+                    color='Direction',
+                    color_discrete_map={'Buying': '#4CAF50', 'Selling': '#F44336'},
+                    size=size_column,
+                    size_max=60,
+                    hover_data=['Sector'],
+                    title="RRG",
+                    labels={
+                        'RS_Ratio': 'Relative Strength',
+                        'RS_Momentum': 'Relative Momentum'
+                    }
+                )
+                
+                # Add quadrant lines
+                fig.add_shape(type="line", x0=0, y0=-40, x1=0, y1=120,
+                line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
+                fig.add_shape(type="line", x0=-2, y0=0, x1=2, y1=0,
+                line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
+
+                # Add subtle quadrant backgrounds
+                fig.add_shape(type="rect", x0=0, y0=0, x1=2, y1=120, 
+                fillcolor="rgba(144, 238, 144, 0.1)", line=dict(width=0))  # Leading
+                fig.add_shape(type="rect", x0=-2, y0=0, x1=0, y1=120, 
+                fillcolor="rgba(144, 200, 255, 0.1)", line=dict(width=0))  # Improving
+                fig.add_shape(type="rect", x0=-2, y0=-40, x1=0, y1=0, 
+                fillcolor="rgba(200, 200, 200, 0.1)", line=dict(width=0))  # Lagging
+                fig.add_shape(type="rect", x0=0, y0=-40, x1=2, y1=0, 
+                fillcolor="rgba(255, 182, 193, 0.1)", line=dict(width=0))  # Weakening
+                
+                # Annotate the quadrants
+                fig.add_annotation(x=1, y=60, text="LEADING", showarrow=False, 
+                                   font=dict(size=18, color="rgba(0,100,0,0.7)"))
+                fig.add_annotation(x=-1, y=60, text="IMPROVING", showarrow=False, 
+                                   font=dict(size=18, color="rgba(0,0,150,0.7)"))
+                fig.add_annotation(x=-1, y=-20, text="LAGGING", showarrow=False, 
+                                   font=dict(size=18, color="rgba(100,100,100,0.7)"))
+                fig.add_annotation(x=1, y=-20, text="WEAKENING", showarrow=False, 
+                                   font=dict(size=18, color="rgba(150,0,0,0.7)"))
+
+                # Add arrows to indicate rotation direction
+                fig.add_annotation(x=0, y=60, ax=1, ay=60, xref="x", yref="y",
+                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
+                                   arrowwidth=2, arrowcolor="rgba(0,100,0,0.5)")
+                fig.add_annotation(x=-1, y=0, ax=-1, ay=60, xref="x", yref="y",
+                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
+                                   arrowwidth=2, arrowcolor="rgba(0,0,150,0.5)")
+                fig.add_annotation(x=0, y=-20, ax=-1, ay=-20, xref="x", yref="y",
+                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
+                                   arrowwidth=2, arrowcolor="rgba(100,100,100,0.5)")
+                fig.add_annotation(x=1, y=0, ax=1, ay=-20, xref="x", yref="y",
+                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
+                                   arrowwidth=2, arrowcolor="rgba(150,0,0,0.5)")
+                
+                # Update layout
+                fig.update_traces(
+                    textposition='top center',
+                    textfont=dict(size=13, color='black', family="Arial, sans-serif"),
+                    marker=dict(opacity=0.85, line=dict(width=1, color='#FFFFFF'))
+                )
+
+                # Update overall layout
+                fig.update_layout(
+                    height=800,  # Larger size for better visibility
+                    width=900,
+                    plot_bgcolor='rgba(240,240,240,0.3)',  # Light background
+                    paper_bgcolor='white',
+                    xaxis=dict(
+                        title=dict(font=dict(size=14, family="Arial, sans-serif")),
+                        gridcolor='rgba(200,200,200,0.2)',
+                        zerolinecolor='rgba(128,128,128,0.5)',
+                        zerolinewidth=1.5,
+                        range=[-2.1, 2.1]  # Fixed range for better visualization
+                    ),
+                    yaxis=dict(
+                        title=dict(font=dict(size=14, family="Arial, sans-serif")),
+                        gridcolor='rgba(200,200,200,0.2)',
+                        zerolinecolor='rgba(128,128,128,0.5)',
+                        zerolinewidth=1.5,
+                        range=[-40, 120]  # Fixed range for better visualization
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.2,
+                        xanchor="center",
+                        x=0.5,
+                        bgcolor='rgba(255,255,255,0.7)',
+                        bordercolor='rgba(128,128,128,0.5)',
+                        borderwidth=1
+                    ),
+                    title=dict(
+                        text="Relative Rotation Graph (RRG) - Sector Analysis",
+                        font=dict(size=22, family="Arial, sans-serif", color='#333333'),
+                        x=0.5
+                    ),
+                    margin=dict(l=50, r=50, t=80, b=100)
+                )
+                
+                # Display the RRG
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Include the tables in an expander for reference
+                with st.expander("View Sector Data Tables"):
+                    col3, col4 = st.columns(2)
+                    
+                    with col3:
+                        st.write("### Sectors Being Bought (Money In)")
+                        if not buying_df.empty:
+                            def highlight_buying(row):
+                                return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
+                            styled_buying = buying_df.style.apply(highlight_buying, axis=1)
+                            st.dataframe(styled_buying)
+                        else:
+                            st.write("No sectors with clear buying trends detected.")
+                    
+                    with col4:
+                        st.write("### Sectors Being Sold (Money Out)")
+                        if not selling_df.empty:
+                            def highlight_selling(row):
+                                return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
+                            styled_selling = selling_df.style.apply(highlight_selling, axis=1)
+                            st.dataframe(styled_selling)
+                        else:
+                            st.write("No sectors with clear selling trends detected.")
             else:
-                st.write("No sectors with clear selling trends detected.")
+                st.write("No significant sector rotation detected based on current parameters.")
     
     with tab5:
         st.subheader("Multi Stock Analysis")
@@ -745,6 +1128,62 @@ def run():
             
         else:
             st.write("No records found with current filters.")
+
+    with tab7:
+        st.subheader("Stocks with Rising Buy/Sell Ratios (Last 10 Days)")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        with col1:
+            min_volume_rising = st.number_input("Minimum Daily Volume", value=500000, 
+                                                step=100000, format="%d", key="rising_vol")
+        with col2:
+            lookback_days_rising = st.slider("Lookback Days", 5, 20, 10, key="rising_days")
+        with col3:
+            max_dips_rising = st.number_input("Max Allowed Dips", value=3, min_value=0, max_value=5, step=1, key="rising_dips")
+        with col4:
+            min_price_rising = st.number_input("Min Price ($)", value=5.0, min_value=1.0, max_value=50.0, step=0.5, key="rising_price")
+        with col5:
+            min_market_cap_rising = st.number_input("Min Market Cap ($M)", value=500, min_value=100, max_value=5000, step=100, key="rising_market_cap")
+        with col6:
+            if st.button("Update Stock Data"):
+                with st.spinner("Updating stock data..."):
+                    update_stock_database(portfolio_symbols)
+                st.success("Stock data updated successfully!")
+        
+        if st.button("Find Rising Ratios"):
+            with st.spinner("Analyzing stocks with rising ratios..."):
+                rising_df = find_rising_ratio_stocks(lookback_days=lookback_days_rising, 
+                                                    min_volume=min_volume_rising, 
+                                                    max_dips=max_dips_rising,
+                                                    min_price=min_price_rising,
+                                                    min_market_cap=min_market_cap_rising * 1_000_000,
+                                                    allowed_symbols=portfolio_symbols)
+            
+            if not rising_df.empty:
+                st.dataframe(rising_df)
+                
+                # Visualization
+                fig = px.bar(rising_df.head(10), x='Symbol', y='Ratio Increase',
+                            title="Top 10 Stocks by Buy/Sell Ratio Increase",
+                            hover_data=['Avg Daily Volume', 'Starting Ratio', 'Ending Ratio', 'Dips', 'Price', 'Market Cap (M)'])
+                fig.update_layout(barmode='group', xaxis_tickangle=-45)
+                st.plotly_chart(fig)
+                
+                # Line chart showing ratio progression for top 10
+                # top_10_symbols = rising_df['Symbol'].head(10).tolist()
+                # detailed_data = {}
+                # for symbol in top_10_symbols:
+                #     df, _ = analyze_symbol(symbol, lookback_days=lookback_days_rising)
+                #     if not df.empty:
+                #         detailed_data[symbol] = df[['date', 'buy_to_sell_ratio']]
+                
+                # if detailed_data:
+                #     plot_df = pd.concat([df.set_index('date')['buy_to_sell_ratio'].rename(symbol) 
+                #                         for symbol, df in detailed_data.items()], axis=1)
+                #     fig2 = px.line(plot_df, title="Buy/Sell Ratio Progression (Top 10 Stocks)")
+                #     fig2.update_layout(xaxis_title="Date", yaxis_title="Buy/Sell Ratio")
+                #     st.plotly_chart(fig2)
+            else:
+                st.write("No stocks found with rising buy/sell ratios over the specified period.")
 
 if __name__ == "__main__":
     run()
