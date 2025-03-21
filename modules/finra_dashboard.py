@@ -804,23 +804,23 @@ def run():
     
     with tab4:
         st.subheader("Sector Rotation Analysis")
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
     
-    with col1:
-        rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
+        with col1:
+            rot_min_volume = st.number_input("Minimum Daily Volume (Sector Rotation)", value=50000, step=10000, format="%d", key="rot_vol")
     
-    with col2:
-        rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
+        with col2:
+            rot_lookback_days = st.slider("Lookback Days (Sector Rotation)", 1, 30, 10, key="rot_days")
     
-    if st.button("Analyze Sector Rotation"):
-        with st.spinner("Analyzing sector rotation..."):
-            # Get sector data
-            buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
+            if st.button("Analyze Sector Rotation"):
+                with st.spinner("Analyzing sector rotation..."):
+                    # Get sector data
+                    buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
             
             # Combine dataframes for RRG
-            if not buying_df.empty or not selling_df.empty:
+                if not buying_df.empty or not selling_df.empty:
                 # Create a DataFrame for all sectors
-                all_sectors = pd.DataFrame()
+                        all_sectors = pd.DataFrame()
                 
                 # First, let's print the column names to debug
                 if not buying_df.empty:
