@@ -805,84 +805,84 @@ def run():
     
     with tab1:
         col1, col2 = st.columns(2)
-    with col1:
-        symbol = st.text_input("Enter Symbol", "SPY").strip().upper()
-        lookback_days = st.slider("Lookback Days", 1, 30, 20)
-    with col2:
-        threshold = st.number_input("Buy/Sell Ratio Threshold", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
-    
-    if st.button("Analyze Stock"):
-        with st.spinner(f"Analyzing {symbol}..."):
-            results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)
-        if not results_df.empty:
-            st.subheader("Summary")
-            avg_ratio = results_df['buy_to_sell_ratio'].mean()
-            max_ratio = results_df['buy_to_sell_ratio'].max()
-            metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-            with metrics_col1:
-                st.metric("Average Buy/Sell Ratio", f"{avg_ratio:.2f}")
-            with metrics_col2:
-                st.metric("Max Buy/Sell Ratio", f"{max_ratio:.2f}")
-            with metrics_col3:
-                st.metric(f"Days Above {threshold}", significant_days)
-            
-            check_alerts(results_df, symbol)
-            
-            fig = px.line(results_df, x='date', y='buy_to_sell_ratio', title=f"{symbol} Buy/Sell Ratio Over Time",
-                          hover_data=['total_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold'])
-            fig.add_hline(y=threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold: {threshold}")
-            st.plotly_chart(fig)
-            
-            st.subheader("Daily Analysis")
-            def highlight_cells(row, max_bought_volume, max_buy_sell_ratio):
-                styles = [''] * len(row)
-                try:
-                    # Get column indices
-                    bought_idx = row.index.get_loc('bought_volume')
-                    ratio_idx = row.index.get_loc('buy_to_sell_ratio')
-                    cum_bought_idx = row.index.get_loc('cumulative_bought')
-                    cum_sold_idx = row.index.get_loc('cumulative_sold')
-                    
-                    # Highlight cumulative bought vs sold
-                    if row['cumulative_bought'] > row['cumulative_sold']:
-                        styles[cum_bought_idx] = 'background-color: rgba(144, 238, 144, 0.3)'
-                        styles[cum_sold_idx] = 'background-color: rgba(255, 182, 193, 0.3)'
-                    else:
-                        styles[cum_bought_idx] = 'background-color: rgba(165, 42, 42, 0.3)'  # Brown color
-                        styles[cum_sold_idx] = 'background-color: rgba(139, 0, 0, 0.3)'  # Dark red color
-                    
-                    # Highlight max bought volume with blue
-                    if row['bought_volume'] == max_bought_volume:
-                        styles[bought_idx] = 'background-color: rgba(0, 100, 0, 0.3)'  # Dark green
-                    
-                    # Highlight max buy/sell ratio with yellow
-                    if row['buy_to_sell_ratio'] == max_buy_sell_ratio:
-                        styles[ratio_idx] = 'background-color: rgba(255, 255, 153, 0.3)'  # Light yellow
+        with col1:
+            symbol = st.text_input("Enter Symbol", "SPY").strip().upper()
+            lookback_days = st.slider("Lookback Days", 1, 30, 20)
+        with col2:
+            threshold = st.number_input("Buy/Sell Ratio Threshold", min_value=1.0, max_value=5.0, value=1.5, step=0.1)
+        
+        if st.button("Analyze Stock"):
+            with st.spinner(f"Analyzing {symbol}..."):
+                results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)
+            if not results_df.empty:
+                st.subheader("Summary")
+                avg_ratio = results_df['buy_to_sell_ratio'].mean()
+                max_ratio = results_df['buy_to_sell_ratio'].max()
+                metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                with metrics_col1:
+                    st.metric("Average Buy/Sell Ratio", f"{avg_ratio:.2f}")
+                with metrics_col2:
+                    st.metric("Max Buy/Sell Ratio", f"{max_ratio:.2f}")
+                with metrics_col3:
+                    st.metric(f"Days Above {threshold}", significant_days)
                 
-                except KeyError:
-                    pass
-                return styles
-            
-            display_df = results_df.copy()
-            for col in ['total_volume', 'bought_volume', 'sold_volume', 'cumulative_bought', 'cumulative_sold']:
-                display_df[col] = display_df[col].astype(int)
-            
-            # Get maximum values for highlighting
-            max_bought_volume = display_df['bought_volume'].max()
-            max_buy_sell_ratio = display_df['buy_to_sell_ratio'].max()
-            
-            # Reorder columns to put cumulative columns at the end
-            column_order = ['date', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 
-                          'sold_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold']
-            display_df = display_df[column_order]
-            
-            styled_df = display_df.style.apply(
-                highlight_cells, 
-                max_bought_volume=max_bought_volume, 
-                max_buy_sell_ratio=max_buy_sell_ratio, 
-                axis=1
-            )
-            st.dataframe(styled_df)
+                check_alerts(results_df, symbol)
+                
+                fig = px.line(results_df, x='date', y='buy_to_sell_ratio', title=f"{symbol} Buy/Sell Ratio Over Time",
+                              hover_data=['total_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold'])
+                fig.add_hline(y=threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold: {threshold}")
+                st.plotly_chart(fig)
+                
+                st.subheader("Daily Analysis")
+                def highlight_cells(row, max_bought_volume, max_buy_sell_ratio):
+                    styles = [''] * len(row)
+                    try:
+                        # Get column indices
+                        bought_idx = row.index.get_loc('bought_volume')
+                        ratio_idx = row.index.get_loc('buy_to_sell_ratio')
+                        cum_bought_idx = row.index.get_loc('cumulative_bought')
+                        cum_sold_idx = row.index.get_loc('cumulative_sold')
+                        
+                        # Highlight cumulative bought vs sold
+                        if row['cumulative_bought'] > row['cumulative_sold']:
+                            styles[cum_bought_idx] = 'background-color: rgba(144, 238, 144, 0.3)'
+                            styles[cum_sold_idx] = 'background-color: rgba(255, 182, 193, 0.3)'
+                        else:
+                            styles[cum_bought_idx] = 'background-color: rgba(165, 42, 42, 0.3)'  # Brown color
+                            styles[cum_sold_idx] = 'background-color: rgba(139, 0, 0, 0.3)'  # Dark red color
+                        
+                        # Highlight max bought volume with blue
+                        if row['bought_volume'] == max_bought_volume:
+                            styles[bought_idx] = 'background-color: rgba(0, 100, 0, 0.3)'  # Dark green
+                        
+                        # Highlight max buy/sell ratio with yellow
+                        if row['buy_to_sell_ratio'] == max_buy_sell_ratio:
+                            styles[ratio_idx] = 'background-color: rgba(255, 255, 153, 0.3)'  # Light yellow
+                    
+                    except KeyError:
+                        pass
+                    return styles
+                
+                display_df = results_df.copy()
+                for col in ['total_volume', 'bought_volume', 'sold_volume', 'cumulative_bought', 'cumulative_sold']:
+                    display_df[col] = display_df[col].astype(int)
+                
+                # Get maximum values for highlighting
+                max_bought_volume = display_df['bought_volume'].max()
+                max_buy_sell_ratio = display_df['buy_to_sell_ratio'].max()
+                
+                # Reorder columns to put cumulative columns at the end
+                column_order = ['date', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 
+                                'sold_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold']
+                display_df = display_df[column_order]
+                
+                styled_df = display_df.style.apply(
+                    highlight_cells, 
+                    max_bought_volume=max_bought_volume, 
+                    max_buy_sell_ratio=max_buy_sell_ratio, 
+                    axis=1
+                )
+                st.dataframe(styled_df)
     
     with tab2:
         st.subheader("Top 40 Stocks Showing Accumulation")
