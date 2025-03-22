@@ -403,205 +403,41 @@ def high_conviction_stocks(dataframes, ignore_keywords=None):
     if ignore_keywords is None:
         ignore_keywords = []
     
-    filtered_dataframes = [df[~df['Signal'].isin(ignore_keywords)] for df in dataframes if not df.empty]
-    all_data = pd.concat(filtered_dataframes, ignore_index=True)
-    all_data['Date'] = all_data['Date'].dt.date
+    # Filter out empty DataFrames and apply keyword filtering
+    filtered_dataframes = [
+        df[~df['Signal'].isin(ignore_keywords)] 
+        for df in dataframes 
+        if not df.empty and isinstance(df, pd.DataFrame)
+    ]
     
-    grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
-    grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
+    # Check if we have any valid DataFrames to concatenate
+    if not filtered_dataframes:
+        return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
     
-    return grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
-
-def render_options_section(keyword, days_lookback):
-    """Helper function to render options section content"""
-    symbols_df = extract_option_symbols_from_email(
-        EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
-    )
-    
-    new_count = get_new_symbols_count(keyword, symbols_df)
-    
-    header = f"📊 {keyword}"
-    if new_count > 0:
-        header = f"📊 {keyword} 🔴 {new_count} new"
-    
-    with st.expander(header, expanded=False):
-        info = KEYWORD_DEFINITIONS.get(keyword, {})
-        if info:
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-            with col1:
-                st.info(f"Desc: {info.get('description', 'N/A')}")
-            with col2:
-                st.info(f"Risk Level: {info.get('risk_level', 'N/A')}")
-            with col3:
-                st.info(f"Timeframe: {info.get('timeframe', 'N/A')}")
-            with col4:
-                st.info(f"Suggested Stop: {info.get('suggested_stop', 'N/A')}")
+    try:
+        all_data = pd.concat(filtered_dataframes, ignore_index=True)
+        all_data['Date'] = all_data['Date'].dt.date
         
-        if not symbols_df.empty:
-            display_df = symbols_df.copy()
-            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            display_df = display_df.drop('Raw_Symbol', axis=1)
-            st.dataframe(display_df, use_container_width=True)
-            
-            csv = symbols_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label=f"📥 Download {keyword} Data",
-                data=csv,
-                file_name=f"{keyword}_alerts_{datetime.date.today()}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
-
-def render_stock_section(keyword, days_lookback):
-    """Helper function to render stock section content"""
-    symbols_df = extract_stock_symbols_from_email(
-        EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
-    )
-    
-    new_count = get_new_symbols_count(keyword, symbols_df)
-    
-    header = f"📊 {keyword}"
-    if new_count > 0:
-        header = f"📊 {keyword} 🔴 {new_count} new"
-    
-    with st.expander(header, expanded=False):
-        info = KEYWORD_DEFINITIONS.get(keyword, {})
-        if info:
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-            with col1:
-                st.info(f"Desc: {info.get('description', 'N/A')}")
-            with col2:
-                st.info(f"Risk Level: {info.get('risk_level', 'N/A')}")
-            with col3:
-                st.info(f"Timeframe: {info.get('timeframe', 'N/A')}")
-            with col4:
-                st.info(f"Suggested Stop: {info.get('suggested_stop', 'N/A')}")
+        grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(
+            lambda x: ', '.join(set(x))
+        ).reset_index()
+        grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
         
-        if not symbols_df.empty:
-            display_df = symbols_df.copy()
-            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            st.dataframe(display_df, use_container_width=True)
-            
-            csv = symbols_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label=f"📥 Download {keyword} Data",
-                data=csv,
-                file_name=f"{keyword}_alerts_{datetime.date.today()}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
-
-def render_dashboard_header():
-    """Render the dashboard header with market overview"""
-    st.title("📈 Trading Signals Dashboard")
+        result = grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
+        return result if not result.empty else pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
     
-    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
-    spy_price, qqq_price, spy_change, qqq_change = get_spy_qqq_prices()
-    
-    with col1:
-        if spy_price and spy_change:
-            st.metric("SPY", f"${spy_price}", f"{spy_change:+.2f}%")
-    with col2:
-        if qqq_price and qqq_change:
-            st.metric("QQQ", f"${qqq_price}", f"{qqq_change:+.2f}%")
-    with col3:
-        st.write(f"Last Updated: {datetime.datetime.now().strftime('%H:%M:%S')}")
-    with col4:
-        if st.button("🔄 Refresh", key="header_refresh"):
-            st.session_state.cached_data.clear()
-            st.session_state.processed_email_ids.clear()
-            st.rerun()
-
-def render_sidebar_controls():
-    """Render sidebar with dashboard controls"""
-    with st.sidebar:
-        st.header("Dashboard Controls")
-        
-        days_lookback = st.slider(
-            "Lookback Period (days)",
-            1, 3, 1,
-            help="Select days of historical data to analyze"
-        )
-        
-        refresh_interval = st.slider(
-            "Refresh Interval (min)",
-            1, 30, 10,
-            help="Set auto-refresh frequency"
-        )
-        
-        risk_filter = st.multiselect(
-            "Filter by Risk Level",
-            ["Low", "Medium", "High"],
-            default=["Medium", "High"]
-        )
-        
-        st.markdown("---")
-        st.info(f"Processed Emails: {len(st.session_state.processed_email_ids)}")
-        
-        return days_lookback, refresh_interval, risk_filter
-
-def render_quick_stats(days_lookback):
-    """Render quick statistics overview"""
-    st.subheader("Quick Stats")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        lt_count = sum(len(extract_stock_symbols_from_email(
-            EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, k, days_lookback
-        )) for k in Lower_timeframe_KEYWORDS)
-        st.metric("Lower TF Signals", lt_count)
-    
-    with col2:
-        daily_count = sum(len(extract_stock_symbols_from_email(
-            EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, k, days_lookback
-        )) for k in DAILY_KEYWORDS)
-        st.metric("Daily Signals", daily_count)
-    
-    with col3:
-        option_count = sum(len(extract_option_symbols_from_email(
-            EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, k, days_lookback
-        )) for k in OPTION_KEYWORDS)
-        st.metric("Options Signals", option_count)
-
-def render_signal_card(keyword, df, days_lookback):
-    """Render individual signal card"""
-    new_count = get_new_symbols_count(keyword, df)
-    info = KEYWORD_DEFINITIONS.get(keyword, {})
-    
-    with st.container():
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            title = f"{keyword}"
-            if new_count > 0:
-                title += f" 🔴 {new_count} new"
-            st.markdown(f"**{title}**")
-            st.caption(info.get('description', 'No description'))
-        
-        with col2:
-            st.write(f"Risk: {info.get('risk_level', 'N/A')}")
-            st.write(f"TF: {info.get('timeframe', 'N/A')}")
-        
-        if not df.empty:
-            st.dataframe(df[['Ticker', 'Date']].head(5), use_container_width=True)
-            st.button(f"View Details", key=f"view_{keyword}")
+    except Exception as e:
+        logger.error(f"Error in high_conviction_stocks: {e}")
+        return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
 
 def run():
     """Main dashboard function"""
     init_session_state()
     
-    # Get controls from sidebar
     days_lookback, refresh_interval, risk_filter = render_sidebar_controls()
-    
-    # Header section
     render_dashboard_header()
-    
-    # Quick stats
     render_quick_stats(days_lookback)
     
-    # Main dashboard tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "Lower Timeframe",
         "Daily",
@@ -609,12 +445,11 @@ def run():
         "High Conviction"
     ])
     
-    # Filter keywords based on risk level
     def filter_by_risk(keywords):
         return [k for k in keywords if KEYWORD_DEFINITIONS.get(k, {})
                .get('risk_level', 'Medium') in risk_filter]
     
-    # Lower Timeframe Tab
+    # [Keep Lower Timeframe Tab unchanged]
     with tab1:
         st.subheader("Lower Timeframe Signals")
         cols = st.columns(2)
@@ -625,7 +460,7 @@ def run():
             with cols[i % 2]:
                 render_signal_card(keyword, df, days_lookback)
     
-    # Daily Tab
+    # [Keep Daily Tab unchanged]
     with tab2:
         st.subheader("Daily Signals")
         cols = st.columns(2)
@@ -636,7 +471,7 @@ def run():
             with cols[i % 2]:
                 render_signal_card(keyword, df, days_lookback)
     
-    # Options Tab
+    # [Keep Options Tab unchanged]
     with tab3:
         st.subheader("Options Signals")
         cols = st.columns(2)
@@ -647,7 +482,7 @@ def run():
             with cols[i % 2]:
                 render_signal_card(keyword, df, days_lookback)
     
-    # High Conviction Tab
+    # Modified High Conviction Tab
     with tab4:
         st.subheader("High Conviction Signals")
         all_signals = [
@@ -655,23 +490,28 @@ def run():
                 EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, k, days_lookback
             ) for k in filter_by_risk(Lower_timeframe_KEYWORDS + DAILY_KEYWORDS)
         ]
+        
         hc_df = high_conviction_stocks(all_signals, ["tmo_long", "tmo_Short", "orb_bull", "orb_bear"])
         
         if not hc_df.empty:
             st.dataframe(hc_df, use_container_width=True)
             csv = hc_df.to_csv(index=False)
-            st.download_button("Download High Conviction", csv, "high_conviction.csv")
+            st.download_button(
+                "Download High Conviction", 
+                csv, 
+                f"high_conviction_{datetime.date.today()}.csv",
+                key="hc_download"
+            )
         else:
-            st.warning("No high conviction signals found")
+            st.info("No high conviction signals found for the selected period and filters.")
     
-    # Auto-refresh logic
+    # [Keep auto-refresh logic and footer unchanged]
     if time.time() - st.session_state.last_refresh_time >= refresh_interval * 60:
         st.session_state.cached_data.clear()
         st.session_state.processed_email_ids.clear()
         st.session_state.last_refresh_time = time.time()
         st.rerun()
     
-    # Footer
     st.markdown("---")
     st.caption("Disclaimer: For informational purposes only. Not financial advice. Trade at your own risk.")
 
