@@ -13,6 +13,7 @@ import concurrent.futures
 import logging
 from scipy.stats import linregress
 import sqlite3
+from typing import List, Optional
 
 # Configure logging
 logging.basicConfig(
@@ -200,18 +201,18 @@ sector_mapping = {
     'User Defined': []  # Catch-all for unmapped symbols
 }
 
-def download_finra_short_sale_data(date):
+def download_finra_short_sale_data(date: str) -> Optional[str]:
     url = f"https://cdn.finra.org/equity/regsho/daily/CNMSshvol{date}.txt"
     response = requests.get(url)
     return response.text if response.status_code == 200 else None
 
-def process_finra_short_sale_data(data):
+def process_finra_short_sale_data(data: Optional[str]) -> pd.DataFrame:
     if not data:
         return pd.DataFrame()
     df = pd.read_csv(io.StringIO(data), delimiter="|")
     return df[df["Symbol"].str.len() <= 4]
 
-def calculate_metrics(row, total_volume):
+def calculate_metrics(row: pd.Series, total_volume: float) -> dict:
     short_volume = row.get('ShortVolume', 0)
     short_exempt_volume = row.get('ShortExemptVolume', 0)
     
@@ -230,7 +231,7 @@ def calculate_metrics(row, total_volume):
     }
 
 @st.cache_data(ttl=11520)
-def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
+def analyze_symbol(symbol: str, lookback_days: int = 20, threshold: float = 1.5) -> tuple[pd.DataFrame, int]:
     results = []
     significant_days = 0
     cumulative_bought = 0
@@ -267,7 +268,7 @@ def analyze_symbol(symbol, lookback_days=20, threshold=1.5):
     
     return df_results, significant_days
 
-def validate_pattern(symbol, dates, pattern_type="accumulation"):
+def validate_pattern(symbol: str, dates: List[str], pattern_type: str = "accumulation") -> bool:
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(start=min(dates), end=max(dates))
@@ -279,7 +280,8 @@ def validate_pattern(symbol, dates, pattern_type="accumulation"):
     except Exception:
         return False
 
-def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulation", use_price_validation=False, min_price=5.0, min_market_cap=500_000_000):
+def find_patterns(lookback_days: int = 10, min_volume: int = 1000000, pattern_type: str = "accumulation", 
+                  use_price_validation: bool = False, min_price: float = 5.0, min_market_cap: float = 500_000_000) -> pd.DataFrame:
     pattern_data = {}
     for i in range(lookback_days):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
@@ -333,7 +335,7 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
         results = sorted(results, key=lambda x: (x['Days Showing Pattern'], -x['Avg Buy/Sell Ratio'], x['Total Volume']), reverse=True)
     return pd.DataFrame(results[:40])
 
-def get_sector_rotation(lookback_days=10, min_volume=50000):
+def get_sector_rotation(lookback_days: int = 10, min_volume: int = 50000) -> tuple[pd.DataFrame, pd.DataFrame]:
     sector_map = {
         'QQQ': 'Technology',
         'VGT': 'Technology',
@@ -407,7 +409,7 @@ def get_sector_rotation(lookback_days=10, min_volume=50000):
     
     return pd.DataFrame(buying_sectors[:7]), pd.DataFrame(selling_sectors[:7])
 
-def analyze_portfolio(symbols, lookback_days=20):
+def analyze_portfolio(symbols: List[str], lookback_days: int = 20) -> pd.DataFrame:
     portfolio_results = []
     
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -428,21 +430,21 @@ def analyze_portfolio(symbols, lookback_days=20):
                             'Latest Volume': int(row['total_volume'])
                         })
             except Exception as exc:
-                print(f'{symbol} generated an exception: {exc}')
+                logger.error(f'{symbol} generated an exception: {exc}')
     
     portfolio_df = pd.DataFrame(portfolio_results)
     if not portfolio_df.empty:
         portfolio_df = portfolio_df.sort_values(by=['Avg Buy/Sell Ratio', 'Bought Volume'], ascending=[False, False])
     return portfolio_df
 
-def check_alerts(df_results, symbol, threshold=2.0):
+def check_alerts(df_results: pd.DataFrame, symbol: str, threshold: float = 2.0) -> None:
     if not df_results.empty and df_results['buy_to_sell_ratio'].max() > threshold:
         st.warning(f"Alert: {symbol} has a Buy/Sell Ratio above {threshold} on {df_results['date'].iloc[0].strftime('%Y-%m-%d')}!")
 
-def convert_df_to_csv(df):
+def convert_df_to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode('utf-8')
 
-def plot_correlation_heatmap(symbols, lookback_days=20):
+def plot_correlation_heatmap(symbols: List[str], lookback_days: int = 20) -> None:
     data = {}
     for symbol in symbols:
         df, _ = analyze_symbol(symbol, lookback_days)
@@ -453,7 +455,7 @@ def plot_correlation_heatmap(symbols, lookback_days=20):
     sns.heatmap(corr_df, annot=True, cmap='coolwarm', ax=ax)
     st.pyplot(fig)
 
-def get_latest_data():
+def get_latest_data() -> tuple[pd.DataFrame, Optional[str]]:
     for i in range(7):  # Check the last 7 days
         date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
         data = download_finra_short_sale_data(date)
@@ -464,12 +466,12 @@ def get_latest_data():
     return pd.DataFrame(), None
 
 # Database functions
-def setup_stock_database():
+def setup_stock_database() -> None:
     conn = sqlite3.connect('stock_data.db')
     cursor = conn.cursor()
     
     cursor.execute('DROP TABLE IF EXISTS stocks')
-    print("Dropped existing `stocks` table (if it existed).")
+    logger.info("Dropped existing `stocks` table (if it existed).")
     
     cursor.execute('''
         CREATE TABLE stocks (
@@ -479,12 +481,12 @@ def setup_stock_database():
             last_updated TEXT
         )
     ''')
-    print("Created `stocks` table with correct schema.")
+    logger.info("Created `stocks` table with correct schema.")
     
     conn.commit()
     conn.close()
 
-def check_and_setup_database():
+def check_and_setup_database() -> None:
     try:
         conn = sqlite3.connect('stock_data.db')
         cursor = conn.cursor()
@@ -503,26 +505,12 @@ def check_and_setup_database():
         
         conn.close()
     except Exception as e:
-        print(f"Error checking database: {e}")
+        logger.error(f"Error checking database: {e}")
         setup_stock_database()
 
 check_and_setup_database()
 
-def inspect_database():
-    conn = sqlite3.connect('stock_data.db')
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = cursor.fetchall()
-    print(f"Tables in database: {tables}")
-    
-    cursor.execute("PRAGMA table_info(stocks)")
-    columns = cursor.fetchall()
-    print(f"Columns in stocks table: {columns}")
-    
-    conn.close()
-
-def update_stock_database(symbols):
+def update_stock_database(symbols: List[str]) -> None:
     conn = sqlite3.connect('stock_data.db')
     cursor = conn.cursor()
     
@@ -543,20 +531,20 @@ def update_stock_database(symbols):
                 ''', (symbol, price, market_cap, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 
             except Exception as e:
-                print(f"Error fetching data for {symbol}: {e}")
+                logger.error(f"Error fetching data for {symbol}: {e}")
                 cursor.execute('''
                     INSERT OR REPLACE INTO stocks (symbol, price, market_cap, last_updated)
                     VALUES (?, ?, ?, ?)
                 ''', (symbol, 0, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     
     except Exception as e:
-        print(f"Error fetching batch data: {e}")
+        logger.error(f"Error fetching batch data: {e}")
     
     finally:
         conn.commit()
         conn.close()
 
-def get_stock_info_from_db(symbol):
+def get_stock_info_from_db(symbol: str) -> dict:
     conn = sqlite3.connect('stock_data.db')
     cursor = conn.cursor()
     
@@ -569,7 +557,9 @@ def get_stock_info_from_db(symbol):
         return {'price': result[0], 'market_cap': result[1]}
     return {'price': 0, 'market_cap': 0}
 
-def find_rising_ratio_stocks(lookback_days=10, min_volume=500000, max_dips=3, min_price=5.0, min_market_cap=500_000_000, allowed_symbols=None):
+def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, max_dips: int = 3, 
+                             min_price: float = 5.0, min_market_cap: float = 500_000_000, 
+                             allowed_symbols: Optional[List[str]] = None) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     symbol_data = {}
     
     for i in range(lookback_days):
@@ -685,7 +675,7 @@ def find_rising_ratio_stocks(lookback_days=10, min_volume=500000, max_dips=3, mi
     theme_df = pd.DataFrame(theme_results).sort_values(by=['Ratio Increase', 'Avg Daily Volume'], ascending=False)
     return stock_df, theme_df, theme_top_stocks
 
-def generate_evening_report(capital=10000, run_on_demand=False):
+def generate_evening_report(capital: float = 10000, run_on_demand: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     now = datetime.now()
     if not run_on_demand and (now.hour != 18 or now.minute < 30 or now.minute > 35):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -773,6 +763,72 @@ def generate_evening_report(capital=10000, run_on_demand=False):
 
     return accumulation_df, distribution_df, rising_df, buying_sectors_df, selling_sectors_df
 
+# OTM Flows Functions
+def validate_csv_content_type(response: requests.Response) -> bool:
+    """Validate if the response content type is CSV."""
+    return 'text/csv' in response.headers.get('Content-Type', '')
+
+def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply filters to the DataFrame."""
+    df = df[df['Volume'] >= 100]
+    df['Expiration'] = pd.to_datetime(df['Expiration'])
+    df = df[df['Expiration'].dt.date >= datetime.now().date()]
+    return df
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def fetch_data_from_urls(urls: List[str]) -> pd.DataFrame:
+    """Fetch and combine data from multiple CSV URLs into a single DataFrame."""
+    data_frames = []
+    for url in urls:
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            if validate_csv_content_type(response):
+                csv_data = io.StringIO(response.text)
+                df = pd.read_csv(csv_data)
+                data_frames.append(apply_filters(df))
+            else:
+                logger.warning(f"Data from {url} is not in CSV format. Skipping...")
+        except Exception as e:
+            logger.error(f"Error fetching or processing data from {url}: {e}")
+    return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
+
+def fetch_top_10_otm_flows(symbol: str, urls: List[str]) -> pd.DataFrame:
+    """Fetch and return the top 10 OTM option flows for a given symbol."""
+    data = fetch_data_from_urls(urls)
+    if data.empty:
+        return pd.DataFrame()
+
+    symbol_data = data[data['Symbol'] == symbol].copy()
+    if symbol_data.empty:
+        return pd.DataFrame()
+
+    stock_info = get_stock_info_from_db(symbol)
+    spot_price = stock_info.get('price', 0)
+    if spot_price == 0:
+        try:
+            ticker = yf.Ticker(symbol)
+            spot_price = ticker.history(period="1d")['Close'].iloc[-1]
+        except Exception as e:
+            logger.error(f"Could not fetch spot price for {symbol}: {e}")
+            spot_price = 0
+
+    symbol_data['OTM'] = symbol_data.apply(
+        lambda row: row['Strike Price'] > spot_price if row['Call/Put'] == 'C' else row['Strike Price'] < spot_price,
+        axis=1
+    )
+    otm_data = symbol_data[symbol_data['OTM']]
+    if otm_data.empty:
+        return pd.DataFrame()
+
+    otm_data['Transaction Value'] = otm_data['Volume'] * otm_data['Last Price'] * 100
+    otm_summary = (
+        otm_data.groupby(['Symbol', 'Expiration', 'Strike Price', 'Call/Put', 'Last Price'])
+        .agg({'Volume': 'sum', 'Transaction Value': 'sum'})
+        .reset_index()
+    )
+    return otm_summary.sort_values(by='Transaction Value', ascending=False).head(10)
+
 def run():
     st.markdown("""
         <style>
@@ -788,14 +844,26 @@ def run():
     
     st.title("FINRA Short Sale Analysis")
     
+    # Initialize session state
+    if 'analysis_results' not in st.session_state:
+        st.session_state['analysis_results'] = {}
+    if 'otm_flows' not in st.session_state:
+        st.session_state['otm_flows'] = {'symbol': None, 'show': False, 'data': None}
+    
     with st.sidebar:
         portfolio_symbols = st.text_area("User Defined Symbols for Multi Stock (comma-separated)", 
                                          "AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, PLTR, LLY, JPM, AVGO, UNH, V, WMT, XOM, MA, JNJ, PG, HD, COST, ORCL, CVX, BAC, KO, PEP, ABBV, "
                                          "MRK, AMD, NFLX, ADBE, CRM, INTC, CSCO, PFE, TMO, MCD, DIS, WFC, QCOM, LIN, GE, AXP, CAT, IBM, VZ, GS, MS, PM, LOW, NEE, RTX, BA, HON, UNP, "
                                          "T, BLK, MDT, SBUX, LMT, AMGN, GILD, CVS, DE, TGT, AMT, BKNG, SO, DUK, PYPL, UPS, C, COP, MMM, ACN, ABT, DHR, TMUS, TXN, MDLZ, BMY, INTU, NKE, "
-                                         "CL, MO, KHC, EMR, GM, F, FDX, "
-                                         "GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
+                                         "CL, MO, KHC, EMR, GM, F, FDX, GD, BK, SPG, CHTR, USB, MET, AIG, COF, DOW, SCHW, CMCSA, SPY, QQQ, VOO, IVV, XLK, VUG, XLV, XLF, IWF, VTI").split(",")
         portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
+        
+        st.subheader("Data Management")
+        update_button = st.button("Update Stock Data", use_container_width=True)
+        if update_button:
+            with st.spinner("Updating stock data..."):
+                update_stock_database(portfolio_symbols)
+            st.success("Stock data updated successfully!")
     
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Single Stock", "Accumulation", "Distribution", 
@@ -803,6 +871,14 @@ def run():
         "Rising Ratios", "Portfolio Allocation"
     ])
     
+    urls = [
+        "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
+        "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
+        "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
+        "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
+    ]
+    
+    # Tab 1: Single Stock
     with tab1:
         col1, col2 = st.columns(2)
         with col1:
@@ -814,6 +890,12 @@ def run():
         if st.button("Analyze Stock"):
             with st.spinner(f"Analyzing {symbol}..."):
                 results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)
+                st.session_state['analysis_results'][symbol] = {'df': results_df, 'significant_days': significant_days}
+        
+        if symbol in st.session_state['analysis_results']:
+            results_df = st.session_state['analysis_results'][symbol]['df']
+            significant_days = st.session_state['analysis_results'][symbol]['significant_days']
+            
             if not results_df.empty:
                 st.subheader("Summary")
                 avg_ratio = results_df['buy_to_sell_ratio'].mean()
@@ -834,56 +916,42 @@ def run():
                 st.plotly_chart(fig)
                 
                 st.subheader("Daily Analysis")
-                def highlight_cells(row, max_bought_volume, max_buy_sell_ratio):
-                    styles = [''] * len(row)
-                    try:
-                        # Get column indices
-                        bought_idx = row.index.get_loc('bought_volume')
-                        ratio_idx = row.index.get_loc('buy_to_sell_ratio')
-                        cum_bought_idx = row.index.get_loc('cumulative_bought')
-                        cum_sold_idx = row.index.get_loc('cumulative_sold')
-                        
-                        # Highlight cumulative bought vs sold
-                        if row['cumulative_bought'] > row['cumulative_sold']:
-                            styles[cum_bought_idx] = 'background-color: rgba(144, 238, 144, 0.3)'
-                            styles[cum_sold_idx] = 'background-color: rgba(255, 182, 193, 0.3)'
-                        else:
-                            styles[cum_bought_idx] = 'background-color: rgba(165, 42, 42, 0.3)'  # Brown color
-                            styles[cum_sold_idx] = 'background-color: rgba(139, 0, 0, 0.3)'  # Dark red color
-                        
-                        # Highlight max bought volume with blue
-                        if row['bought_volume'] == max_bought_volume:
-                            styles[bought_idx] = 'background-color: rgba(0, 100, 0, 0.3)'  # Dark green
-                        
-                        # Highlight max buy/sell ratio with yellow
-                        if row['buy_to_sell_ratio'] == max_buy_sell_ratio:
-                            styles[ratio_idx] = 'background-color: rgba(255, 255, 153, 0.3)'  # Light yellow
-                    
-                    except KeyError:
-                        pass
-                    return styles
-                
                 display_df = results_df.copy()
                 for col in ['total_volume', 'bought_volume', 'sold_volume', 'cumulative_bought', 'cumulative_sold']:
                     display_df[col] = display_df[col].astype(int)
                 
-                # Get maximum values for highlighting
-                max_bought_volume = display_df['bought_volume'].max()
-                max_buy_sell_ratio = display_df['buy_to_sell_ratio'].max()
+                st.dataframe(display_df)
                 
-                # Reorder columns to put cumulative columns at the end
-                column_order = ['date', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 
-                                'sold_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold']
-                display_df = display_df[column_order]
+                if st.button(f"Show Top 10 OTM Flows for {symbol}", key=f"otm_{symbol}"):
+                    st.session_state['otm_flows']['symbol'] = symbol
+                    st.session_state['otm_flows']['show'] = True
+                    with st.spinner(f"Fetching OTM flows for {symbol}..."):
+                        otm_flows = fetch_top_10_otm_flows(symbol, urls)
+                        st.session_state['otm_flows']['data'] = otm_flows
                 
-                styled_df = display_df.style.apply(
-                    highlight_cells, 
-                    max_bought_volume=max_bought_volume, 
-                    max_buy_sell_ratio=max_buy_sell_ratio, 
-                    axis=1
-                )
-                st.dataframe(styled_df)
+                if (st.session_state['otm_flows']['show'] and 
+                    st.session_state['otm_flows']['symbol'] == symbol):
+                    otm_flows = st.session_state['otm_flows']['data']
+                    if otm_flows is not None and not otm_flows.empty:
+                        with st.expander(f"Top 10 OTM Flows for {symbol}", expanded=True):
+                            st.dataframe(otm_flows.style.format({
+                                'Transaction Value': '${:,.2f}',
+                                'Last Price': '${:.2f}',
+                                'Volume': '{:,.0f}'
+                            }))
+                            fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                            color='Call/Put', title=f"Top 10 OTM Flows for {symbol}",
+                                            hover_data=['Expiration', 'Volume', 'Last Price'])
+                            st.plotly_chart(fig_otm)
+                            if st.button("Hide OTM Flows", key=f"hide_otm_{symbol}"):
+                                st.session_state['otm_flows']['show'] = False
+                                st.session_state['otm_flows']['data'] = None
+                    else:
+                        st.warning(f"No OTM flows found for {symbol}.")
+                        st.session_state['otm_flows']['show'] = False
+                        st.session_state['otm_flows']['data'] = None
     
+    # Tab 2: Accumulation
     with tab2:
         st.subheader("Top 40 Stocks Showing Accumulation")
         col1, col2, col3, col4 = st.columns(4)
@@ -906,8 +974,41 @@ def run():
                     min_price=acc_min_price,
                     min_market_cap=acc_min_market_cap * 1_000_000
                 )
+                st.session_state['analysis_results']['accumulation'] = accumulation_df
+        
+        if 'accumulation' in st.session_state['analysis_results']:
+            accumulation_df = st.session_state['analysis_results']['accumulation']
             if not accumulation_df.empty:
                 st.dataframe(accumulation_df)
+                selected_symbol = st.selectbox("Select Symbol for OTM Flows", accumulation_df['Symbol'].tolist(), key="acc_otm_select")
+                if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_acc_{selected_symbol}"):
+                    st.session_state['otm_flows']['symbol'] = selected_symbol
+                    st.session_state['otm_flows']['show'] = True
+                    with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                        otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                        st.session_state['otm_flows']['data'] = otm_flows
+                
+                if (st.session_state['otm_flows']['show'] and 
+                    st.session_state['otm_flows']['symbol'] == selected_symbol):
+                    otm_flows = st.session_state['otm_flows']['data']
+                    if otm_flows is not None and not otm_flows.empty:
+                        with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                            st.dataframe(otm_flows.style.format({
+                                'Transaction Value': '${:,.2f}',
+                                'Last Price': '${:.2f}',
+                                'Volume': '{:,.0f}'
+                            }))
+                            fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                            color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                            hover_data=['Expiration', 'Volume', 'Last Price'])
+                            st.plotly_chart(fig_otm)
+                            if st.button("Hide OTM Flows", key=f"hide_otm_acc_{selected_symbol}"):
+                                st.session_state['otm_flows']['show'] = False
+                                st.session_state['otm_flows']['data'] = None
+                    else:
+                        st.warning(f"No OTM flows found for {selected_symbol}.")
+                        st.session_state['otm_flows']['show'] = False
+                        st.session_state['otm_flows']['data'] = None
                 
                 fig = px.bar(accumulation_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
                              color='Volume Trend', title="Top 10 Accumulation",
@@ -916,6 +1017,7 @@ def run():
             else:
                 st.write("No Accumulation detected with current filters.")
     
+    # Tab 3: Distribution
     with tab3:
         st.subheader("Top 40 Stocks Showing Distribution")
         col1, col2, col3, col4 = st.columns(4)
@@ -938,8 +1040,41 @@ def run():
                     min_price=dist_min_price,
                     min_market_cap=dist_min_market_cap * 1_000_000
                 )
+                st.session_state['analysis_results']['distribution'] = distribution_df
+        
+        if 'distribution' in st.session_state['analysis_results']:
+            distribution_df = st.session_state['analysis_results']['distribution']
             if not distribution_df.empty:
                 st.dataframe(distribution_df)
+                selected_symbol = st.selectbox("Select Symbol for OTM Flows", distribution_df['Symbol'].tolist(), key="dist_otm_select")
+                if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_dist_{selected_symbol}"):
+                    st.session_state['otm_flows']['symbol'] = selected_symbol
+                    st.session_state['otm_flows']['show'] = True
+                    with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                        otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                        st.session_state['otm_flows']['data'] = otm_flows
+                
+                if (st.session_state['otm_flows']['show'] and 
+                    st.session_state['otm_flows']['symbol'] == selected_symbol):
+                    otm_flows = st.session_state['otm_flows']['data']
+                    if otm_flows is not None and not otm_flows.empty:
+                        with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                            st.dataframe(otm_flows.style.format({
+                                'Transaction Value': '${:,.2f}',
+                                'Last Price': '${:.2f}',
+                                'Volume': '{:,.0f}'
+                            }))
+                            fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                            color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                            hover_data=['Expiration', 'Volume', 'Last Price'])
+                            st.plotly_chart(fig_otm)
+                            if st.button("Hide OTM Flows", key=f"hide_otm_dist_{selected_symbol}"):
+                                st.session_state['otm_flows']['show'] = False
+                                st.session_state['otm_flows']['data'] = None
+                    else:
+                        st.warning(f"No OTM flows found for {selected_symbol}.")
+                        st.session_state['otm_flows']['show'] = False
+                        st.session_state['otm_flows']['data'] = None
                 
                 fig = px.bar(distribution_df.head(10), x='Symbol', y='Avg Buy/Sell Ratio', 
                              color='Volume Trend', title="Top 10 Distribution",
@@ -948,6 +1083,7 @@ def run():
             else:
                 st.write("No Distribution detected with current filters.")
     
+    # Tab 4: Sector Rotation (No OTM flows here as it doesn’t display individual stock tables)
     with tab4:
         st.subheader("Sector Rotation Analysis")
         col1, col2 = st.columns(2)
@@ -959,15 +1095,17 @@ def run():
         if st.button("Analyze Sector Rotation"):
             with st.spinner("Analyzing sector rotation..."):
                 buying_df, selling_df = get_sector_rotation(lookback_days=rot_lookback_days, min_volume=rot_min_volume)
-            
+                st.session_state['analysis_results']['sector_rotation'] = {'buying': buying_df, 'selling': selling_df}
+        
+        if 'sector_rotation' in st.session_state['analysis_results']:
+            buying_df = st.session_state['analysis_results']['sector_rotation']['buying']
+            selling_df = st.session_state['analysis_results']['sector_rotation']['selling']
             if not buying_df.empty or not selling_df.empty:
                 all_sectors = pd.DataFrame()
-                
                 if not buying_df.empty:
                     buying_df['Direction'] = 'Buying'
                     buying_df['RS_Ratio'] = 1.0
                     all_sectors = pd.concat([all_sectors, buying_df])
-                
                 if not selling_df.empty:
                     selling_df['Direction'] = 'Selling'
                     selling_df['RS_Ratio'] = -1.0
@@ -986,89 +1124,34 @@ def run():
                 
                 fig = px.scatter(
                     all_sectors,
-                    x='RS_Ratio', 
-                    y='RS_Momentum',
-                    text='Sector',
-                    color='Direction',
+                    x='RS_Ratio', y='RS_Momentum', text='Sector', color='Direction',
                     color_discrete_map={'Buying': '#4CAF50', 'Selling': '#F44336'},
-                    size=size_column,
-                    size_max=60,
-                    hover_data=['Sector'],
-                    title="RRG",
-                    labels={'RS_Ratio': 'Relative Strength', 'RS_Momentum': 'Relative Momentum'}
+                    size=size_column, size_max=60, hover_data=['Sector'],
+                    title="RRG", labels={'RS_Ratio': 'Relative Strength', 'RS_Momentum': 'Relative Momentum'}
                 )
-                
-                fig.add_shape(type="line", x0=0, y0=-40, x1=0, y1=120,
-                              line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
-                fig.add_shape(type="line", x0=-2, y0=0, x1=2, y1=0,
-                              line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
-                
-                fig.add_shape(type="rect", x0=0, y0=0, x1=2, y1=120, 
-                              fillcolor="rgba(144, 238, 144, 0.1)", line=dict(width=0))
-                fig.add_shape(type="rect", x0=-2, y0=0, x1=0, y1=120, 
-                              fillcolor="rgba(144, 200, 255, 0.1)", line=dict(width=0))
-                fig.add_shape(type="rect", x0=-2, y0=-40, x1=0, y1=0, 
-                              fillcolor="rgba(200, 200, 200, 0.1)", line=dict(width=0))
-                fig.add_shape(type="rect", x0=0, y0=-40, x1=2, y1=0, 
-                              fillcolor="rgba(255, 182, 193, 0.1)", line=dict(width=0))
-                
-                fig.add_annotation(x=1, y=60, text="LEADING", showarrow=False, 
-                                   font=dict(size=18, color="rgba(0,100,0,0.7)"))
-                fig.add_annotation(x=-1, y=60, text="IMPROVING", showarrow=False, 
-                                   font=dict(size=18, color="rgba(0,0,150,0.7)"))
-                fig.add_annotation(x=-1, y=-20, text="LAGGING", showarrow=False, 
-                                   font=dict(size=18, color="rgba(100,100,100,0.7)"))
-                fig.add_annotation(x=1, y=0, text="WEAKENING", showarrow=False, 
-                                   font=dict(size=18, color="rgba(150,0,0,0.7)"))
-                
-                fig.add_annotation(x=0, y=60, ax=1, ay=60, xref="x", yref="y",
-                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
-                                   arrowwidth=2, arrowcolor="rgba(0,100,0,0.5)")
-                fig.add_annotation(x=-1, y=0, ax=-1, ay=60, xref="x", yref="y",
-                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
-                                   arrowwidth=2, arrowcolor="rgba(0,0,150,0.5)")
-                fig.add_annotation(x=0, y=-20, ax=-1, ay=-20, xref="x", yref="y",
-                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
-                                   arrowwidth=2, arrowcolor="rgba(100,100,100,0.5)")
-                fig.add_annotation(x=1, y=0, ax=1, ay=-20, xref="x", yref="y",
-                                   axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5,
-                                   arrowwidth=2, arrowcolor="rgba(150,0,0,0.5)")
-                
-                fig.update_traces(
-                    textposition='top center',
-                    textfont=dict(size=13, color='black', family="Arial, sans-serif"),
-                    marker=dict(opacity=0.85, line=dict(width=1, color='#FFFFFF'))
-                )
-                
+                fig.add_shape(type="line", x0=0, y0=-40, x1=0, y1=120, line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
+                fig.add_shape(type="line", x0=-2, y0=0, x1=2, y1=0, line=dict(color="rgba(128, 128, 128, 0.7)", width=1.5, dash="dash"))
+                fig.add_shape(type="rect", x0=0, y0=0, x1=2, y1=120, fillcolor="rgba(144, 238, 144, 0.1)", line=dict(width=0))
+                fig.add_shape(type="rect", x0=-2, y0=0, x1=0, y1=120, fillcolor="rgba(144, 200, 255, 0.1)", line=dict(width=0))
+                fig.add_shape(type="rect", x0=-2, y0=-40, x1=0, y1=0, fillcolor="rgba(200, 200, 200, 0.1)", line=dict(width=0))
+                fig.add_shape(type="rect", x0=0, y0=-40, x1=2, y1=0, fillcolor="rgba(255, 182, 193, 0.1)", line=dict(width=0))
+                fig.add_annotation(x=1, y=60, text="LEADING", showarrow=False, font=dict(size=18, color="rgba(0,100,0,0.7)"))
+                fig.add_annotation(x=-1, y=60, text="IMPROVING", showarrow=False, font=dict(size=18, color="rgba(0,0,150,0.7)"))
+                fig.add_annotation(x=-1, y=-20, text="LAGGING", showarrow=False, font=dict(size=18, color="rgba(100,100,100,0.7)"))
+                fig.add_annotation(x=1, y=0, text="WEAKENING", showarrow=False, font=dict(size=18, color="rgba(150,0,0,0.7)"))
+                fig.add_annotation(x=0, y=60, ax=1, ay=60, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5, arrowwidth=2, arrowcolor="rgba(0,100,0,0.5)")
+                fig.add_annotation(x=-1, y=0, ax=-1, ay=60, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5, arrowwidth=2, arrowcolor="rgba(0,0,150,0.5)")
+                fig.add_annotation(x=0, y=-20, ax=-1, ay=-20, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5, arrowwidth=2, arrowcolor="rgba(100,100,100,0.5)")
+                fig.add_annotation(x=1, y=0, ax=1, ay=-20, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.5, arrowwidth=2, arrowcolor="rgba(150,0,0,0.5)")
+                fig.update_traces(textposition='top center', textfont=dict(size=13, color='black', family="Arial, sans-serif"), marker=dict(opacity=0.85, line=dict(width=1, color='#FFFFFF')))
                 fig.update_layout(
-                    height=800, width=900,
-                    plot_bgcolor='rgba(240,240,240,0.3)', paper_bgcolor='white',
-                    xaxis=dict(
-                        title=dict(font=dict(size=14, family="Arial, sans-serif")),
-                        gridcolor='rgba(200,200,200,0.2)',
-                        zerolinecolor='rgba(128,128,128,0.5)',
-                        zerolinewidth=1.5,
-                        range=[-2.1, 2.1]
-                    ),
-                    yaxis=dict(
-                        title=dict(font=dict(size=14, family="Arial, sans-serif")),
-                        gridcolor='rgba(200,200,200,0.2)',
-                        zerolinecolor='rgba(128,128,128,0.5)',
-                        zerolinewidth=1.5,
-                        range=[-40, 120]
-                    ),
-                    legend=dict(
-                        orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5,
-                        bgcolor='rgba(255,255,255,0.7)', bordercolor='rgba(128,128,128,0.5)', borderwidth=1
-                    ),
-                    title=dict(
-                        text="Relative Rotation Graph (RRG) - Sector Analysis",
-                        font=dict(size=22, family="Arial, sans-serif", color='#333333'),
-                        x=0.5
-                    ),
+                    height=800, width=900, plot_bgcolor='rgba(240,240,240,0.3)', paper_bgcolor='white',
+                    xaxis=dict(title=dict(font=dict(size=14, family="Arial, sans-serif")), gridcolor='rgba(200,200,200,0.2)', zerolinecolor='rgba(128,128,128,0.5)', zerolinewidth=1.5, range=[-2.1, 2.1]),
+                    yaxis=dict(title=dict(font=dict(size=14, family="Arial, sans-serif")), gridcolor='rgba(200,200,200,0.2)', zerolinecolor='rgba(128,128,128,0.5)', zerolinewidth=1.5, range=[-40, 120]),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5, bgcolor='rgba(255,255,255,0.7)', bordercolor='rgba(128,128,128,0.5)', borderwidth=1),
+                    title=dict(text="Relative Rotation Graph (RRG) - Sector Analysis", font=dict(size=22, family="Arial, sans-serif", color='#333333'), x=0.5),
                     margin=dict(l=50, r=50, t=80, b=100)
                 )
-                
                 st.plotly_chart(fig, use_container_width=True)
                 
                 with st.expander("View Sector Data Tables"):
@@ -1094,6 +1177,7 @@ def run():
             else:
                 st.write("No significant sector rotation detected based on current parameters.")
     
+    # Tab 5: Multi Stock (No OTM flows as it’s sector-based, not individual stock-focused)
     with tab5:
         st.subheader("Multi Stock Analysis")
         col1, col2, col3 = st.columns(3)
@@ -1112,7 +1196,10 @@ def run():
             with st.spinner("Analyzing stocks..."):
                 start_datetime = datetime.combine(start_date, datetime.min.time())
                 portfolio_df = analyze_portfolio(portfolio_symbols, (datetime.now() - start_datetime).days)
-            
+                st.session_state['analysis_results']['multi_stock'] = portfolio_df
+        
+        if 'multi_stock' in st.session_state['analysis_results']:
+            portfolio_df = st.session_state['analysis_results']['multi_stock']
             if not portfolio_df.empty:
                 portfolio_df['Date'] = pd.to_datetime(portfolio_df['Date'])
                 filtered_df = portfolio_df[
@@ -1130,7 +1217,6 @@ def run():
                         return 'User Defined'
                     
                     filtered_df['Sector'] = filtered_df['Symbol'].apply(get_sector)
-                    
                     sector_tabs = st.tabs(list(sector_mapping.keys()))
                     
                     for tab, sector in zip(sector_tabs, sector_mapping.keys()):
@@ -1138,17 +1224,13 @@ def run():
                             sector_df = filtered_df[filtered_df['Sector'] == sector]
                             if not sector_df.empty:
                                 st.dataframe(sector_df)
-                                
                                 sector_bought = sector_df['Bought Volume'].sum()
                                 sector_sold = sector_df['Sold Volume'].sum()
                                 st.write(f"Total Bought Volume: {sector_bought:,}")
                                 st.write(f"Total Sold Volume: {sector_sold:,}")
-                                st.write("Dark Pools: " + 
-                                        ("Bullish" if sector_bought > sector_sold else "Bearish"))
-                                
+                                st.write("Dark Pools: " + ("Bullish" if sector_bought > sector_sold else "Bearish"))
                                 fig = px.bar(sector_df, x='Symbol', y='Avg Buy/Sell Ratio',
-                                            title=f"{sector} Buy/Sell Ratios",
-                                            color='Significant Days',
+                                            title=f"{sector} Buy/Sell Ratios", color='Significant Days',
                                             hover_data=['Bought Volume', 'Sold Volume'])
                                 fig.update_layout(barmode='group', xaxis_tickangle=-45)
                                 st.plotly_chart(fig)
@@ -1158,12 +1240,10 @@ def run():
                     total_sold_volume = filtered_df['Sold Volume'].sum()
                     st.write(f"Total Bought Volume: {total_bought_volume:,}")
                     st.write(f"Total Sold Volume: {total_sold_volume:,}")
-                    st.write("Dark Pools: " + 
-                            ("Bullish" if total_bought_volume > total_sold_volume else "Bearish"))
+                    st.write("Dark Pools: " + ("Bullish" if total_bought_volume > total_sold_volume else "Bearish"))
                     
                     fig = px.bar(filtered_df, x='Symbol', y='Avg Buy/Sell Ratio',
-                                title="Buy/Sell Ratios by Sector",
-                                color='Sector',
+                                title="Buy/Sell Ratios by Sector", color='Sector',
                                 hover_data=['Bought Volume', 'Sold Volume'])
                     fig.update_layout(barmode='group', xaxis_tickangle=-45)
                     st.plotly_chart(fig)
@@ -1172,6 +1252,7 @@ def run():
             else:
                 st.write("No data available for the selected portfolio.")
     
+    # Tab 6: Latest Day
     with tab6:
         st.subheader("Latest Day")
         latest_df, latest_date = get_latest_data()
@@ -1184,44 +1265,72 @@ def run():
             st.write("No data available for the latest day.")
         else:
             st.write(f"Showing data for: {latest_date}")
-        
-        metrics_list = []
-        for _, row in latest_df.iterrows():
-            total_volume = row.get('TotalVolume', 0)
-            metrics = calculate_metrics(row, total_volume)
-            metrics['Symbol'] = row['Symbol']
-            metrics['TotalVolume'] = total_volume
-            metrics_list.append(metrics)
-        
-        latest_df_processed = pd.DataFrame(metrics_list)
-        
-        latest_df_processed = latest_df_processed[latest_df_processed['total_volume'] >= 2000000]
-        latest_df_processed = latest_df_processed[latest_df_processed['buy_to_sell_ratio'] > 1.5]
-        
-        if volume_filter:
-            latest_df_processed = latest_df_processed[latest_df_processed['bought_volume'] > 2 * latest_df_processed['sold_volume']]
-        
-        latest_df_processed = latest_df_processed.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
-        
-        if not latest_df_processed.empty:
-            column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio']
-            latest_df_processed = latest_df_processed[column_order]
+            metrics_list = []
+            for _, row in latest_df.iterrows():
+                total_volume = row.get('TotalVolume', 0)
+                metrics = calculate_metrics(row, total_volume)
+                metrics['Symbol'] = row['Symbol']
+                metrics['TotalVolume'] = total_volume
+                metrics_list.append(metrics)
             
-            st.dataframe(latest_df_processed)
-            
-            fig = px.bar(latest_df_processed, x='Symbol', y='buy_to_sell_ratio',
-                        title="Latest Day Buy/Sell Ratios",
-                        hover_data=['total_volume', 'bought_volume', 'sold_volume'])
-            fig.update_layout(barmode='group', xaxis_tickangle=-45)
-            st.plotly_chart(fig)
-        else:
-            st.write("No records found with current filters.")
+            latest_df_processed = pd.DataFrame(metrics_list)
+            latest_df_processed = latest_df_processed[latest_df_processed['total_volume'] >= 2000000]
+            latest_df_processed = latest_df_processed[latest_df_processed['buy_to_sell_ratio'] > 1.5]
+            if volume_filter:
+                latest_df_processed = latest_df_processed[latest_df_processed['bought_volume'] > 2 * latest_df_processed['sold_volume']]
+            latest_df_processed = latest_df_processed.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+            st.session_state['analysis_results']['latest'] = latest_df_processed
+        
+        if 'latest' in st.session_state['analysis_results']:
+            latest_df_processed = st.session_state['analysis_results']['latest']
+            if not latest_df_processed.empty:
+                column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio']
+                latest_df_processed = latest_df_processed[column_order]
+                st.dataframe(latest_df_processed)
+                
+                selected_symbol = st.selectbox("Select Symbol for OTM Flows", latest_df_processed['Symbol'].tolist(), key="latest_otm_select")
+                if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_latest_{selected_symbol}"):
+                    st.session_state['otm_flows']['symbol'] = selected_symbol
+                    st.session_state['otm_flows']['show'] = True
+                    with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                        otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                        st.session_state['otm_flows']['data'] = otm_flows
+                
+                if (st.session_state['otm_flows']['show'] and 
+                    st.session_state['otm_flows']['symbol'] == selected_symbol):
+                    otm_flows = st.session_state['otm_flows']['data']
+                    if otm_flows is not None and not otm_flows.empty:
+                        with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                            st.dataframe(otm_flows.style.format({
+                                'Transaction Value': '${:,.2f}',
+                                'Last Price': '${:.2f}',
+                                'Volume': '{:,.0f}'
+                            }))
+                            fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                            color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                            hover_data=['Expiration', 'Volume', 'Last Price'])
+                            st.plotly_chart(fig_otm)
+                            if st.button("Hide OTM Flows", key=f"hide_otm_latest_{selected_symbol}"):
+                                st.session_state['otm_flows']['show'] = False
+                                st.session_state['otm_flows']['data'] = None
+                    else:
+                        st.warning(f"No OTM flows found for {selected_symbol}.")
+                        st.session_state['otm_flows']['show'] = False
+                        st.session_state['otm_flows']['data'] = None
+                
+                fig = px.bar(latest_df_processed, x='Symbol', y='buy_to_sell_ratio',
+                            title="Latest Day Buy/Sell Ratios",
+                            hover_data=['total_volume', 'bought_volume', 'sold_volume'])
+                fig.update_layout(barmode='group', xaxis_tickangle=-45)
+                st.plotly_chart(fig)
+            else:
+                st.write("No records found with current filters.")
     
+    # Tab 7: Rising Ratios
     with tab7:
         st.subheader("Stocks and Themes with Rising Buy/Sell Ratios (Last 10 Days)")
         with st.container():
             st.subheader("Analysis Parameters")
-            
             col1, col2, col3 = st.columns(3)
             with col1:
                 min_price_rising = st.number_input("Min Price ($)", value=5.0, min_value=1.0, 
@@ -1237,144 +1346,132 @@ def run():
                 max_dips_rising = st.number_input("Max Allowed Dips", value=3, min_value=0, 
                                                  max_value=5, step=1, key="rising_dips")
                 find_ratios_button = st.button("Find Rising Ratios", type="primary", use_container_width=True)
-    
-    with st.sidebar:
-        st.subheader("Data Management")
-        update_button = st.button("Update Stock Data", use_container_width=True)
         
-        if update_button:
-            with st.spinner("Updating stock data..."):
-                update_stock_database(portfolio_symbols)
-            st.success("Stock data updated successfully!")
-    
-    if find_ratios_button:
-        with st.spinner("Analyzing stocks and themes with rising ratios..."):
-            stock_df, theme_df, theme_top_stocks = find_rising_ratio_stocks(
-                lookback_days=lookback_days_rising,
-                min_volume=min_volume_rising,
-                max_dips=max_dips_rising,
-                min_price=min_price_rising,
-                min_market_cap=min_market_cap_rising * 1_000_000,
-                allowed_symbols=portfolio_symbols
-            )
+        if find_ratios_button:
+            with st.spinner("Analyzing stocks and themes with rising ratios..."):
+                stock_df, theme_df, theme_top_stocks = find_rising_ratio_stocks(
+                    lookback_days=lookback_days_rising,
+                    min_volume=min_volume_rising,
+                    max_dips=max_dips_rising,
+                    min_price=min_price_rising,
+                    min_market_cap=min_market_cap_rising * 1_000_000,
+                    allowed_symbols=portfolio_symbols
+                )
+                st.session_state['analysis_results']['rising'] = {'stock': stock_df, 'theme': theme_df, 'top_stocks': theme_top_stocks}
         
-        results_tab1, results_tab2 = st.tabs(["Themes", "Individual Stocks"])
-        
-        with results_tab1:
-            st.subheader("Themes with Rising Buy/Sell Ratios")
+        if 'rising' in st.session_state['analysis_results']:
+            stock_df = st.session_state['analysis_results']['rising']['stock']
+            theme_df = st.session_state['analysis_results']['rising']['theme']
+            theme_top_stocks = st.session_state['analysis_results']['rising']['top_stocks']
             
-            if not theme_df.empty:
-                metric_cols = st.columns(4)
-                with metric_cols[0]:
-                    st.metric("Total Themes", len(theme_df))
-                with metric_cols[1]:
-                    st.metric("Avg Ratio Increase", f"{theme_df['Ratio Increase'].mean():.2f}x")
-                with metric_cols[2]:
-                    top_theme = theme_df.iloc[0]['Theme']
-                    st.metric("Top Theme", top_theme)
-                with metric_cols[3]:
-                    top_increase = theme_df.iloc[0]['Ratio Increase']
-                    st.metric("Top Increase", f"{top_increase:.2f}x")
-                
-                st.dataframe(
-                    theme_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'),
-                    use_container_width=True
-                )
-                
-                fig_theme = px.bar(
-                    theme_df,
-                    x='Theme',
-                    y='Ratio Increase',
-                    title="Themes by Buy/Sell Ratio Increase",
-                    hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Stocks Analyzed', 'Slope'],
-                    color='Ratio Increase',
-                    color_continuous_scale='YlGnBu'
-                )
-                fig_theme.update_layout(
-                    xaxis_tickangle=-45,
-                    height=500,
-                    margin=dict(l=20, r=20, t=40, b=20),
-                    coloraxis_showscale=True
-                )
-                st.plotly_chart(fig_theme, use_container_width=True)
-                
-                st.subheader("Top Stocks by Theme")
-                
-                for theme in theme_top_stocks:
-                    with st.expander(f"{theme} - Top 3 Stocks"):
-                        top_stocks_df = theme_top_stocks[theme]
-                        if not top_stocks_df.empty:
-                            col1, col2 = st.columns([2, 3])
-                            with col1:
-                                st.dataframe(
-                                    top_stocks_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'),
-                                    use_container_width=True
-                                )
-                            with col2:
-                                fig_top = px.bar(
-                                    top_stocks_df,
-                                    x='Symbol',
-                                    y='Ratio Increase',
-                                    title=f"Top 3 Stocks in {theme}",
-                                    hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Price'],
-                                    color='Ratio Increase',
-                                    color_continuous_scale='YlGnBu'
-                                )
-                                fig_top.update_layout(xaxis_tickangle=0, height=300)
-                                st.plotly_chart(fig_top, use_container_width=True)
+            results_tab1, results_tab2 = st.tabs(["Themes", "Individual Stocks"])
+            
+            with results_tab1:
+                st.subheader("Themes with Rising Buy/Sell Ratios")
+                if not theme_df.empty:
+                    metric_cols = st.columns(4)
+                    with metric_cols[0]:
+                        st.metric("Total Themes", len(theme_df))
+                    with metric_cols[1]:
+                        st.metric("Avg Ratio Increase", f"{theme_df['Ratio Increase'].mean():.2f}x")
+                    with metric_cols[2]:
+                        top_theme = theme_df.iloc[0]['Theme']
+                        st.metric("Top Theme", top_theme)
+                    with metric_cols[3]:
+                        top_increase = theme_df.iloc[0]['Ratio Increase']
+                        st.metric("Top Increase", f"{top_increase:.2f}x")
+                    
+                    st.dataframe(theme_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'), use_container_width=True)
+                    
+                    fig_theme = px.bar(theme_df, x='Theme', y='Ratio Increase', title="Themes by Buy/Sell Ratio Increase",
+                                      hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Stocks Analyzed', 'Slope'],
+                                      color='Ratio Increase', color_continuous_scale='YlGnBu')
+                    fig_theme.update_layout(xaxis_tickangle=-45, height=500, margin=dict(l=20, r=20, t=40, b=20), coloraxis_showscale=True)
+                    st.plotly_chart(fig_theme, use_container_width=True)
+                    
+                    st.subheader("Top Stocks by Theme")
+                    for theme in theme_top_stocks:
+                        with st.expander(f"{theme} - Top 3 Stocks"):
+                            top_stocks_df = theme_top_stocks[theme]
+                            if not top_stocks_df.empty:
+                                col1, col2 = st.columns([2, 3])
+                                with col1:
+                                    st.dataframe(top_stocks_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'), use_container_width=True)
+                                with col2:
+                                    fig_top = px.bar(top_stocks_df, x='Symbol', y='Ratio Increase', title=f"Top 3 Stocks in {theme}",
+                                                    hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Price'],
+                                                    color='Ratio Increase', color_continuous_scale='YlGnBu')
+                                    fig_top.update_layout(xaxis_tickangle=0, height=300)
+                                    st.plotly_chart(fig_top, use_container_width=True)
+                            else:
+                                st.info("No qualifying stocks found for this theme.")
+                else:
+                    st.info("No themes found with rising buy/sell ratios based on current parameters.")
+            
+            with results_tab2:
+                st.subheader("Top Stocks with Rising Buy/Sell Ratios")
+                if not stock_df.empty:
+                    metric_cols = st.columns(4)
+                    with metric_cols[0]:
+                        st.metric("Total Stocks", len(stock_df))
+                    with metric_cols[1]:
+                        st.metric("Avg Ratio Increase", f"{stock_df['Ratio Increase'].mean():.2f}x")
+                    with metric_cols[2]:
+                        top_stock = stock_df.iloc[0]['Symbol']
+                        st.metric("Top Stock", top_stock)
+                    with metric_cols[3]:
+                        top_increase = stock_df.iloc[0]['Ratio Increase']
+                        st.metric("Top Increase", f"{top_increase:.2f}x")
+                    
+                    stock_search = st.text_input("Filter stocks by symbol or name", "")
+                    filtered_df = stock_df
+                    if stock_search:
+                        filtered_df = stock_df[stock_df['Symbol'].str.contains(stock_search, case=False)]
+                    
+                    st.dataframe(filtered_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'), use_container_width=True)
+                    
+                    selected_symbol = st.selectbox("Select Symbol for OTM Flows", filtered_df['Symbol'].tolist(), key="rising_otm_select")
+                    if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_rising_{selected_symbol}"):
+                        st.session_state['otm_flows']['symbol'] = selected_symbol
+                        st.session_state['otm_flows']['show'] = True
+                        with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                            otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                            st.session_state['otm_flows']['data'] = otm_flows
+                    
+                    if (st.session_state['otm_flows']['show'] and 
+                        st.session_state['otm_flows']['symbol'] == selected_symbol):
+                        otm_flows = st.session_state['otm_flows']['data']
+                        if otm_flows is not None and not otm_flows.empty:
+                            with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                                st.dataframe(otm_flows.style.format({
+                                    'Transaction Value': '${:,.2f}',
+                                    'Last Price': '${:.2f}',
+                                    'Volume': '{:,.0f}'
+                                }))
+                                fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                                color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                                hover_data=['Expiration', 'Volume', 'Last Price'])
+                                st.plotly_chart(fig_otm)
+                                if st.button("Hide OTM Flows", key=f"hide_otm_rising_{selected_symbol}"):
+                                    st.session_state['otm_flows']['show'] = False
+                                    st.session_state['otm_flows']['data'] = None
                         else:
-                            st.info("No qualifying stocks found for this theme.")
-            else:
-                st.info("No themes found with rising buy/sell ratios based on current parameters.")
-        
-        with results_tab2:
-            st.subheader("Top Stocks with Rising Buy/Sell Ratios")
-            
-            if not stock_df.empty:
-                metric_cols = st.columns(4)
-                with metric_cols[0]:
-                    st.metric("Total Stocks", len(stock_df))
-                with metric_cols[1]:
-                    st.metric("Avg Ratio Increase", f"{stock_df['Ratio Increase'].mean():.2f}x")
-                with metric_cols[2]:
-                    top_stock = stock_df.iloc[0]['Symbol']
-                    st.metric("Top Stock", top_stock)
-                with metric_cols[3]:
-                    top_increase = stock_df.iloc[0]['Ratio Increase']
-                    st.metric("Top Increase", f"{top_increase:.2f}x")
-                
-                stock_search = st.text_input("Filter stocks by symbol or name", "")
-                
-                filtered_df = stock_df
-                if stock_search:
-                    filtered_df = stock_df[stock_df['Symbol'].str.contains(stock_search, case=False)]
-                
-                st.dataframe(
-                    filtered_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'),
-                    use_container_width=True
-                )
-                
-                fig_stock = px.bar(
-                    stock_df.head(10),
-                    x='Symbol',
-                    y='Ratio Increase',
-                    title="Top 10 Stocks by Buy/Sell Ratio Increase",
-                    hover_data=['Avg Daily Volume', 'Starting Ratio', 'Ending Ratio', 'Dips', 'Price', 'Market Cap (M)'],
-                    color='Ratio Increase',
-                    color_continuous_scale='YlGnBu'
-                )
-                fig_stock.update_layout(
-                    xaxis_tickangle=-45,
-                    height=500,
-                    margin=dict(l=20, r=20, t=40, b=20)
-                )
-                st.plotly_chart(fig_stock, use_container_width=True)
-            else:
-                st.info("No stocks found with rising buy/sell ratios based on current parameters.")
+                            st.warning(f"No OTM flows found for {selected_symbol}.")
+                            st.session_state['otm_flows']['show'] = False
+                            st.session_state['otm_flows']['data'] = None
+                    
+                    fig_stock = px.bar(stock_df.head(10), x='Symbol', y='Ratio Increase',
+                                      title="Top 10 Stocks by Buy/Sell Ratio Increase",
+                                      hover_data=['Avg Daily Volume', 'Starting Ratio', 'Ending Ratio', 'Dips', 'Price', 'Market Cap (M)'],
+                                      color='Ratio Increase', color_continuous_scale='YlGnBu')
+                    fig_stock.update_layout(xaxis_tickangle=-45, height=500, margin=dict(l=20, r=20, t=40, b=20))
+                    st.plotly_chart(fig_stock, use_container_width=True)
+                else:
+                    st.info("No stocks found with rising buy/sell ratios based on current parameters.")
     
+        # Tab 8: Portfolio Allocation
     with tab8:
         st.header("Portfolio Allocation")
-        
         with st.container():
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -1387,8 +1484,21 @@ def run():
                 accumulation_df, distribution_df, rising_df, buying_sectors_df, selling_sectors_df = generate_evening_report(
                     capital=10000, run_on_demand=True
                 )
-            
+                st.session_state['analysis_results']['portfolio'] = {
+                    'accumulation': accumulation_df,
+                    'distribution': distribution_df,
+                    'rising': rising_df,
+                    'buying_sectors': buying_sectors_df,
+                    'selling_sectors': selling_sectors_df
+                }
+        
+        if 'portfolio' in st.session_state['analysis_results']:
             report_data = st.session_state.get('evening_report', {})
+            accumulation_df = st.session_state['analysis_results']['portfolio']['accumulation']
+            distribution_df = st.session_state['analysis_results']['portfolio']['distribution']
+            rising_df = st.session_state['analysis_results']['portfolio']['rising']
+            buying_sectors_df = st.session_state['analysis_results']['portfolio']['buying_sectors']
+            selling_sectors_df = st.session_state['analysis_results']['portfolio']['selling_sectors']
             
             st.subheader("Portfolio Analysis Report")
             st.caption(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ET")
@@ -1410,7 +1520,6 @@ def run():
             
             with portfolio_tab:
                 st.subheader("Portfolio Optimization ($10,000 Capital)")
-                
                 if not buy_df.empty:
                     col1, col2 = st.columns([3, 2])
                     with col1:
@@ -1421,79 +1530,69 @@ def run():
                             use_container_width=True,
                             height=250
                         )
+                        selected_symbol = st.selectbox("Select Symbol for OTM Flows", buy_df['Symbol'].tolist(), key="portfolio_otm_select")
+                        if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_portfolio_{selected_symbol}"):
+                            st.session_state['otm_flows']['symbol'] = selected_symbol
+                            st.session_state['otm_flows']['show'] = True
+                            with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                                otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                                st.session_state['otm_flows']['data'] = otm_flows
+                        
+                        if (st.session_state['otm_flows']['show'] and 
+                            st.session_state['otm_flows']['symbol'] == selected_symbol):
+                            otm_flows = st.session_state['otm_flows']['data']
+                            if otm_flows is not None and not otm_flows.empty:
+                                with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                                    st.dataframe(otm_flows.style.format({
+                                        'Transaction Value': '${:,.2f}',
+                                        'Last Price': '${:.2f}',
+                                        'Volume': '{:,.0f}'
+                                    }))
+                                    fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                                    color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                                    hover_data=['Expiration', 'Volume', 'Last Price'])
+                                    st.plotly_chart(fig_otm)
+                                    if st.button("Hide OTM Flows", key=f"hide_otm_portfolio_{selected_symbol}"):
+                                        st.session_state['otm_flows']['show'] = False
+                                        st.session_state['otm_flows']['data'] = None
+                            else:
+                                st.warning(f"No OTM flows found for {selected_symbol}.")
+                                st.session_state['otm_flows']['show'] = False
+                                st.session_state['otm_flows']['data'] = None
                     with col2:
-                        fig = px.pie(
-                            buy_df, 
-                            values='Cost', 
-                            names='Symbol', 
-                            title="Portfolio Allocation",
-                            color_discrete_sequence=px.colors.qualitative.G10,
-                            hole=0.4
-                        )
-                        fig.update_layout(
-                            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
-                            margin=dict(l=20, r=20, t=40, b=20)
-                        )
+                        fig = px.pie(buy_df, values='Cost', names='Symbol', title="Portfolio Allocation",
+                                    color_discrete_sequence=px.colors.qualitative.G10, hole=0.4)
+                        fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+                                         margin=dict(l=20, r=20, t=40, b=20))
                         fig.update_traces(textposition='inside', textinfo='percent+label')
                         st.plotly_chart(fig, use_container_width=True)
-                    
-                    #                     st.subheader("Allocation by Sector/Industry")
-                    #                     if 'Sector' in buy_df.columns:
-                    #                         fig_treemap = px.treemap(
-                    #                             buy_df, 
-                    #                             path=['Sector', 'Symbol'], 
-                    #                             values='Cost',
-                    #                             color='Cost',
-                    #                             color_continuous_scale='Viridis',
-                    #                             title="Hierarchical View by Sector"
-                    #                         )
-                    #                         fig_treemap.update_layout(margin=dict(l=20, r=20, t=40, b=20), height=400)
-                    #                         st.plotly_chart(fig_treemap, use_container_width=True)
-                    #                     else:
-                    #                         st.info("Sector data not available for hierarchical visualization.")
                 else:
                     st.info("Insufficient data for portfolio optimization. Try adjusting filters or updating stock data.")
             
             with insights_tab:
                 st.subheader("Market Trend Analysis")
-                
                 insight_cols = st.columns(2)
                 with insight_cols[0]:
                     st.write("#### Accumulation Patterns")
-                    if not report_data.get('accumulation_df', pd.DataFrame()).empty:
-                        acc_df = report_data['accumulation_df']
-                        st.dataframe(
-                            acc_df.style.background_gradient(subset=['Avg Buy/Sell Ratio'], cmap='Greens'),
-                            use_container_width=True,
-                            height=200
-                        )
-                        if len(acc_df) > 0:
-                            fig_acc = px.bar(
-                                acc_df.head(5),
-                                x='Symbol',
-                                y='Avg Buy/Sell Ratio',
-                                title="Top Accumulation Stocks",
-                                color='Avg Buy/Sell Ratio',
-                                color_continuous_scale='Greens'
-                            )
+                    if not accumulation_df.empty:
+                        st.dataframe(accumulation_df.style.background_gradient(subset=['Avg Buy/Sell Ratio'], cmap='Greens'),
+                                    use_container_width=True, height=200)
+                        if len(accumulation_df) > 0:
+                            fig_acc = px.bar(accumulation_df.head(5), x='Symbol', y='Avg Buy/Sell Ratio',
+                                            title="Top Accumulation Stocks", color='Avg Buy/Sell Ratio',
+                                            color_continuous_scale='Greens')
                             fig_acc.update_layout(height=250)
                             st.plotly_chart(fig_acc, use_container_width=True)
                     else:
                         st.info("No accumulation patterns detected.")
                     
                     st.write("#### Sector Buying Trends")
-                    if not report_data.get('buying_sectors_df', pd.DataFrame()).empty:
-                        buying_df = report_data['buying_sectors_df']
-                        st.dataframe(buying_df, use_container_width=True, height=200)
-                        if len(buying_df) > 0:
-                            fig_sectors = px.bar(
-                                buying_df,
-                                x='Sector',
-                                y='Avg Buy/Sell Ratio',
-                                title="Sectors with Strong Buying",
-                                color='Avg Buy/Sell Ratio',
-                                color_continuous_scale='Blues'
-                            )
+                    if not buying_sectors_df.empty:
+                        st.dataframe(buying_sectors_df, use_container_width=True, height=200)
+                        if len(buying_sectors_df) > 0:
+                            fig_sectors = px.bar(buying_sectors_df, x='Sector', y='Avg Buy/Sell Ratio',
+                                                title="Sectors with Strong Buying", color='Avg Buy/Sell Ratio',
+                                                color_continuous_scale='Blues')
                             fig_sectors.update_layout(height=250)
                             st.plotly_chart(fig_sectors, use_container_width=True)
                     else:
@@ -1501,70 +1600,75 @@ def run():
                 
                 with insight_cols[1]:
                     st.write("#### Distribution Patterns")
-                    if not report_data.get('distribution_df', pd.DataFrame()).empty:
-                        dist_df = report_data['distribution_df']
-                        st.dataframe(
-                            dist_df.style.background_gradient(subset=['Avg Buy/Sell Ratio'], cmap='Reds'),
-                            use_container_width=True,
-                            height=200
-                        )
-                        if len(dist_df) > 0:
-                            fig_dist = px.bar(
-                                dist_df.head(5),
-                                x='Symbol',
-                                y='Avg Buy/Sell Ratio',
-                                title="Top Distribution Stocks",
-                                color='Avg Buy/Sell Ratio',
-                                color_continuous_scale='Reds'
-                            )
+                    if not distribution_df.empty:
+                        st.dataframe(distribution_df.style.background_gradient(subset=['Avg Buy/Sell Ratio'], cmap='Reds'),
+                                    use_container_width=True, height=200)
+                        if len(distribution_df) > 0:
+                            fig_dist = px.bar(distribution_df.head(5), x='Symbol', y='Avg Buy/Sell Ratio',
+                                            title="Top Distribution Stocks",
+                                            # --- CUT OFF HERE ---
+                                            color='Avg Buy/Sell Ratio', color_continuous_scale='Reds')
                             fig_dist.update_layout(height=250)
                             st.plotly_chart(fig_dist, use_container_width=True)
                     else:
                         st.info("No distribution patterns detected.")
                     
                     st.write("#### Sector Selling Trends")
-                    if not report_data.get('selling_sectors_df', pd.DataFrame()).empty:
-                        selling_df = report_data['selling_sectors_df']
-                        st.dataframe(selling_df, use_container_width=True, height=200)
-                        if len(selling_df) > 0:
-                            fig_sectors_sell = px.bar(
-                                selling_df,
-                                x='Sector',
-                                y='Avg Buy/Sell Ratio',
-                                title="Sectors with Strong Selling",
-                                color='Avg Buy/Sell Ratio',
-                                color_continuous_scale='Reds'
-                            )
+                    if not selling_sectors_df.empty:
+                        st.dataframe(selling_sectors_df, use_container_width=True, height=200)
+                        if len(selling_sectors_df) > 0:
+                            fig_sectors_sell = px.bar(selling_sectors_df, x='Sector', y='Avg Buy/Sell Ratio',
+                                                    title="Sectors with Strong Selling", color='Avg Buy/Sell Ratio',
+                                                    color_continuous_scale='Reds')
                             fig_sectors_sell.update_layout(height=250)
                             st.plotly_chart(fig_sectors_sell, use_container_width=True)
                     else:
                         st.info("No sectors with significant selling trends detected.")
                 
                 st.write("#### Stocks with Rising Buy/Sell Ratios")
-                if not report_data.get('rising_df', pd.DataFrame()).empty:
-                    rising_df = report_data['rising_df']
-                    st.dataframe(
-                        rising_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'),
-                        use_container_width=True,
-                        height=200
-                    )
+                if not rising_df.empty:
+                    st.dataframe(rising_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'),
+                                use_container_width=True, height=200)
                     if len(rising_df) > 0:
-                        fig_rising = px.bar(
-                            rising_df.head(10),
-                            x='Symbol',
-                            y='Ratio Increase',
-                            title="Top 10 Stocks with Rising Buy/Sell Ratios",
-                            color='Ratio Increase',
-                            color_continuous_scale='YlGnBu'
-                        )
+                        fig_rising = px.bar(rising_df.head(10), x='Symbol', y='Ratio Increase',
+                                            title="Top 10 Stocks with Rising Buy/Sell Ratios",
+                                            color='Ratio Increase', color_continuous_scale='YlGnBu')
                         fig_rising.update_layout(height=350)
                         st.plotly_chart(fig_rising, use_container_width=True)
+                    selected_symbol = st.selectbox("Select Symbol for OTM Flows", rising_df['Symbol'].tolist(), key="rising_insights_otm_select")
+                    if st.button(f"Show Top 10 OTM Flows for {selected_symbol}", key=f"otm_rising_insights_{selected_symbol}"):
+                        st.session_state['otm_flows']['symbol'] = selected_symbol
+                        st.session_state['otm_flows']['show'] = True
+                        with st.spinner(f"Fetching OTM flows for {selected_symbol}..."):
+                            otm_flows = fetch_top_10_otm_flows(selected_symbol, urls)
+                            st.session_state['otm_flows']['data'] = otm_flows
+                    
+                    if (st.session_state['otm_flows']['show'] and 
+                        st.session_state['otm_flows']['symbol'] == selected_symbol):
+                        otm_flows = st.session_state['otm_flows']['data']
+                        if otm_flows is not None and not otm_flows.empty:
+                            with st.expander(f"Top 10 OTM Flows for {selected_symbol}", expanded=True):
+                                st.dataframe(otm_flows.style.format({
+                                    'Transaction Value': '${:,.2f}',
+                                    'Last Price': '${:.2f}',
+                                    'Volume': '{:,.0f}'
+                                }))
+                                fig_otm = px.bar(otm_flows, x='Strike Price', y='Transaction Value',
+                                                color='Call/Put', title=f"Top 10 OTM Flows for {selected_symbol}",
+                                                hover_data=['Expiration', 'Volume', 'Last Price'])
+                                st.plotly_chart(fig_otm)
+                                if st.button("Hide OTM Flows", key=f"hide_otm_rising_insights_{selected_symbol}"):
+                                    st.session_state['otm_flows']['show'] = False
+                                    st.session_state['otm_flows']['data'] = None
+                        else:
+                            st.warning(f"No OTM flows found for {selected_symbol}.")
+                            st.session_state['otm_flows']['show'] = False
+                            st.session_state['otm_flows']['data'] = None
                 else:
                     st.info("No stocks with rising buy/sell ratios detected.")
             
             with recommendations_tab:
                 st.subheader("Trading Recommendations")
-                
                 rec_col1, rec_col2 = st.columns(2)
                 
                 with rec_col1:
@@ -1572,24 +1676,13 @@ def run():
                     if not buy_df.empty:
                         min_signal = st.slider("Minimum Signal Strength", 1.0, 10.0, 3.0, step=0.1, key="min_buy_signal")
                         filtered_buy = buy_df[buy_df['Signal Strength'] >= min_signal]
-                        
                         if not filtered_buy.empty:
-                            st.dataframe(
-                                filtered_buy[['Symbol', 'Price', 'Reason', 'Signal Strength']]
-                                .style.background_gradient(subset=['Signal Strength'], cmap='Greens'),
-                                use_container_width=True,
-                                height=300
-                            )
-                            
-                            fig_buy_rec = px.bar(
-                                filtered_buy.head(7),
-                                x='Symbol',
-                                y='Signal Strength',
-                                title="Top Buy Recommendations",
-                                color='Signal Strength',
-                                color_continuous_scale='Greens',
-                                hover_data=['Price', 'Reason']
-                            )
+                            st.dataframe(filtered_buy[['Symbol', 'Price', 'Reason', 'Signal Strength']]
+                                        .style.background_gradient(subset=['Signal Strength'], cmap='Greens'),
+                                        use_container_width=True, height=300)
+                            fig_buy_rec = px.bar(filtered_buy.head(7), x='Symbol', y='Signal Strength',
+                                                title="Top Buy Recommendations", color='Signal Strength',
+                                                color_continuous_scale='Greens', hover_data=['Price', 'Reason'])
                             fig_buy_rec.update_layout(height=300)
                             st.plotly_chart(fig_buy_rec, use_container_width=True)
                         else:
@@ -1603,29 +1696,16 @@ def run():
                     if not sell_df.empty:
                         if 'Signal Strength' not in sell_df.columns:
                             sell_df['Signal Strength'] = [round(random.uniform(5, 10), 1) for _ in range(len(sell_df))]
-                        
                         sell_df['Reason'] = 'Distribution'
-                        
                         min_sell_signal = st.slider("Minimum Signal Strength", 1.0, 10.0, 5.0, step=0.1, key="min_sell_signal")
                         filtered_sell = sell_df[sell_df['Signal Strength'] >= min_sell_signal]
-                        
                         if not filtered_sell.empty:
-                            st.dataframe(
-                                filtered_sell[['Symbol', 'Price', 'Reason', 'Signal Strength']]
-                                .style.background_gradient(subset=['Signal Strength'], cmap='Reds'),
-                                use_container_width=True,
-                                height=300
-                            )
-                            
-                            fig_sell_rec = px.bar(
-                                filtered_sell.head(7),
-                                x='Symbol',
-                                y='Signal Strength',
-                                title="Top Sell/Short Recommendations",
-                                color='Signal Strength',
-                                color_continuous_scale='Reds',
-                                hover_data=['Price', 'Reason']
-                            )
+                            st.dataframe(filtered_sell[['Symbol', 'Price', 'Reason', 'Signal Strength']]
+                                        .style.background_gradient(subset=['Signal Strength'], cmap='Reds'),
+                                        use_container_width=True, height=300)
+                            fig_sell_rec = px.bar(filtered_sell.head(7), x='Symbol', y='Signal Strength',
+                                                title="Top Sell/Short Recommendations", color='Signal Strength',
+                                                color_continuous_scale='Reds', hover_data=['Price', 'Reason'])
                             fig_sell_rec.update_layout(height=300)
                             st.plotly_chart(fig_sell_rec, use_container_width=True)
                         else:
@@ -1634,7 +1714,6 @@ def run():
                         st.info("No strong sell/short candidates identified.")
         else:
             st.info("👆 Click 'Generate Portfolio Allocation' to create a comprehensive report with allocation recommendations.")
-            
             with st.expander("Preview of Portfolio Analysis"):
                 st.write("The report will include:")
                 st.write("- Portfolio allocation recommendations based on $10,000 capital")
@@ -1642,9 +1721,9 @@ def run():
                 st.write("- Market insights including accumulation and distribution patterns")
                 st.write("- Sector rotation analysis")
                 st.write("- Specific buy and sell recommendations with signal strength")
-                
                 st.image("https://via.placeholder.com/800x400?text=Sample+Portfolio+Report", 
                         caption="Sample portfolio allocation visualization")
-
+    
 if __name__ == "__main__":
     run()
+
