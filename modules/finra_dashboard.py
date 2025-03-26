@@ -31,10 +31,12 @@ theme_mapping = {
         "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"
     ],
     "Artificial Intelligence": [
-        "NVDA", "GOOGL", "MSFT", "AMD", "PLTR", "SNOW", "AI", "CRM", "IBM"
+        "NVDA", "GOOGL", "MSFT", "AMD", "PLTR", "SNOW", "AI", "CRM", "IBM", 
+        "AAPL", "ADBE", "MSCI", "DELL", "BIDU"
     ],
     "Quantum Computing": [
-        "IBM", "GOOGL", "MSFT", "RGTI", "IONQ", "QUBT", "HON"
+        "IBM", "GOOGL", "MSFT", "RGTI", "IONQ", "QUBT", "HON", 
+        "QCOM", "INTC", "AMAT", "MKSI", "NTNX"
     ],
     "Clean Energy": [
         "TSLA", "ENPH", "FSLR", "NEE", "PLUG", "SEDG", "RUN"
@@ -158,6 +160,36 @@ theme_mapping = {
     ],
     "Communication Services": [
         "GOOGL", "META", "DIS", "NFLX", "VZ", "CMCSA", "T", "TMUS", "EA"
+    ],
+    "Renewable Energy Storage": [
+        "PLUG", "STEM", "BESS", "SUNL", "PWR", "FCEL", "SPWR", "BLDP", "NGP"
+    ],
+    "Smart Home Technology": [
+        "GOOGL", "AMZN", "AAPL", "NVDA", "ROKU", "SONOS", "Z", "ZBRA", "STZ"
+    ],
+    "Advanced Materials": [
+        "LYB", "DOW", "DD", "AXLL", "ALB", "BASFY", "MKFG", "NKLA", "LTHM"
+    ],
+    "Green Transportation": [
+        "CHPT", "BLNK", "WKHS", "FSR", "GOEV", "KNDI", "SOLO", "JCI", "LAZR"
+    ],
+    "Sustainable Agriculture Tech": [
+        "DESP", "RGEN", "HSKA", "CFIV", "TNIE", "SCLX", "VERY", "CHNC", "CATC"
+    ],
+    "Emerging Markets Tech": [
+        "BABA", "JD", "BIDU", "SE", "TCEHY", "MELI", "GLOB", "NTES", "KWEB"
+    ],
+    "Aerospace Innovation": [
+        "ASTR", "VELO", "RKT", "SRAC", "VACQ", "BKSY", "PL", "UFO", "ARKX"
+    ],
+    "Mental Health & Wellness Tech": [
+        "VIGI", "MMED", "CMPS", "MYND", "WNDW", "Mind", "GPFT", "RDHL", "PSYC"
+    ],
+    "Advanced Robotics": [
+        "CGNX", "ADSK", "CAT", "HUBB", "KRNS", "RAAS", "ZBRA", "OMCL", "MKSI"
+    ],
+    "Digital Payment Innovations": [
+        "MA", "V", "PYPL", "SQ", "MELI", "BABA", "ADYEY", "TCEHY", "WU"
     ]
 }
 
