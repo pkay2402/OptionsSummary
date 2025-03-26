@@ -648,6 +648,17 @@ def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, 
                     'Days of Data': num_days
                 })
     
+    # Debugging: Check stock_results
+    print("Stock Results:", stock_results)
+    
+    # Ensure stock_results contains the required keys
+    if stock_results and all(key in stock_results[0] for key in ['Ratio Increase', 'Total Volume']):
+        stock_df = pd.DataFrame(stock_results).sort_values(by=['Ratio Increase', 'Total Volume'], ascending=False)[:40]
+    else:
+        logger.error("Missing required keys in stock_results. Returning empty DataFrame.")
+        stock_df = pd.DataFrame()
+    
+    # Process themes (unchanged)
     theme_results = []
     theme_top_stocks = {}
     for theme, theme_symbols in theme_mapping.items():
@@ -671,10 +682,11 @@ def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, 
                         theme_stock_results.append({
                             'Symbol': symbol,
                             'Price': round(stock_info['price'], 2),
-                            'Ratio Increase': round(ratios[-1] - ratios[0], 2),
+                            'Market Cap (M)': round(stock_info['market_cap'] / 1_000_000, 2),
                             'Starting Ratio': round(ratios[0], 2),
                             'Ending Ratio': round(ratios[-1], 2),
-                            'Avg Daily Volume': int(sum(symbol_data[symbol]['volumes']) / len(symbol_data[symbol]['volumes']))
+                            'Ratio Increase': round(ratios[-1] - ratios[0], 2),
+                            'Dips': dips
                         })
         
         if valid_symbols >= 3 and theme_ratios:
@@ -703,7 +715,6 @@ def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, 
         else:
             logger.info(f"Theme '{theme}' skipped: insufficient valid symbols ({valid_symbols}) or no ratios.")
     
-    stock_df = pd.DataFrame(stock_results).sort_values(by=['Ratio Increase', 'Total Volume'], ascending=False)[:40]
     theme_df = pd.DataFrame(theme_results).sort_values(by=['Ratio Increase', 'Avg Daily Volume'], ascending=False)
     return stock_df, theme_df, theme_top_stocks
 
@@ -1430,9 +1441,15 @@ def run():
                                 with col1:
                                     st.dataframe(top_stocks_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'), use_container_width=True)
                                 with col2:
-                                    fig_top = px.bar(top_stocks_df, x='Symbol', y='Ratio Increase', title=f"Top 5 Stocks in {theme}",
-                                                    hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Price'],
-                                                    color='Ratio Increase', color_continuous_scale='YlGnBu')
+                                    fig_top = px.bar(
+                                        top_stocks_df,
+                                        x='Symbol',
+                                        y='Ratio Increase',
+                                        title=f"Top 5 Stocks in {theme}",
+                                        hover_data=['Starting Ratio', 'Ending Ratio', 'Price', 'Market Cap (M)', 'Dips'],  # Removed 'Avg Daily Volume'
+                                        color='Ratio Increase',
+                                        color_continuous_scale='YlGnBu'
+                                    )
                                     fig_top.update_layout(xaxis_tickangle=0, height=300)
                                     st.plotly_chart(fig_top, use_container_width=True)
                             else:
