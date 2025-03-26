@@ -696,7 +696,7 @@ def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, 
                         'Stocks Analyzed': valid_symbols,
                         'Slope': round(slope, 4)
                     })
-                    top_stocks = sorted(theme_stock_results, key=lambda x: x['Ratio Increase'], reverse=True)[:3]
+                    top_stocks = sorted(theme_stock_results, key=lambda x: x['Ratio Increase'], reverse=True)[:5]
                     theme_top_stocks[theme] = pd.DataFrame(top_stocks)
             else:
                 logger.warning(f"Theme '{theme}' has inconsistent or no ratio data.")
@@ -1423,14 +1423,14 @@ def run():
                     
                     st.subheader("Top Stocks by Theme")
                     for theme in theme_top_stocks:
-                        with st.expander(f"{theme} - Top 3 Stocks"):
+                        with st.expander(f"{theme} - Top 5 Stocks"):
                             top_stocks_df = theme_top_stocks[theme]
                             if not top_stocks_df.empty:
                                 col1, col2 = st.columns([2, 3])
                                 with col1:
                                     st.dataframe(top_stocks_df.style.background_gradient(subset=['Ratio Increase'], cmap='YlGn'), use_container_width=True)
                                 with col2:
-                                    fig_top = px.bar(top_stocks_df, x='Symbol', y='Ratio Increase', title=f"Top 3 Stocks in {theme}",
+                                    fig_top = px.bar(top_stocks_df, x='Symbol', y='Ratio Increase', title=f"Top 5 Stocks in {theme}",
                                                     hover_data=['Starting Ratio', 'Ending Ratio', 'Avg Daily Volume', 'Price'],
                                                     color='Ratio Increase', color_continuous_scale='YlGnBu')
                                     fig_top.update_layout(xaxis_tickangle=0, height=300)
@@ -1758,4 +1758,3 @@ def run():
     
 if __name__ == "__main__":
     run()
-
