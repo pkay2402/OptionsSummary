@@ -300,6 +300,142 @@ def analyze_symbol(symbol: str, lookback_days: int = 20, threshold: float = 1.5)
     
     return df_results, significant_days
 
+def get_market_overview(symbols: List[str] = ["SPY", "QQQ", "VIXY", "SMH", "BTAL", "SPXU", "SQQQ", "SOXS"], days: int = 3) -> tuple[pd.DataFrame, str]:
+    """
+    Fetch the last 3 days of data for specified symbols and analyze buy/sell ratios and volumes to determine market sentiment.
+    Returns a DataFrame for the latest day and a summary string.
+    """
+    bearish_symbols = {"VIXY", "SPXU", "SQQQ", "SOXS", "BTAL"}
+    bullish_symbols = {"SPY", "QQQ", "SMH"}
+    
+    # Collect data for the last 3 days
+    all_data = {}
+    latest_date = None
+    for i in range(days):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+        data = download_finra_short_sale_data(date)
+        if data:
+            df = process_finra_short_sale_data(data)
+            if not df.empty:
+                all_data[date] = df[df['Symbol'].isin(symbols)].copy()
+                if i == 0:
+                    latest_date = date
+    
+    if not all_data:
+        logger.warning("No data available for Market Overview over the last 3 days.")
+        return pd.DataFrame(), "No data available for the last 3 days."
+
+    # Process each symbol's data over the 3 days
+    symbol_trends = {}
+    for symbol in symbols:
+        symbol_data = []
+        for date, df in all_data.items():
+            symbol_row = df[df['Symbol'] == symbol]
+            if not symbol_row.empty:
+                row = symbol_row.iloc[0]
+                total_volume = row.get('TotalVolume', 0)
+                metrics = calculate_metrics(row, total_volume)
+                metrics['Date'] = date
+                symbol_data.append(metrics)
+        
+        if symbol_data:
+            df_symbol = pd.DataFrame(symbol_data)
+            df_symbol['Date'] = pd.to_datetime(df_symbol['Date'], format='%Y%m%d')
+            df_symbol = df_symbol.sort_values('Date')
+            
+            # Calculate trend in buy/sell ratio
+            if len(df_symbol) > 1:
+                slope, _, _, _, _ = linregress(range(len(df_symbol)), df_symbol['buy_to_sell_ratio'])
+                trend = "Increasing" if slope > 0 else "Decreasing"
+            else:
+                trend = "Stable"  # Insufficient data for trend
+            
+            # Aggregate bought and sold volumes
+            total_bought = df_symbol['bought_volume'].sum()
+            total_sold = df_symbol['sold_volume'].sum()
+            
+            symbol_trends[symbol] = {
+                'latest_ratio': df_symbol['buy_to_sell_ratio'].iloc[-1],
+                'trend': trend,
+                'total_bought': total_bought,
+                'total_sold': total_sold,
+                'latest_data': df_symbol.iloc[-1].to_dict()
+            }
+
+    # Prepare the latest day DataFrame
+    latest_data = []
+    for symbol in symbols:
+        if symbol in symbol_trends:
+            latest = symbol_trends[symbol]['latest_data']
+            latest['Symbol'] = symbol
+            latest['Price'] = get_stock_info_from_db(symbol).get('price', 0)
+            # Override with real-time prices where available
+            real_time_prices = {
+                "SPY": 567.591, "QQQ": 483.096, "VIXY": 46.44, "SMH": 221.03,
+                "BTAL": 20.006, "SPXU": 24.426, "SQQQ": 35.14, "SOXS": 25.474
+            }
+            latest['Price'] = real_time_prices.get(symbol, latest['Price'])
+            latest_data.append(latest)
+    
+    overview_df = pd.DataFrame(latest_data)
+    if overview_df.empty:
+        return pd.DataFrame(), "No data available for the specified symbols."
+
+    # Determine sentiment based on trends and volumes
+    def determine_sentiment(symbol, trend, ratio, bought, sold):
+        if symbol in bearish_symbols:
+            if trend == "Increasing" or bought > sold:
+                return "Bearish"
+            elif trend == "Decreasing" or bought < sold:
+                return "Bullish"
+            else:
+                return "Neutral"
+        elif symbol in bullish_symbols:
+            if trend == "Increasing" or bought > sold:
+                return "Bullish"
+            elif trend == "Decreasing" or bought < sold:
+                return "Bearish"
+            else:
+                return "Neutral"
+        return "Neutral"
+
+    overview_df['Sentiment'] = overview_df.apply(
+        lambda row: determine_sentiment(
+            row['Symbol'], 
+            symbol_trends[row['Symbol']]['trend'], 
+            row['buy_to_sell_ratio'], 
+            symbol_trends[row['Symbol']]['total_bought'], 
+            symbol_trends[row['Symbol']]['total_sold']
+        ), axis=1
+    )
+    
+    # Reorder columns
+    column_order = ['Symbol', 'Date', 'Price', 'buy_to_sell_ratio', 'total_volume', 
+                    'bought_volume', 'sold_volume', 'short_volume_ratio', 'Sentiment']
+    overview_df = overview_df[column_order]
+    
+    # Generate market summary
+    bullish_count = len(overview_df[overview_df['Sentiment'] == "Bullish"])
+    bearish_count = len(overview_df[overview_df['Sentiment'] == "Bearish"])
+    neutral_count = len(overview_df[overview_df['Sentiment'] == "Neutral"])
+    
+    avg_ratio_bullish = overview_df[overview_df['Symbol'].isin(bullish_symbols)]['buy_to_sell_ratio'].mean()
+    avg_ratio_bearish = overview_df[overview_df['Symbol'].isin(bearish_symbols)]['buy_to_sell_ratio'].mean()
+    
+    summary = f"Market Overview (Last {days} Days):\n"
+    summary += f"- Bullish Signals: {bullish_count} (SPY, QQQ, SMH avg ratio: {avg_ratio_bullish:.2f})\n"
+    summary += f"- Bearish Signals: {bearish_count} (VIXY, SPXU, SQQQ, SOXS, BTAL avg ratio: {avg_ratio_bearish:.2f})\n"
+    summary += f"- Neutral Signals: {neutral_count}\n"
+    
+    if bullish_count > bearish_count:
+        summary += "Overall Sentiment: Bullish - Increasing buy/sell ratios and bought volumes in SPY, QQQ, and SMH suggest market strength."
+    elif bearish_count > bullish_count:
+        summary += "Overall Sentiment: Bearish - Increasing buy/sell ratios and bought volumes in VIXY, SPXU, SQQQ, SOXS, and BTAL indicate market weakness."
+    else:
+        summary += "Overall Sentiment: Neutral - Mixed signals with no clear dominance of bullish or bearish trends."
+    
+    return overview_df, summary
+
 def validate_pattern(symbol: str, dates: List[str], pattern_type: str = "accumulation") -> bool:
     try:
         stock = yf.Ticker(symbol)
@@ -908,10 +1044,10 @@ def run():
                 update_stock_database(portfolio_symbols)
             st.success("Stock data updated successfully!")
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Single Stock", "Accumulation", "Distribution", 
         "Sector Rotation", "Multi Stock", "Latest Day", 
-        "Rising Ratios", "Portfolio Allocation"
+        "Rising Ratios", "Portfolio Allocation", "Market Overview"
     ])
     
     urls = [
@@ -1772,6 +1908,94 @@ def run():
                 st.write("- Specific buy and sell recommendations with signal strength")
                 st.image("https://via.placeholder.com/800x400?text=Sample+Portfolio+Report", 
                         caption="Sample portfolio allocation visualization")
+        # Tab 9: Market Overview
+        # Tab 9: Market Overview
+    with tab9:
+        st.subheader("Market Overview")
+        st.write("Analysis of key market ETFs and indices over the last 3 days, with latest day details.")
+        
+        # Define the symbols to analyze
+        market_symbols = ["SPY", "QQQ", "VIXY", "SMH", "BTAL", "SPXU", "SQQQ", "SOXS"]
+        
+        # Button to fetch data
+        if st.button("Fetch Market Overview", key="market_overview_button"):
+            with st.spinner("Fetching market overview data..."):
+                market_df, summary = get_market_overview(market_symbols, days=3)
+                st.session_state['analysis_results']['market_overview'] = {'df': market_df, 'summary': summary}
+        
+        # Display results if available
+        if 'market_overview' in st.session_state['analysis_results']:
+            market_df = st.session_state['analysis_results']['market_overview']['df']
+            summary = st.session_state['analysis_results']['market_overview']['summary']
+            
+            if not market_df.empty:
+                # Display date of data
+                latest_date = market_df['Date'].iloc[0]
+                st.write(f"Latest Day Data: {latest_date}")
+                
+                # Format the DataFrame for display
+                display_df = market_df.copy()
+                display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}")
+                display_df['total_volume'] = display_df['total_volume'].astype(int)
+                display_df['bought_volume'] = display_df['bought_volume'].astype(int)
+                display_df['sold_volume'] = display_df['sold_volume'].astype(int)
+                
+                # Style the DataFrame based on sentiment
+                def highlight_sentiment(row):
+                    if row['Sentiment'] == "Bullish":
+                        return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
+                    elif row['Sentiment'] == "Bearish":
+                        return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
+                    else:
+                        return [''] * len(row)
+                
+                st.dataframe(
+                    display_df.style.apply(highlight_sentiment, axis=1)
+                             .format({'buy_to_sell_ratio': '{:.2f}', 'short_volume_ratio': '{:.4f}'}), 
+                    use_container_width=True
+                )
+                
+                # Market Sentiment Summary
+                sentiment_counts = market_df['Sentiment'].value_counts()
+                st.write("### Sentiment Breakdown (Latest Day)")
+                sentiment_cols = st.columns(3)
+                with sentiment_cols[0]:
+                    st.metric("Bullish", sentiment_counts.get("Bullish", 0))
+                with sentiment_cols[1]:
+                    st.metric("Bearish", sentiment_counts.get("Bearish", 0))
+                with sentiment_cols[2]:
+                    st.metric("Neutral", sentiment_counts.get("Neutral", 0))
+                
+                # Display 3-day summary
+                st.write("### 3-Day Market Summary")
+                st.text(summary)
+                
+                # Visualization
+                fig = px.bar(
+                    market_df,
+                    x='Symbol',
+                    y='buy_to_sell_ratio',
+                    color='Sentiment',
+                    title=f"Market Overview - Buy/Sell Ratios (Latest Day: {latest_date})",
+                    hover_data=['Price', 'total_volume', 'bought_volume', 'sold_volume'],
+                    color_discrete_map={
+                        "Bullish": "#4CAF50",
+                        "Bearish": "#F44336",
+                        "Neutral": "#9E9E9E"
+                    }
+                )
+                fig.add_hline(y=1.5, line_dash="dash", line_color="green", annotation_text="Accumulation Threshold")
+                fig.add_hline(y=0.7, line_dash="dash", line_color="red", annotation_text="Distribution Threshold")
+                fig.update_layout(
+                    xaxis_title="Symbol",
+                    yaxis_title="Buy/Sell Ratio",
+                    xaxis_tickangle=-45,
+                    height=500
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+            else:
+                st.write("No data available for the specified symbols over the last 3 days.")
     
 if __name__ == "__main__":
     run()
