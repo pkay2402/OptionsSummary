@@ -158,7 +158,7 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
             newsletter += f"Total Contracts: {total_volume:,}\n"
             newsletter += f"Put/Call Premium Ratio: {pc_ratio:.2f}\n\n"
             
-            key_flows = market_df.nlargest(3, 'Premium Price')
+            key_flows = market_df.nlargest(7, 'Premium Price')
             newsletter += "Key Market Flows:\n"
             for idx, flow in key_flows.iterrows():
                 move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
