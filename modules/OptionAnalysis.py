@@ -134,7 +134,7 @@ def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, t
     
     # Section 1: Market Update (SPY & QQQ)
     newsletter += "=== MARKET UPDATE (OTM FLOWS) ===\n"
-    market_tickers = ['SPY', 'QQQ']
+    market_tickers = ['SPY', 'QQQ', 'DIA', 'IWM','VXX','SMH']
     market_df = df[df['Ticker'].isin(market_tickers)].copy()
     
     if market_df.empty:
@@ -328,7 +328,7 @@ def main():
                     
                     top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=200, value=100)
                     premium_price = st.number_input("Minimum Premium Price", min_value=0, value=150000)
-                    side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'BB'])
+                    side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'A'])
                     with st.expander("Select Tickers", expanded=False):
                         tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
                     sort_by = st.selectbox("Sort By", options=["Ticker", "Premium Price"])
