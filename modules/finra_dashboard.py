@@ -851,7 +851,12 @@ def find_rising_ratio_stocks(lookback_days: int = 10, min_volume: int = 500000, 
         else:
             logger.info(f"Theme '{theme}' skipped: insufficient valid symbols ({valid_symbols}) or no ratios.")
     
-    theme_df = pd.DataFrame(theme_results).sort_values(by=['Ratio Increase', 'Avg Daily Volume'], ascending=False)
+    # Check if theme_results is empty before creating theme_df
+    if theme_results:
+        theme_df = pd.DataFrame(theme_results).sort_values(by=['Ratio Increase', 'Avg Daily Volume'], ascending=False)
+    else:
+        logger.warning("No themes met the criteria for analysis.")
+        theme_df = pd.DataFrame()
     return stock_df, theme_df, theme_top_stocks
 
 def generate_evening_report(capital: float = 10000, run_on_demand: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
