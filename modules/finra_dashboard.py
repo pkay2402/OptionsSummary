@@ -449,6 +449,143 @@ def check_and_setup_database() -> None:
 
 check_and_setup_database()
 
+# ... (Your existing imports and helper functions remain unchanged) ...
+
+def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
+    """
+    Analyze FINRA data to identify stocks with bought volume > 2x sold volume
+    and sold volume > 2x bought volume.
+    Returns two DataFrames (high_buy_df, high_sell_df) and the date of the data.
+    """
+    # Get unique symbols across all themes and assign a single theme per symbol
+    symbol_themes = {}
+    for theme, symbols in theme_mapping.items():
+        for symbol in symbols:
+            if symbol not in symbol_themes:  # Assign to the first theme encountered
+                symbol_themes[symbol] = theme
+    
+    all_symbols = list(symbol_themes.keys())
+    
+    # Fetch latest data
+    latest_df, latest_date = get_latest_data(all_symbols)
+    if latest_df.empty or latest_date is None:
+        return pd.DataFrame(), pd.DataFrame(), None
+    
+    # Calculate metrics for each stock
+    metrics_list = []
+    for _, row in latest_df.iterrows():
+        total_volume = row.get('TotalVolume', 0)
+        metrics = calculate_metrics(row, total_volume)
+        metrics['Symbol'] = row['Symbol']
+        metrics['TotalVolume'] = total_volume
+        metrics_list.append(metrics)
+    
+    df = pd.DataFrame(metrics_list)
+    
+    # Remove duplicates by symbol, keeping the first occurrence
+    df = df.drop_duplicates(subset=['Symbol'], keep='first')
+    
+    # Assign themes to symbols
+    df['Theme'] = df['Symbol'].map(symbol_themes)
+    
+    # Filter for high buy and high sell stocks
+    high_buy_df = df[df['bought_volume'] > 2 * df['sold_volume']].copy()
+    high_sell_df = df[df['sold_volume'] > 2 * df['bought_volume']].copy()
+    
+    # Sort and select relevant columns
+    columns = ['Symbol', 'Theme', 'buy_to_sell_ratio', 'bought_volume', 'sold_volume', 'total_volume']
+    if not high_buy_df.empty:
+        high_buy_df = high_buy_df[columns].sort_values(by='buy_to_sell_ratio', ascending=False)
+        for col in ['bought_volume', 'sold_volume', 'total_volume']:
+            high_buy_df[col] = high_buy_df[col].astype(int)
+        high_buy_df['buy_to_sell_ratio'] = high_buy_df['buy_to_sell_ratio'].round(2)
+    
+    if not high_sell_df.empty:
+        high_sell_df = high_sell_df[columns].sort_values(by='buy_to_sell_ratio', ascending=True)
+        for col in ['bought_volume', 'sold_volume', 'total_volume']:
+            high_sell_df[col] = high_sell_df[col].astype(int)
+        high_sell_df['buy_to_sell_ratio'] = high_sell_df['buy_to_sell_ratio'].round(2)
+    
+    return high_buy_df, high_sell_df, latest_date
+
+# ... (Your existing imports and helper functions remain unchanged) ...
+
+def process_natural_language_query(query: str, theme_mapping: dict) -> dict:
+    """
+    Parse a natural language query and return parameters to call appropriate functions.
+    Returns a dict with intent, parameters, and any error message.
+    """
+    query = query.lower().strip()
+    result = {'intent': None, 'params': {}, 'error': None, 'output': None}
+    
+    # Helper function to extract number of days
+    def extract_days(text):
+        import re
+        match = re.search(r'(\d+)\s*(days?|weeks?)', text)
+        if match:
+            num = int(match.group(1))
+            unit = match.group(2)
+            return num * 7 if 'week' in unit else num
+        return 20  # Default lookback
+    
+    # Helper function to find theme
+    def find_theme(text):
+        for theme in theme_mapping.keys():
+            if theme.lower() in text:
+                return theme
+        return None
+    
+    # Helper function to extract stock symbol
+    def extract_symbol(text):
+        import re
+        # Simple heuristic: Look for 1-4 letter uppercase words or words after '$'
+        words = text.split()
+        for word in words:
+            word_clean = word.replace('$', '').upper()
+            if re.match(r'^[A-Z]{1,4}$', word_clean):
+                return word_clean
+        return None
+    
+    # Intent detection based on keywords
+    if any(keyword in query for keyword in ['bullish', 'bearish', 'top', 'recommend', 'long', 'short']):
+        result['intent'] = 'recommendations'
+        theme = find_theme(query)
+        if theme:
+            result['params']['theme'] = theme
+        else:
+            result['params']['theme'] = None  # All themes
+    
+    elif any(keyword in query for keyword in ['analyze', 'stock', 'data for']):
+        symbol = extract_symbol(query)
+        if symbol:
+            result['intent'] = 'single_stock'
+            result['params']['symbol'] = symbol
+            result['params']['lookback_days'] = extract_days(query)
+            result['params']['threshold'] = 1.5  # Default threshold
+        else:
+            result['error'] = f"Could not identify a valid stock symbol in query: {query}"
+    
+    elif any(keyword in query for keyword in ['theme', 'sentiment', 'summarize']):
+        theme = find_theme(query)
+        if theme:
+            result['intent'] = 'theme_summary'
+            result['params']['theme'] = theme
+        else:
+            result['error'] = f"Could not identify a valid theme in query: {query}"
+    
+    elif any(keyword in query for keyword in ['show data', 'theme data', 'stocks in']):
+        theme = find_theme(query)
+        if theme:
+            result['intent'] = 'theme_analysis'
+            result['params']['theme'] = theme
+        else:
+            result['error'] = f"Could not identify a valid theme in query: {query}"
+    
+    else:
+        result['error'] = f"Unrecognized query: {query}. Try phrases like 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days', or 'Summarize sentiment for Financials'."
+    
+    return result
+
 def run():
     st.markdown("""
         <style>
@@ -480,9 +617,187 @@ def run():
         st.session_state['recommendations'] = None
     if 'theme_summary' not in st.session_state:
         st.session_state['theme_summary'] = None
+    if 'stock_summary' not in st.session_state:
+        st.session_state['stock_summary'] = None
     
-    # Create tabs: Recommendations, Theme Summary, Single Stock, Theme Analysis
-    tab_names = ["Recommendations", "Theme Summary", "Single Stock", "Theme Analysis"]
+    # Natural Language Query Interface
+    st.subheader("Ask a Question")
+    query = st.text_input("Enter your query (e.g., 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days')", "")
+    if query:
+        with st.spinner("Processing your query..."):
+            query_result = process_natural_language_query(query, theme_mapping)
+            
+            if query_result['error']:
+                st.error(query_result['error'])
+            else:
+                intent = query_result['intent']
+                params = query_result['params']
+                
+                if intent == 'recommendations':
+                    long_df, short_df, latest_date = generate_recommendations()
+                    if params['theme']:
+                        long_df = long_df[long_df['Theme'] == params['theme']]
+                        short_df = short_df[short_df['Theme'] == params['theme']]
+                    
+                    st.write(f"### Top Recommendations for {params['theme'] or 'All Themes'} (Data: {latest_date})")
+                    
+                    if not long_df.empty:
+                        st.write("#### Long Candidates")
+                        st.dataframe(long_df.style.format({
+                            'buy_to_sell_ratio': '{:.2f}',
+                            'bought_volume': '{:,.0f}',
+                            'sold_volume': '{:,.0f}',
+                            'total_volume': '{:,.0f}',
+                            'long_score': '{:.4f}'
+                        }))
+                        fig = px.bar(long_df, x='Symbol', y='long_score', title="Long Candidates",
+                                     color_discrete_sequence=['#4CAF50'])
+                        st.plotly_chart(fig)
+                    
+                    if not short_df.empty:
+                        st.write("#### Short Candidates")
+                        st.dataframe(short_df.style.format({
+                            'buy_to_sell_ratio': '{:.2f}',
+                            'bought_volume': '{:,.0f}',
+                            'sold_volume': '{:,.0f}',
+                            'total_volume': '{:,.0f}',
+                            'short_score': '{:.4f}'
+                        }))
+                        fig = px.bar(short_df, x='Symbol', y='short_score', title="Short Candidates",
+                                     color_discrete_sequence=['#F44336'])
+                        st.plotly_chart(fig)
+                    
+                    if long_df.empty and short_df.empty:
+                        st.write("No candidates found for the specified theme.")
+                
+                elif intent == 'single_stock':
+                    symbol = params['symbol']
+                    lookback_days = params['lookback_days']
+                    threshold = params['threshold']
+                    
+                    results_df, significant_days = analyze_symbol(symbol, lookback_days, threshold)
+                    st.session_state['analysis_results'][symbol] = {
+                        'df': results_df,
+                        'significant_days': significant_days
+                    }
+                    
+                    if not results_df.empty:
+                        st.write(f"### Analysis for {symbol} (Last {lookback_days} Days)")
+                        avg_ratio = results_df['buy_to_sell_ratio'].mean()
+                        max_ratio = results_df['buy_to_sell_ratio'].max()
+                        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                        with metrics_col1:
+                            st.metric("Average Buy/Sell Ratio", f"{avg_ratio:.2f}")
+                        with metrics_col2:
+                            st.metric("Max Buy/Sell Ratio", f"{max_ratio:.2f}")
+                        with metrics_col3:
+                            st.metric(f"Days Above {threshold}", significant_days)
+                        
+                        check_alerts(results_df, symbol)
+                        
+                        fig = px.line(results_df, x='date', y='buy_to_sell_ratio',
+                                      title=f"{symbol} Buy/Sell Ratio Over Time",
+                                      hover_data=['total_volume', 'short_volume_ratio'])
+                        fig.add_hline(y=threshold, line_dash="dash", line_color="red",
+                                      annotation_text=f"Threshold: {threshold}")
+                        st.plotly_chart(fig)
+                        
+                        st.write("#### Daily Analysis")
+                        display_df = results_df.copy()
+                        for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                            display_df[col] = display_df[col].astype(int)
+                        st.dataframe(display_df.style.format({
+                            'buy_to_sell_ratio': '{:.2f}',
+                            'short_volume_ratio': '{:.4f}',
+                            'total_volume': '{:,.0f}',
+                            'bought_volume': '{:,.0f}',
+                            'sold_volume': '{:,.0f}'
+                        }))
+                    else:
+                        st.write(f"No data available for {symbol}.")
+                
+                elif intent == 'theme_summary':
+                    bullish_df, bearish_df, latest_date = generate_theme_summary()
+                    theme = params['theme']
+                    st.write(f"### Sentiment Summary for {theme} (Data: {latest_date})")
+                    
+                    theme_bullish = bullish_df[bullish_df['Theme'] == theme]
+                    theme_bearish = bearish_df[bearish_df['Theme'] == theme]
+                    
+                    if not theme_bullish.empty:
+                        st.write("#### Bullish Sentiment")
+                        st.dataframe(theme_bullish.style.format({
+                            'Bought-to-Sold Ratio': '{:.2f}',
+                            'Average Buy/Sell Ratio': '{:.2f}',
+                            'Total Bought Volume': '{:,.0f}',
+                            'Total Sold Volume': '{:,.0f}',
+                            'Total Volume': '{:,.0f}',
+                            'Number of Stocks': '{:d}'
+                        }))
+                    elif not theme_bearish.empty:
+                        st.write("#### Bearish Sentiment")
+                        st.dataframe(theme_bearish.style.format({
+                            'Bought-to-Sold Ratio': '{:.2f}',
+                            'Average Buy/Sell Ratio': '{:.2f}',
+                            'Total Bought Volume': '{:,.0f}',
+                            'Total Sold Volume': '{:,.0f}',
+                            'Total Volume': '{:,.0f}',
+                            'Number of Stocks': '{:d}'
+                        }))
+                    else:
+                        st.write(f"No sentiment data available for {theme}.")
+                    
+                    # Simple visualization
+                    if not theme_bullish.empty or not theme_bearish.empty:
+                        plot_data = []
+                        if not theme_bullish.empty:
+                            plot_data.append(theme_bullish[['Theme', 'Bought-to-Sold Ratio']].assign(Sentiment='Bullish'))
+                        if not theme_bearish.empty:
+                            plot_data.append(theme_bearish[['Theme', 'Bought-to-Sold Ratio']].assign(Sentiment='Bearish'))
+                        plot_df = pd.concat(plot_data, ignore_index=True)
+                        fig = px.bar(plot_df, x='Theme', y='Bought-to-Sold Ratio', color='Sentiment',
+                                     title=f"{theme} Sentiment", color_discrete_map={'Bullish': '#4CAF50', 'Bearish': '#F44336'})
+                        st.plotly_chart(fig)
+                
+                elif intent == 'theme_analysis':
+                    theme = params['theme']
+                    symbols = theme_mapping[theme]
+                    latest_df, latest_date = get_latest_data(symbols)
+                    
+                    if not latest_df.empty:
+                        st.write(f"### {theme} Analysis (Data: {latest_date})")
+                        metrics_list = []
+                        for _, row in latest_df.iterrows():
+                            total_volume = row.get('TotalVolume', 0)
+                            metrics = calculate_metrics(row, total_volume)
+                            metrics['Symbol'] = row['Symbol']
+                            metrics['TotalVolume'] = total_volume
+                            metrics_list.append(metrics)
+                        
+                        theme_df = pd.DataFrame(metrics_list)
+                        theme_df = theme_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+                        
+                        display_df = theme_df.copy()
+                        for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                            display_df[col] = display_df[col].astype(int)
+                        
+                        st.dataframe(display_df.style.format({
+                            'buy_to_sell_ratio': '{:.2f}',
+                            'short_volume_ratio': '{:.4f}',
+                            'total_volume': '{:,.0f}',
+                            'bought_volume': '{:,.0f}',
+                            'sold_volume': '{:,.0f}'
+                        }))
+                        
+                        fig = px.bar(theme_df, x='Symbol', y='buy_to_sell_ratio',
+                                     title=f"{theme} Buy/Sell Ratios",
+                                     hover_data=['total_volume', 'bought_volume', 'sold_volume'])
+                        st.plotly_chart(fig)
+                    else:
+                        st.write(f"No data available for {theme} stocks.")
+    
+    # Create tabs: Recommendations, Theme Summary, Stock Summary, Single Stock, Theme Analysis
+    tab_names = ["Recommendations", "Theme Summary", "Stock Summary", "Single Stock", "Theme Analysis"]
     tabs = st.tabs(tab_names)
     
     # Recommendations Tab
@@ -636,8 +951,81 @@ def run():
                     fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Neutral Line")
                     st.plotly_chart(fig)
     
-    # Single Stock Tab
+    # Stock Summary Tab
     with tabs[2]:
+        st.subheader("Stock Volume Summary")
+        st.write("Stocks with significant buying (Bought Volume > 2x Sold Volume) or selling (Sold Volume > 2x Bought Volume) based on latest FINRA short sale data.")
+        
+        if st.button("Generate Stock Summary"):
+            with st.spinner("Analyzing stock volume data..."):
+                high_buy_df, high_sell_df, latest_date = generate_stock_summary()
+                st.session_state['stock_summary'] = {'high_buy_df': high_buy_df, 'high_sell_df': high_sell_df, 'date': latest_date}
+        
+        if st.session_state['stock_summary']:
+            stock_summary = st.session_state['stock_summary']
+            high_buy_df = stock_summary['high_buy_df']
+            high_sell_df = stock_summary['high_sell_df']
+            latest_date = stock_summary['date']
+            
+            if latest_date:
+                st.write(f"Data analyzed for: {latest_date}")
+            
+            # High Buy Stocks
+            st.write("### Stocks with High Buying (Bought Volume > 2x Sold Volume)")
+            if not high_buy_df.empty:
+                def highlight_high_buy(row):
+                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
+                
+                st.dataframe(high_buy_df.style.apply(highlight_high_buy, axis=1).format({
+                    'buy_to_sell_ratio': '{:.2f}',
+                    'bought_volume': '{:,.0f}',
+                    'sold_volume': '{:,.0f}',
+                    'total_volume': '{:,.0f}'
+                }))
+            else:
+                st.write("No stocks found with Bought Volume > 2x Sold Volume.")
+            
+            # High Sell Stocks
+            st.write("### Stocks with High Selling (Sold Volume > 2x Bought Volume)")
+            if not high_sell_df.empty:
+                def highlight_high_sell(row):
+                    return ['background-color: rgba(255, 182, 193, 0.3)'] * len(row)
+                
+                st.dataframe(high_sell_df.style.apply(highlight_high_sell, axis=1).format({
+                    'buy_to_sell_ratio': '{:.2f}',
+                    'bought_volume': '{:,.0f}',
+                    'sold_volume': '{:,.0f}',
+                    'total_volume': '{:,.0f}'
+                }))
+            else:
+                st.write("No stocks found with Sold Volume > 2x Bought Volume.")
+            
+            # Visualization
+            if not high_buy_df.empty or not high_sell_df.empty:
+                plot_data = []
+                if not high_buy_df.empty:
+                    buy_plot = high_buy_df[['Symbol', 'buy_to_sell_ratio']].copy()
+                    buy_plot['Type'] = 'High Buy'
+                    buy_plot['Ratio'] = buy_plot['buy_to_sell_ratio']
+                    plot_data.append(buy_plot[['Symbol', 'Ratio', 'Type']])
+                if not high_sell_df.empty:
+                    sell_plot = high_sell_df[['Symbol', 'buy_to_sell_ratio']].copy()
+                    sell_plot['Type'] = 'High Sell'
+                    sell_plot['Ratio'] = sell_plot['buy_to_sell_ratio']
+                    plot_data.append(sell_plot[['Symbol', 'Ratio', 'Type']])
+                
+                if plot_data:
+                    plot_df = pd.concat(plot_data, ignore_index=True)
+                    fig = px.bar(plot_df, x='Symbol', y='Ratio', color='Type',
+                                title="Stocks with Significant Buy or Sell Volume",
+                                color_discrete_map={'High Buy': '#4CAF50', 'High Sell': '#F44336'},
+                                hover_data=['Symbol', 'Ratio'])
+                    fig.update_layout(barmode='group', xaxis_tickangle=-45)
+                    fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Neutral Line")
+                    st.plotly_chart(fig)
+    
+    # Single Stock Tab
+    with tabs[3]:
         col1, col2 = st.columns(2)
         with col1:
             symbol = st.text_input("Enter Symbol", "SPY").strip().upper()
@@ -687,7 +1075,7 @@ def run():
                 st.write(f"No data available for {symbol}.")
     
     # Theme Analysis Tab with Dropdown
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("Theme Analysis")
         st.write("Select a theme to view the latest FINRA short sale data for its stocks.")
         
