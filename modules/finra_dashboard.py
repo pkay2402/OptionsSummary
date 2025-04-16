@@ -455,9 +455,18 @@ def run():
         .stButton>button {
             background-color: #4CAF50;
             color: white;
+            border-radius: 5px;
+            padding: 8px 16px;
         }
         .stTabs [data-baseweb="tab"] {
             font-size: 16px;
+            padding: 10px;
+        }
+        .stSelectbox {
+            max-width: 300px;
+        }
+        .stDataFrame {
+            font-size: 14px;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -472,20 +481,8 @@ def run():
     if 'theme_summary' not in st.session_state:
         st.session_state['theme_summary'] = None
     
-    # with st.sidebar:
-    #     portfolio_symbols = st.text_area("User Defined Symbols (comma-separated)", 
-    #                                    "AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, JPM, V, MA, BAC, LLY, UNH, JNJ").split(",")
-    #     portfolio_symbols = [s.strip().upper() for s in portfolio_symbols if s.strip()]
-        
-    #     st.subheader("Data Management")
-    #     update_button = st.button("Update Stock Data", use_container_width=True)
-    #     if update_button:
-    #         with st.spinner("Updating stock data..."):
-    #             logger.info("Stock data update triggered (function not implemented).")
-    #         st.success("Stock data updated successfully!")
-    
-    # Create tabs: Recommendations + Theme Summary + Single Stock + Theme-based tabs
-    tab_names = ["Recommendations", "Theme Summary", "Single Stock"] + list(theme_mapping.keys())
+    # Create tabs: Recommendations, Theme Summary, Single Stock, Theme Analysis
+    tab_names = ["Recommendations", "Theme Summary", "Single Stock", "Theme Analysis"]
     tabs = st.tabs(tab_names)
     
     # Recommendations Tab
@@ -541,7 +538,6 @@ def run():
             
             # Visualization
             if not long_df.empty or not short_df.empty:
-                # Combine data for plotting
                 plot_data = []
                 if not long_df.empty:
                     long_plot = long_df[['Symbol', 'long_score']].copy()
@@ -682,7 +678,6 @@ def run():
                 for col in ['total_volume', 'bought_volume', 'sold_volume', 'cumulative_bought', 'cumulative_sold']:
                     display_df[col] = display_df[col].astype(int)
                 
-                # Highlight rows based on cumulative_bought vs cumulative_sold
                 def highlight_row(row):
                     color = 'background-color: rgba(144, 238, 144, 0.3)' if row['cumulative_bought'] > row['cumulative_sold'] else 'background-color: rgba(255, 182, 193, 0.3)'
                     return [color] * len(row)
@@ -691,20 +686,21 @@ def run():
             else:
                 st.write(f"No data available for {symbol}.")
     
-    # Theme-based Tabs
-        # Theme-based Tabs
-    for i, theme in enumerate(theme_mapping.keys(), 3):
-        with tabs[i]:
-            st.subheader(f"{theme} - Latest Day FINRA Data")
-            symbols = theme_mapping[theme]
-            
-            # Fetch latest data for the theme's symbols
-            latest_df, latest_date = get_latest_data(symbols)
-            
-            if latest_df.empty or latest_date is None:
-                st.write(f"No data available for {theme} stocks on the latest day.")
-                continue
-            
+    # Theme Analysis Tab with Dropdown
+    with tabs[3]:
+        st.subheader("Theme Analysis")
+        st.write("Select a theme to view the latest FINRA short sale data for its stocks.")
+        
+        # Dropdown for theme selection
+        selected_theme = st.selectbox("Select Theme", list(theme_mapping.keys()), index=0)
+        symbols = theme_mapping[selected_theme]
+        
+        # Fetch latest data for the selected theme's symbols
+        latest_df, latest_date = get_latest_data(symbols)
+        
+        if latest_df.empty or latest_date is None:
+            st.write(f"No data available for {selected_theme} stocks on the latest day.")
+        else:
             st.write(f"Showing data for: {latest_date}")
             
             # Process the data
@@ -725,16 +721,13 @@ def run():
                 for col in ['total_volume', 'bought_volume', 'sold_volume']:
                     display_df[col] = display_df[col].astype(int)
                 
-                # Calculate cumulative bought and sold for display (not for highlighting)
                 display_df['cumulative_bought'] = display_df['bought_volume'].cumsum()
                 display_df['cumulative_sold'] = display_df['sold_volume'].cumsum()
                 
-                # Highlight rows based on individual stock's bought_volume vs sold_volume
                 def highlight_row(row):
                     color = 'background-color: rgba(144, 238, 144, 0.3)' if row['bought_volume'] > row['sold_volume'] else 'background-color: rgba(255, 182, 193, 0.3)'
                     return [color] * len(row)
                 
-                # Display the table
                 column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio', 'cumulative_bought', 'cumulative_sold']
                 st.dataframe(display_df[column_order].style.apply(highlight_row, axis=1).format({
                     'buy_to_sell_ratio': '{:.2f}',
@@ -756,12 +749,12 @@ def run():
                 
                 # Visualization
                 fig = px.bar(theme_df, x='Symbol', y='buy_to_sell_ratio',
-                            title=f"{theme} Buy/Sell Ratios for {latest_date}",
+                            title=f"{selected_theme} Buy/Sell Ratios for {latest_date}",
                             hover_data=['total_volume', 'bought_volume', 'sold_volume'])
                 fig.update_layout(barmode='group', xaxis_tickangle=-45)
                 st.plotly_chart(fig)
             else:
-                st.write(f"No records found for {theme} stocks on {latest_date}.")
+                st.write(f"No records found for {selected_theme} stocks on {latest_date}.")
 
 if __name__ == "__main__":
     run()
