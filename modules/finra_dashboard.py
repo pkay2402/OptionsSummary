@@ -24,6 +24,12 @@ theme_mapping = {
     "Indexes": [
         "SPY", "QQQ", "IWM", "DIA", "SMH"
     ],
+    "Bull Leverage ETF": [
+        "SPXL", "UPRO", "TQQQ", "SOXL", "UDOW", "FAS", "SPUU", "TNA"
+    ],
+    "Bear Leverage ETF": [
+        "SQQQ", "SPXS", "SOXS", "SDOW", "FAZ","SPDN", "TZA", "SPXU"
+    ],
     "Volatility": [
         "VXX", "VIXY", "UVXY"
     ],
@@ -49,7 +55,7 @@ theme_mapping = {
         "XLU", "DUK", "SO", "D", "NEE", "EXC", "AEP", "SRE", "ED"
     ],
     "Telecommunications": [
-        "XLC", "T", "VZ", "TMUS", "S", "DISH", "LUMN", "VOD"
+        "XLC", "T", "VZ", "TMUS", "S", "LUMN", "VOD"
     ],
     "Materials": [
         "XLB", "XME", "XLI", "FCX", "NUE", "DD", "APD", "LIN", "IFF"
@@ -96,7 +102,7 @@ theme_mapping = {
     ],
     "Energy": [
         "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "OXY", "VLO",
-        "PXD", "HES", "WMB", "KMI", "OKE", "HAL", "BKR", "FANG", "DVN",
+        "XLE", "HES", "WMB", "KMI", "OKE", "HAL", "BKR", "FANG", "DVN",
         "TRGP", "APA"
     ],
     "Industrials": [
@@ -115,23 +121,23 @@ theme_mapping = {
     ],
     "Quantum Computing": [
         "IBM", "GOOGL", "MSFT", "RGTI", "IONQ", "QUBT", "HON", "QCOM",
-        "INTC", "AMAT", "MKSI", "NTNX", "DWave", "XERI", "QTUM", "FORM",
+        "INTC", "AMAT", "MKSI", "NTNX", "XERI", "QTUM", "FORM",
         "LMT", "BA", "NOC", "ACN"
     ],
     "Clean Energy": [
         "TSLA", "ENPH", "FSLR", "NEE", "PLUG", "SEDG", "RUN", "SHLS",
-        "ARRY", "NOVA", "BE", "BLDP", "FCEL", "CWEN", "NEP", "DTE", "AES",
-        "EIX", "SRE", "SPWR"
+        "ARRY", "NOVA", "BE", "BLDP", "FCEL", "CWEN", "DTE", "AES",
+        "EIX", "SRE"
     ],
     "Artificial Intelligence": [
         "NVDA", "GOOGL", "MSFT", "AMD", "PLTR", "SNOW", "AI", "CRM", "IBM",
-        "AAPL", "ADBE", "MSCI", "DELL", "BIDU", "UPST", "C3AI", "PATH",
+        "AAPL", "ADBE", "MSCI", "DELL", "BIDU", "UPST", "AI", "PATH",
         "SOUN", "VRNT", "ANSS"
     ],
     "Biotechnology": [
         "MRNA", "CRSP", "VRTX", "REGN", "ILMN", "AMGN", "NBIX", "BIIB",
         "INCY", "GILD", "BMRN", "ALNY", "SRPT", "BEAM", "NTLA", "EDIT",
-        "BLUE", "SANA", "FATE", "KRYS"
+        "BLUE", "SANA", "VKTX", "KRYS"
     ]
 }
 
@@ -333,10 +339,10 @@ def find_patterns(lookback_days=10, min_volume=1000000, pattern_type="accumulati
                 'Market Cap (M)': round(market_cap / 1_000_000, 2),
                 'Avg Daily Volume': int(avg_volume),
                 'Avg Buy/Sell Ratio': round(avg_ratio, 2),
+                'Volume Trend': 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing',
                 'Days Showing Pattern': data['days_pattern'],
                 'Total Volume': int(data['total_volume']),
                 'Latest Ratio': data['ratios'][0],
-                'Volume Trend': 'Increasing' if data['volumes'][0] > avg_volume else 'Decreasing',
                 'Pattern Type': pattern_type.capitalize()
             })
     if pattern_type == "accumulation":
@@ -1096,21 +1102,30 @@ def run():
     with tabs[5]:
         st.subheader("Accumulation/Distribution Analysis")
         st.write("Identify stocks showing accumulation (buying pressure) or distribution (selling pressure) patterns over the last 10 days.")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            min_volume = st.number_input("Minimum Daily Volume", value=1000000, step=500000, format="%d")
+            min_volume = st.number_input("Minimum Daily Volume", value=500000, step=100000, format="%d")
         with col2:
-            min_price = st.number_input("Minimum Price ($)", value=5.0, min_value=1.0, max_value=50.0, step=0.5)
+            min_price = st.number_input("Minimum Price ($)", value=5.0, min_value=0.5, max_value=50.0, step=0.5)
         with col3:
-            min_market_cap = st.number_input("Minimum Market Cap ($M)", value=500, min_value=100, max_value=5000, step=100)
+            min_market_cap = st.number_input("Minimum Market Cap ($M)", value=500, min_value=50, max_value=5000, step=50)
         with col4:
+            use_validation = st.checkbox("Use Price Validation", value=False, help="Ensure price trends align with pattern")
+        with col5:
             pattern_type = st.selectbox("Pattern Type", ["Accumulation", "Distribution"], index=0)
         if st.button("Find Patterns"):
-            with st.spinner(f"Finding {pattern_type.lower()} patterns..."):
+            with st.spinner(f"Updating stock data and finding {pattern_type.lower()} patterns..."):
+                # Automatically update database with all symbols from theme_mapping
+                all_symbols = set()
+                for symbols in theme_mapping.values():
+                    all_symbols.update(symbols)
+                update_stock_database(list(all_symbols))
+                logger.info(f"Updated database with {len(all_symbols)} symbols")
                 pattern_df = find_patterns(
                     lookback_days=10,
                     min_volume=min_volume,
                     pattern_type=pattern_type.lower(),
+                    use_price_validation=use_validation,
                     min_price=min_price,
                     min_market_cap=min_market_cap * 1_000_000
                 )
@@ -1133,7 +1148,7 @@ def run():
                 fig.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.write(f"No {pattern_type.lower()} patterns detected with current filters.")
+                st.write(f"No {pattern_type.lower()} patterns detected with current filters. Try relaxing volume, price, or market cap filters, or disabling price validation.")
 
 if __name__ == "__main__":
     run()
