@@ -583,7 +583,7 @@ def process_natural_language_query(query: str, theme_mapping: dict) -> dict:
     return result
 
 def run():
-    st.set_page_config(page_title="FINRA Short Sale Analysis")
+    #st.set_page_config(page_title="FINRA Short Sale Analysis")
     st.markdown("""
         <style>
         .stButton>button {
