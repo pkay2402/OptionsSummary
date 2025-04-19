@@ -63,19 +63,67 @@ def calculate_demark_sequence(df):
     
     return df_seq
 
+# Helper function to filter weekends for daily data
+def filter_weekends(df, interval):
+    if interval == '1d':
+        # Keep only weekdays (Monday=0, Sunday=6)
+        return df[df.index.dayofweek < 5]
+    return df
+
 # Function to create candlestick chart with optimized annotations
-def create_demark_chart(df, ticker):
+def create_demark_chart(df, ticker, interval='1d'):
+    # Filter weekends for daily charts
+    df = filter_weekends(df, interval)
+    
     fig = go.Figure()
     
-    # Add candlestick chart
-    fig.add_trace(go.Candlestick(
+    # Add candlestick chart with improved appearance
+    # Using proper properties for the Candlestick object
+    candlestick = go.Candlestick(
         x=df.index,
         open=df['Open'],
         high=df['High'],
         low=df['Low'],
         close=df['Close'],
-        name='Candlestick'
-    ))
+        name='Candlestick',
+        increasing=dict(line=dict(color='#26A69A', width=1), fillcolor='#B2DFDB'),
+        decreasing=dict(line=dict(color='#EF5350', width=1), fillcolor='#FFCDD2')
+    )
+    
+    # Set hover text for better information display
+    hover_text = []
+    for idx, row in df.iterrows():
+        date_str = idx.strftime('%Y-%m-%d')
+        if interval != '1d':
+            date_str = idx.strftime('%Y-%m-%d %H:%M')
+        
+        text = (f"Date: {date_str}<br>" +
+                f"Open: {row['Open']:.2f}<br>" +
+                f"High: {row['High']:.2f}<br>" +
+                f"Low: {row['Low']:.2f}<br>" +
+                f"Close: {row['Close']:.2f}")
+                
+        # Add setup/countdown info if present
+        if row['Setup'] > 0:
+            text += f"<br>Setup: {int(row['Setup'])}"
+            if row['Setup_Perfected']:
+                text += " (Perfected)"
+                
+        if row['Countdown'] > 0:
+            text += f"<br>Countdown: {int(row['Countdown'])}"
+            
+        hover_text.append(text)
+    
+    candlestick.text = hover_text
+    candlestick.hoverinfo = "text"
+    
+    # Customize the hover label
+    candlestick.hoverlabel = dict(
+        bgcolor="white",
+        font=dict(size=14, family="Arial")
+    )
+    
+    fig.add_trace(candlestick)
     
     # Create lists to hold annotation data
     setup_annotations = []
@@ -112,11 +160,16 @@ def create_demark_chart(df, ticker):
                 'weight': weight
             })
     
+    # Calculate dynamic spacing factor based on price range
+    price_range = df['High'].max() - df['Low'].min()
+    up_spacing = 0.005 * (price_range / df['High'].mean())
+    down_spacing = 0.005 * (price_range / df['Low'].mean())
+    
     # Add annotations to chart with improved positioning
     for ann in setup_annotations:
         fig.add_annotation(
             x=ann['x'],
-            y=ann['y'] * 1.005,  # Position above the high
+            y=ann['y'] * (1 + up_spacing),  # Dynamic position above the high
             text=ann['text'],
             showarrow=False,
             font=dict(
@@ -125,16 +178,17 @@ def create_demark_chart(df, ticker):
                 weight='bold'
             ),
             bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='black',
+            bordercolor=ann['color'],
             borderwidth=1,
-            borderpad=2
+            borderpad=2,
+            opacity=0.9
         )
         
         # Add a star for perfected setups
         if ann['perfected'] and ann['text'] == '9':
             fig.add_annotation(
                 x=ann['x'],
-                y=ann['y'] * 1.01,  # Position above the setup number
+                y=ann['y'] * (1 + up_spacing * 2),  # Position above the setup number
                 text='★',
                 showarrow=False,
                 font=dict(size=16, color='gold'),
@@ -145,30 +199,81 @@ def create_demark_chart(df, ticker):
     for ann in countdown_annotations:
         fig.add_annotation(
             x=ann['x'],
-            y=ann['y'] * 0.995,  # Position below the low
+            y=ann['y'] * (1 - down_spacing),  # Dynamic position below the low
             text=ann['text'],
             showarrow=False,
             font=dict(
                 size=ann['size'], 
-                color='red', 
+                color='darkred' if ann['text'] == '13' else 'red', 
                 weight=ann['weight']
             ),
             bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='black',
+            bordercolor='red',
             borderwidth=1,
-            borderpad=2
+            borderpad=2,
+            opacity=0.9
         )
+    
+    # Add volume bars at bottom with low opacity
+    if 'Volume' in df.columns and not df['Volume'].isnull().all():
+        # Calculate colors based on price movement
+        volume_colors = np.where(df['Close'] >= df['Open'], '#B2DFDB', '#FFCDD2')
+        
+        # Add volume as a separate trace
+        fig.add_trace(go.Bar(
+            x=df.index,
+            y=df['Volume'],
+            name='Volume',
+            marker=dict(
+                color=volume_colors,
+                opacity=0.5
+            ),
+            yaxis='y2'
+        ))
+        
+        # Create a secondary y-axis for volume
+        fig.update_layout(
+            yaxis2=dict(
+                title="Volume",
+                domain=[0, 0.2],  # Bottom 20% of the chart
+                showgrid=False
+            ),
+            yaxis=dict(
+                domain=[0.25, 1]  # Top 75% of the chart
+            )
+        )
+    
+    # Enhance grid and background
+    fig.update_layout(
+        plot_bgcolor='rgba(250,250,250,0.9)',
+        xaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(200,200,200,0.2)',
+            zeroline=False
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(200,200,200,0.2)',
+            zeroline=False,
+            autorange=True,
+            fixedrange=False
+        )
+    )
     
     # Customize layout
     fig.update_layout(
-        title=f"{ticker} with DeMark TD Sequential",
+        title=dict(
+            text=f"{ticker} with DeMark TD Sequential",
+            font=dict(size=24)
+        ),
         yaxis_title="Price",
         xaxis_title="Date",
         xaxis_rangeslider_visible=False,
         template="plotly_white",
         legend_title="Legend",
-        height=600,
-        margin=dict(t=50, b=50, l=50, r=50)
+        height=700,  # Increased height for better visibility
+        margin=dict(t=80, b=50, l=50, r=50),
+        hovermode="closest"  # Changed from "x unified" to "closest" for better compatibility
     )
     
     # Add custom buttons for different timeframes with safety checks
@@ -185,7 +290,6 @@ def create_demark_chart(df, ticker):
         buttons.append(dict(label="6M", method="relayout", args=[{"xaxis.range": [df.index[-180], df.index[-1]]}]))
     
     # For YTD check if we have data from start of year
-    # Convert to timezone-naive datetime for proper comparison
     try:
         # Create YTD start date with the same timezone info as the index
         if hasattr(df.index[-1], 'tzinfo') and df.index[-1].tzinfo is not None:
@@ -231,7 +335,9 @@ def create_demark_chart(df, ticker):
                     x=0.1,
                     xanchor="left",
                     y=1.1,
-                    yanchor="top"
+                    yanchor="top",
+                    bgcolor='rgba(255,255,255,0.9)',
+                    bordercolor='rgba(0,0,0,0.5)'
                 )
             ]
         )
@@ -253,7 +359,7 @@ def run():
                                   value="1d")
 
     with col2:
-        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
+        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=90))
         end_date = st.date_input("End Date", datetime.now())
 
     # Add a spinner during data loading
@@ -289,7 +395,7 @@ def run():
                             df_with_demark = calculate_demark_sequence(df)
                             
                             # Create and display chart
-                            fig = create_demark_chart(df_with_demark, ticker)
+                            fig = create_demark_chart(df_with_demark, ticker, interval)
                             st.plotly_chart(fig, use_container_width=True)
                             
                             # Summary statistics
@@ -321,7 +427,9 @@ def run():
                             
                             # Raw data display option
                             with st.expander("Show Raw Data"):
-                                st.dataframe(df_with_demark[['Open', 'High', 'Low', 'Close', 'Setup', 'Countdown', 'Setup_Perfected']])
+                                # Filter weekends from display if daily chart
+                                display_df = filter_weekends(df_with_demark, interval) if interval == '1d' else df_with_demark
+                                st.dataframe(display_df[['Open', 'High', 'Low', 'Close', 'Setup', 'Countdown', 'Setup_Perfected']])
                                 
                             # Allow download of data
                             csv = df_with_demark.to_csv()
