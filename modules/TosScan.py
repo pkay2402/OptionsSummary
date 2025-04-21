@@ -375,7 +375,7 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
     else:
         st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
-def main():
+def run():
     init_session_state()
     
     with st.sidebar:
@@ -485,4 +485,4 @@ def main():
     st.markdown(f"**Last Updated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
-    main()
+    run()
