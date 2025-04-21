@@ -46,13 +46,16 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 # Keyword lists
-Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear","A+Bull_30m", "tmo_long", "tmo_Short"]
+Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear", "A+Bull_30m", "tmo_long", "tmo_Short"]
 DAILY_KEYWORDS = ["rising5sma", "falling5sma", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
                   "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
-# Keyword definitions (abbreviated for brevity)
+# Keyword definitions (minimal example; replace with your full definitions)
 KEYWORD_DEFINITIONS = {
+    "orb_bull": {"description": "10 mins 9 ema crossed above opening range high of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Below the ORB high"},
+    "orb_bear": {"description": "10 mins 9 ema crossed below opening range low of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Above the ORB low"},
+    # Add other definitions here
 }
 
 @lru_cache(maxsize=2)
@@ -143,7 +146,7 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         mail.logout()
         if stock_data:
             df = pd.DataFrame(stock_data, columns=['Ticker', 'Date', 'Signal'])
-            df['Date'] = pd.to_datetime(df['Date'])  # Ensure Date is datetime
+            df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values(by=['Date', 'Ticker']).drop_duplicates(subset=['Ticker', 'Signal', 'Date'], keep='last')
             st.session_state.cached_data[keyword] = df
             return df
@@ -193,7 +196,7 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         mail.logout()
         if option_data:
             df = pd.DataFrame(option_data, columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
-            df['Date'] = pd.to_datetime(df['Date'])  # Ensure Date is datetime
+            df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values(by=['Date', 'Raw_Symbol']).drop_duplicates(subset=['Raw_Symbol', 'Signal', 'Date'], keep='last')
             st.session_state.cached_data[keyword] = df
             return df
@@ -243,7 +246,6 @@ def high_conviction_stocks(dataframes, ignore_keywords=None):
         if all_data.empty or 'Date' not in all_data.columns:
             return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
         
-        # Ensure 'Date' is datetime
         all_data['Date'] = pd.to_datetime(all_data['Date'], errors='coerce')
         if all_data['Date'].isna().all():
             logger.warning("All 'Date' values are invalid or missing.")
@@ -272,6 +274,57 @@ def fetch_stock_metrics(tickers):
     except Exception as e:
         logger.error(f"Error fetching stock metrics: {e}")
     return pd.DataFrame(metrics, columns=['Ticker', 'Price', '% Change', 'Volume'])
+
+def aggregate_all_scans(days_lookback):
+    all_data = []
+    
+    # Collect stock scans (Lower Timeframe and Daily)
+    for keyword in Lower_timeframe_KEYWORDS + DAILY_KEYWORDS:
+        df = extract_stock_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
+        if not df.empty:
+            df = df[['Ticker', 'Date', 'Signal']].copy()
+            df['Type'] = 'Stock'
+            all_data.append(df)
+    
+    # Collect option scans
+    for keyword in OPTION_KEYWORDS:
+        df = extract_option_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
+        if not df.empty:
+            df = df[['Readable_Symbol', 'Date', 'Signal']].copy()
+            df = df.rename(columns={'Readable_Symbol': 'Ticker'})
+            df['Type'] = 'Option'
+            all_data.append(df)
+    
+    if not all_data:
+        return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
+    
+    try:
+        combined = pd.concat(all_data, ignore_index=True)
+        combined['Date'] = pd.to_datetime(combined['Date'], errors='coerce')
+        if combined['Date'].isna().all():
+            logger.warning("All 'Date' values in aggregated data are invalid.")
+            return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
+        
+        # Group by Ticker and 30-minute intervals
+        combined['Interval'] = combined['Date'].dt.floor('30min')
+        grouped = combined.groupby(['Interval', 'Ticker', 'Type'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
+        grouped = grouped.rename(columns={'Signal': 'Scans'})
+        
+        # Fetch stock metrics for stock tickers
+        stock_tickers = grouped[grouped['Type'] == 'Stock']['Ticker'].unique()
+        if stock_tickers.size > 0:
+            metrics_df = fetch_stock_metrics(stock_tickers)
+            grouped = grouped.merge(metrics_df, on='Ticker', how='left')
+        
+        # Fill NaN for options (no metrics)
+        grouped[['Price', '% Change', 'Volume']] = grouped[['Price', '% Change', 'Volume']].fillna('N/A')
+        
+        # Sort by Interval (descending) and Ticker
+        grouped = grouped.sort_values(by=['Interval', 'Ticker'], ascending=[False, True])
+        return grouped[['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume']]
+    except Exception as e:
+        logger.error(f"Error in aggregate_all_scans: {e}")
+        return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
 
 def render_dashboard_section(keyword, days_lookback, is_option=False):
     if is_option:
@@ -306,14 +359,12 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
             df = df.merge(metrics_df, on='Ticker', how='left')
             display_cols.extend(['Price', '% Change', 'Volume'])
         
-        # Interactive table with AgGrid
         gb = GridOptionsBuilder.from_dataframe(df[display_cols])
         gb.configure_pagination(paginationAutoPageSize=True)
         gb.configure_side_bar()
         grid_options = gb.build()
         AgGrid(df[display_cols], grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
         
-        # Download button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label=f"Download {keyword} Data",
@@ -327,7 +378,6 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
 def main():
     init_session_state()
     
-    # Sidebar settings
     with st.sidebar:
         st.header("Dashboard Settings")
         days_lookback = st.slider("Days to Look Back", 1, 3, 1)
@@ -336,7 +386,6 @@ def main():
         st.markdown("---")
         st.markdown("**Disclaimer**: This tool is for informational purposes only. Trade at your own risk.")
 
-    # Header with market overview
     st.title("Thinkorswim Scan Dashboard")
     col1, col2, col3 = st.columns([2, 2, 1])
     spy_price, qqq_price, spy_change, qqq_change = get_spy_qqq_prices()
@@ -352,27 +401,52 @@ def main():
             st.session_state.processed_email_ids.clear()
             st.rerun()
     
-    # Auto-refresh logic
     if auto_refresh and time.time() - st.session_state.last_refresh_time >= refresh_interval * 60:
         st.session_state.cached_data.clear()
         st.session_state.processed_email_ids.clear()
         st.session_state.last_refresh_time = time.time()
         st.rerun()
     
-    # Tabs for different scan types
-    tabs = st.tabs(["Lower Timeframe", "Daily", "High Conviction", "Live Options"])
+    # Tabs for different scan types, with All Scans Summary as first
+    tabs = st.tabs(["All Scans Summary", "Lower Timeframe", "Daily", "High Conviction", "Live Options"])
     
     with tabs[0]:
+        st.header("All Scans Summary")
+        summary_df = aggregate_all_scans(days_lookback)
+        if not summary_df.empty:
+            # Split by 30-minute intervals
+            intervals = summary_df['Interval'].unique()
+            for interval in sorted(intervals, reverse=True):
+                interval_df = summary_df[summary_df['Interval'] == interval]
+                st.subheader(f"Interval: {interval.strftime('%Y-%m-%d %H:%M')}")
+                gb = GridOptionsBuilder.from_dataframe(interval_df)
+                gb.configure_pagination(paginationAutoPageSize=True)
+                gb.configure_side_bar()
+                grid_options = gb.build()
+                AgGrid(interval_df, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+            
+            # Download all summary data
+            csv = summary_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download All Scans Summary",
+                data=csv,
+                file_name=f"all_scans_summary_{datetime.date.today()}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("No signals found across all scans.")
+    
+    with tabs[1]:
         st.header("Lower Timeframe Scans")
         for keyword in Lower_timeframe_KEYWORDS:
             render_dashboard_section(keyword, days_lookback, is_option=False)
     
-    with tabs[1]:
+    with tabs[2]:
         st.header("Daily Scans")
         for keyword in DAILY_KEYWORDS:
             render_dashboard_section(keyword, days_lookback, is_option=False)
     
-    with tabs[2]:
+    with tabs[3]:
         st.header("High Conviction Scans")
         all_signals = []
         for keyword in Lower_timeframe_KEYWORDS + DAILY_KEYWORDS:
@@ -391,6 +465,7 @@ def main():
                 AgGrid(high_conviction_df, grid_options=gb.build(), height=300, fit_columns_on_grid_load=True)
                 
                 csv = high_conviction_df.to_csv(index=False).encode('utf-8')
+
                 st.download_button(
                     label="Download High Conviction Data",
                     data=csv,
@@ -402,12 +477,11 @@ def main():
         else:
             st.warning("No signals available for high conviction analysis.")
     
-    with tabs[3]:
+    with tabs[4]:
         st.header("Live Options Scans")
         for keyword in OPTION_KEYWORDS:
             render_dashboard_section(keyword, days_lookback, is_option=True)
     
-    # Footer
     st.markdown(f"**Last Updated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
