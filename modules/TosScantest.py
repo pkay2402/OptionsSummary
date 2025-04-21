@@ -12,7 +12,6 @@ from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from st_aggrid import AgGrid, GridOptionsBuilder
-import plotly.express as px
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,13 +45,13 @@ SENDER_EMAIL = "alerts@thinkorswim.com"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
-# Keyword lists (same as provided)
+# Keyword lists
 Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "A+Bull_30m", "tmo_long", "tmo_Short"]
 DAILY_KEYWORDS = ["rising5sma", "falling5sma", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume", 
                   "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
-# Keyword definitions (same as provided, abbreviated for brevity)
+# Keyword definitions (abbreviated for brevity)
 KEYWORD_DEFINITIONS = {
     "Long_VP": {"description": "Volume Profile based long signal.", "risk_level": "Medium", "timeframe": "2 weeks", "suggested_stop": "Below the volume node"},
     # ... (include all other definitions from your original code)
@@ -108,7 +107,7 @@ def parse_email_body(msg):
         logger.error(f"Error parsing email body: {e}")
         return ""
 
-def extract_stock_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
+def extract_stock_symbols_from_email(email нарaddress, password, sender_email, keyword, days_lookback):
     if keyword in st.session_state.cached_data:
         return st.session_state.cached_data[keyword]
     
@@ -146,6 +145,7 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         mail.logout()
         if stock_data:
             df = pd.DataFrame(stock_data, columns=['Ticker', 'Date', 'Signal'])
+            df['Date'] = pd.to_datetime(df['Date'])  # Ensure Date is datetime
             df = df.sort_values(by=['Date', 'Ticker']).drop_duplicates(subset=['Ticker', 'Signal', 'Date'], keep='last')
             st.session_state.cached_data[keyword] = df
             return df
@@ -195,6 +195,7 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         mail.logout()
         if option_data:
             df = pd.DataFrame(option_data, columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+            df['Date'] = pd.to_datetime(df['Date'])  # Ensure Date is datetime
             df = df.sort_values(by=['Date', 'Raw_Symbol']).drop_duplicates(subset=['Raw_Symbol', 'Signal', 'Date'], keep='last')
             st.session_state.cached_data[keyword] = df
             return df
@@ -238,11 +239,25 @@ def high_conviction_stocks(dataframes, ignore_keywords=None):
     filtered_dataframes = [df[~df['Signal'].isin(ignore_keywords)] for df in dataframes if not df.empty]
     if not filtered_dataframes:
         return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
-    all_data = pd.concat(filtered_dataframes, ignore_index=True)
-    all_data['Date'] = all_data['Date'].dt.date
-    grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
-    grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
-    return grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
+    
+    try:
+        all_data = pd.concat(filtered_dataframes, ignore_index=True)
+        if all_data.empty or 'Date' not in all_data.columns:
+            return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
+        
+        # Ensure 'Date' is datetime
+        all_data['Date'] = pd.to_datetime(all_data['Date'], errors='coerce')
+        if all_data['Date'].isna().all():
+            logger.warning("All 'Date' values are invalid or missing.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
+        
+        all_data['Date'] = all_data['Date'].dt.date
+        grouped = all_data.groupby(['Date', 'Ticker'])['Signal'].agg(lambda x: ', '.join(set(x))).reset_index()
+        grouped['Count'] = grouped['Signal'].apply(lambda x: len(x.split(', ')))
+        return grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
+    except Exception as e:
+        logger.error(f"Error in high_conviction_stocks: {e}")
+        return pd.DataFrame(columns=['Date', 'Ticker', 'Signal'])
 
 def fetch_stock_metrics(tickers):
     metrics = []
@@ -287,7 +302,6 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
     
     if not df.empty:
         df['Date'] = df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        # Add stock metrics for non-option scans
         if not is_option:
             tickers = df['Ticker'].unique()
             metrics_df = fetch_stock_metrics(tickers)
@@ -309,12 +323,6 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
             file_name=f"{keyword}_alerts_{datetime.date.today()}.csv",
             mime="text/csv"
         )
-        
-        # Visualize signal counts
-        if not is_option:
-            signal_counts = df.groupby('Ticker').size().reset_index(name='Signal Count')
-            fig = px.bar(signal_counts, x='Ticker', y='Signal Count', title=f"{keyword} Signal Frequency")
-            st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
@@ -391,11 +399,6 @@ def main():
                     file_name=f"high_conviction_alerts_{datetime.date.today()}.csv",
                     mime="text/csv"
                 )
-                
-                # Visualization
-                signal_counts = high_conviction_df.groupby('Ticker').size().reset_index(name='Signal Count')
-                fig = px.bar(signal_counts, x='Ticker', y='Signal Count', title="High Conviction Signal Frequency")
-                st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("No high conviction signals found.")
         else:
