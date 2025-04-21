@@ -107,7 +107,7 @@ def parse_email_body(msg):
         logger.error(f"Error parsing email body: {e}")
         return ""
 
-def extract_stock_symbols_from_email(email нарaddress, password, sender_email, keyword, days_lookback):
+def extract_stock_symbols_from_email(email address, password, sender_email, keyword, days_lookback):
     if keyword in st.session_state.cached_data:
         return st.session_state.cached_data[keyword]
     
