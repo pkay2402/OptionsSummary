@@ -46,15 +46,13 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 # Keyword lists
-Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["rising5sma", "falling5sma", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume", 
-                  "bull_Daily_sqz", "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
+Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear","A+Bull_30m", "tmo_long", "tmo_Short"]
+DAILY_KEYWORDS = ["rising5sma", "falling5sma", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
+                  "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
 # Keyword definitions (abbreviated for brevity)
 KEYWORD_DEFINITIONS = {
-    "Long_VP": {"description": "Volume Profile based long signal.", "risk_level": "Medium", "timeframe": "2 weeks", "suggested_stop": "Below the volume node"},
-    # ... (include all other definitions from your original code)
 }
 
 @lru_cache(maxsize=2)
