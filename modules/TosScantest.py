@@ -610,7 +610,7 @@ def run():
     
     with st.sidebar:
         st.header("Dashboard Settings")
-        days_lookback = st.slider("Days to Look Back", 1, 30, 7)
+        days_lookback = st.slider("Days to Look Back", 1, 5, 1)
         auto_refresh = st.checkbox("Auto-refresh", value=False)
         refresh_interval = st.slider("Refresh Interval (min)", 1, 30, 10) if auto_refresh else 10
         st.markdown("---")
