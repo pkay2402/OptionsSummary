@@ -47,7 +47,7 @@ RETRY_DELAY = 2  # seconds
 
 # Keyword lists
 Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["rising5sma", "falling5sma", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
+DAILY_KEYWORDS = ["rising5sma", "falling5sma","demark13_buy","demark13_sell", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
                   "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
