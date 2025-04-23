@@ -4,26 +4,18 @@ import email
 import re
 import datetime
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 from dateutil import parser
 import yfinance as yf
 import time
-from datetime import timedelta
 from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from st_aggrid import AgGrid, GridOptionsBuilder
-import calendar
-from collections import Counter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Streamlit page configuration
-st.set_page_config(page_title="Thinkorswim Scan Dashboard", layout="wide")
 
 # Initialize session state
 def init_session_state():
@@ -52,259 +44,23 @@ RETRY_DELAY = 2  # seconds
 
 # Keyword lists
 Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["rising5sma", "falling5sma","demark13_buy","demark13_sell", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
-                  "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
+DAILY_KEYWORDS = ["rising5sma", "falling5sma", "demark13_buy", "demark13_sell", "HighVolumeSymbols", 
+                  "Long_IT_volume", "Short_IT_volume", "LSMHG_Long", "LSMHG_Short", "StockReversalLong", 
+                  "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
-# Keyword definitions (minimal example; replace with your full definitions)
+# Keyword definitions
 KEYWORD_DEFINITIONS = {
     "orb_bull": {"description": "10 mins 9 ema crossed above opening range high of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Below the ORB high"},
     "orb_bear": {"description": "10 mins 9 ema crossed below opening range low of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Above the ORB low"},
     # Add other definitions here
 }
 
-def create_signal_calendar_data(all_signals, days_lookback=30):
-    """
-    Aggregate signals by date for calendar view
-    """
-    if not all_signals:
-        return pd.DataFrame()
-    
-    try:
-        # Combine all signals
-        signal_data = pd.concat(all_signals, ignore_index=True)
-        if signal_data.empty:
-            return pd.DataFrame()
-        
-        # Ensure Date is datetime
-        signal_data['Date'] = pd.to_datetime(signal_data['Date'], errors='coerce')
-        if signal_data['Date'].isna().all():
-            return pd.DataFrame()
-        
-        # Get counts by date
-        signal_data['Date'] = signal_data['Date'].dt.date
-        daily_counts = signal_data.groupby('Date').size().reset_index(name='Count')
-        daily_counts['Date'] = pd.to_datetime(daily_counts['Date'])
-        
-        # Fill in missing dates
-        end_date = daily_counts['Date'].max()
-        start_date = end_date - timedelta(days=days_lookback)
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-        full_date_df = pd.DataFrame({'Date': date_range})
-        calendar_data = full_date_df.merge(daily_counts, on='Date', how='left').fillna(0)
-        
-        # Add day of week
-        calendar_data['DayOfWeek'] = calendar_data['Date'].dt.day_name()
-        calendar_data['Week'] = calendar_data['Date'].dt.isocalendar().week
-        calendar_data['Month'] = calendar_data['Date'].dt.month_name()
-        
-        return calendar_data
-    except Exception as e:
-        logger.error(f"Error creating signal calendar data: {e}")
-        return pd.DataFrame()
-
-def render_signal_calendar(calendar_data):
-    """
-    Render a calendar heatmap of signals
-    """
-    if calendar_data.empty:
-        st.warning("No data available for calendar view")
-        return
-    
-    # Create a pivot table for the calendar view
-    pivot_data = calendar_data.pivot_table(
-        index=['Month', 'Week'], 
-        columns='DayOfWeek',
-        values='Count',
-        aggfunc='sum'
-    ).fillna(0)
-    
-    # Reorder days
-    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    pivot_data = pivot_data.reindex(columns=days_order)
-    
-    # Create heatmap
-    fig = px.imshow(
-        pivot_data, 
-        color_continuous_scale='Viridis',
-        labels=dict(x="Day of Week", y="Week", color="Signal Count")
-    )
-    
-    fig.update_layout(
-        height=600,
-        margin=dict(l=40, r=20, t=60, b=20),
-        title="Signal Calendar Heatmap"
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Show daily breakdown
-    st.subheader("Daily Signal Breakdown")
-    last_two_weeks = calendar_data.sort_values('Date', ascending=False).head(14)
-    last_two_weeks = last_two_weeks.sort_values('Date')
-    
-    fig_bar = px.bar(
-        last_two_weeks,
-        x='Date',
-        y='Count',
-        labels={'Count': 'Signal Count', 'Date': 'Date'},
-        title="Signal Count - Last 14 Days"
-    )
-    
-    fig_bar.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-# Add these functions for Market Breadth Indicators
-def calculate_market_breadth(all_signals):
-    """
-    Calculate market breadth indicators from signals
-    """
-    if not all_signals:
-        return None, None, None
-    
-    try:
-        # Combine all signals
-        signal_data = pd.concat(all_signals, ignore_index=True)
-        if signal_data.empty:
-            return None, None, None
-        
-        # Categorize signals as bullish or bearish
-        bullish_keywords = ["orb_bull", "A+Bull_30m", "tmo_long", "rising5sma", "demark13_buy", 
-                          "HighVolumeSymbols", "Long_IT_volume", "LSMHG_Long", "StockReversalLong"]
-        bearish_keywords = ["orb_bear", "tmo_Short", "falling5sma", "demark13_sell", 
-                           "Short_IT_volume", "LSMHG_Short", "StockReversalShort"]
-        
-        # Create signal type column
-        def categorize_signal(signal):
-            signal_lower = signal.lower()
-            if any(keyword.lower() in signal_lower for keyword in bullish_keywords):
-                return "Bullish"
-            elif any(keyword.lower() in signal_lower for keyword in bearish_keywords):
-                return "Bearish"
-            else:
-                return "Neutral"
-        
-        signal_data['SignalType'] = signal_data['Signal'].apply(categorize_signal)
-        
-        # Ensure Date is datetime and calculate daily metrics
-        signal_data['Date'] = pd.to_datetime(signal_data['Date'], errors='coerce')
-        if signal_data['Date'].isna().all():
-            return None, None, None
-        
-        signal_data['Date'] = signal_data['Date'].dt.date
-        
-        # Daily count by signal type
-        daily_sentiment = signal_data.groupby(['Date', 'SignalType']).size().unstack(fill_value=0)
-        
-        if 'Bullish' not in daily_sentiment.columns:
-            daily_sentiment['Bullish'] = 0
-        if 'Bearish' not in daily_sentiment.columns:
-            daily_sentiment['Bearish'] = 0
-        if 'Neutral' not in daily_sentiment.columns:
-            daily_sentiment['Neutral'] = 0
-            
-        # Calculate breadth indicators
-        daily_sentiment['Total'] = daily_sentiment.sum(axis=1)
-        daily_sentiment['Bull-Bear Ratio'] = daily_sentiment['Bullish'] / (daily_sentiment['Bearish'] + 0.0001)
-        daily_sentiment['Bullish %'] = (daily_sentiment['Bullish'] / daily_sentiment['Total']) * 100
-        daily_sentiment['Bearish %'] = (daily_sentiment['Bearish'] / daily_sentiment['Total']) * 100
-        daily_sentiment['Net Bull-Bear'] = daily_sentiment['Bullish'] - daily_sentiment['Bearish']
-        
-        # Calculate most active tickers
-        ticker_signal_counts = signal_data.groupby('Ticker').size().reset_index(name='Signal Count')
-        top_tickers = ticker_signal_counts.sort_values('Signal Count', ascending=False).head(10)
-        
-        # Calculate signal distribution by type
-        signal_distribution = signal_data['SignalType'].value_counts().reset_index()
-        signal_distribution.columns = ['Signal Type', 'Count']
-        
-        return daily_sentiment.reset_index(), top_tickers, signal_distribution
-    except Exception as e:
-        logger.error(f"Error calculating market breadth: {e}")
-        return None, None, None
-
-def render_market_breadth(daily_sentiment, top_tickers, signal_distribution):
-    """
-    Render market breadth indicators
-    """
-    if daily_sentiment is None or daily_sentiment.empty:
-        st.warning("No data available for market breadth analysis")
-        return
-    
-    # Sort by date
-    daily_sentiment['Date'] = pd.to_datetime(daily_sentiment['Date'])
-    daily_sentiment = daily_sentiment.sort_values('Date')
-    
-    # Display current breadth metrics
-    latest_date = daily_sentiment['Date'].max()
-    latest_metrics = daily_sentiment[daily_sentiment['Date'] == latest_date].iloc[0]
-    
-    # Metrics display
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        bullish_percent = latest_metrics.get('Bullish %', 0)
-        st.metric("Bullish %", f"{bullish_percent:.1f}%")
-    with col2:
-        bearish_percent = latest_metrics.get('Bearish %', 0)
-        st.metric("Bearish %", f"{bearish_percent:.1f}%")
-    with col3:
-        bull_bear_ratio = latest_metrics.get('Bull-Bear Ratio', 0)
-        st.metric("Bull/Bear Ratio", f"{bull_bear_ratio:.2f}")
-    with col4:
-        net_bull_bear = latest_metrics.get('Net Bull-Bear', 0)
-        st.metric("Net Bull-Bear", f"{net_bull_bear:.0f}")
-    
-    # Bull-Bear Ratio Over Time
-    st.subheader("Bull-Bear Ratio Trend")
-    fig_ratio = px.line(
-        daily_sentiment,
-        x='Date',
-        y='Bull-Bear Ratio',
-        title="Bull/Bear Ratio - Last 30 Days"
-    )
-    fig_ratio.add_hline(y=1.0, line_dash="dash", line_color="gray", 
-                      annotation_text="Neutral Line", annotation_position="top right")
-    fig_ratio.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_ratio, use_container_width=True)
-    
-    # Signal Type Distribution
-    st.subheader("Signal Type Distribution")
-    if signal_distribution is not None and not signal_distribution.empty:
-        fig_pie = px.pie(
-            signal_distribution, 
-            values='Count', 
-            names='Signal Type',
-            title="Distribution of Signal Types",
-            color='Signal Type',
-            color_discrete_map={'Bullish': 'green', 'Bearish': 'red', 'Neutral': 'gray'}
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-    
-    # Top Active Tickers
-    st.subheader("Most Active Tickers")
-    if top_tickers is not None and not top_tickers.empty:
-        fig_bar = px.bar(
-            top_tickers,
-            y='Ticker',
-            x='Signal Count',
-            orientation='h',
-            title="Top 10 Most Active Tickers",
-        )
-        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_bar, use_container_width=True)
-    
-    # Bull-Bear Net Chart
-    st.subheader("Bull-Bear Net Trend")
-    fig_net = px.area(
-        daily_sentiment,
-        x='Date',
-        y='Net Bull-Bear',
-        title="Net Bull-Bear Signals - Last 30 Days",
-        color_discrete_sequence=['green' if daily_sentiment['Net Bull-Bear'].mean() > 0 else 'red']
-    )
-    fig_net.add_hline(y=0, line_dash="dash", line_color="black")
-    fig_net.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig_net, use_container_width=True)
+# Signal classification for bullish/bearish
+BULLISH_SIGNALS = ["orb_bull", "A+Bull_30m", "tmo_long", "rising5sma", "demark13_buy", 
+                   "Long_IT_volume", "LSMHG_Long", "StockReversalLong", "UOP_Call", "call_swing"]
+BEARISH_SIGNALS = ["orb_bear", "tmo_Short", "falling5sma", "demark13_sell", 
+                   "Short_IT_volume", "LSMHG_Short", "StockReversalShort", "put_swing"]
 
 def connect_to_email(retries=MAX_RETRIES):
     for attempt in range(retries):
@@ -556,6 +312,44 @@ def aggregate_all_scans(days_lookback):
         logger.error(f"Error in aggregate_all_scans: {e}")
         return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
 
+def get_bullish_bearish_summary(summary_df):
+    today = datetime.date.today()
+    today_df = summary_df[summary_df['Interval'].dt.date == today]
+    
+    if today_df.empty:
+        return pd.DataFrame(), pd.DataFrame(), {}
+    
+    # Classify signals as bullish or bearish
+    def classify_signal(scans):
+        signals = scans.split(', ')
+        bullish = [s for s in signals if s in BULLISH_SIGNALS]
+        bearish = [s for s in signals if s in BEARISH_SIGNALS]
+        return pd.Series({'Bullish': bullish, 'Bearish': bearish})
+    
+    today_df[['Bullish', 'Bearish']] = today_df['Scans'].apply(classify_signal)
+    
+    # Extract bullish and bearish signals
+    bullish_signals = today_df[today_df['Bullish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bullish']]
+    bearish_signals = today_df[today_df['Bearish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bearish']]
+    
+    # Compute statistics
+    stats = {
+        'Total Bullish Signals': len(bullish_signals),
+        'Total Bearish Signals': len(bearish_signals),
+        'Unique Bullish Tickers': len(bullish_signals['Ticker'].unique()) if not bullish_signals.empty else 0,
+        'Unique Bearish Tickers': len(bearish_signals['Ticker'].unique()) if not bearish_signals.empty else 0,
+        'Bullish Signal Types': pd.Series([s for sublist in bullish_signals['Bullish'] for s in sublist]).value_counts().to_dict() if not bullish_signals.empty else {},
+        'Bearish Signal Types': pd.Series([s for sublist in bearish_signals['Bearish'] for s in sublist]).value_counts().to_dict() if not bearish_signals.empty else {}
+    }
+    
+    # Format signal columns for display
+    bullish_signals = bullish_signals.copy()
+    bearish_signals = bearish_signals.copy()
+    bullish_signals['Bullish'] = bullish_signals['Bullish'].apply(lambda x: ', '.join(x))
+    bearish_signals['Bearish'] = bearish_signals['Bearish'].apply(lambda x: ', '.join(x))
+    
+    return bullish_signals, bearish_signals, stats
+
 def render_dashboard_section(keyword, days_lookback, is_option=False):
     if is_option:
         df = extract_option_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
@@ -610,7 +404,7 @@ def run():
     
     with st.sidebar:
         st.header("Dashboard Settings")
-        days_lookback = st.slider("Days to Look Back", 1, 5, 1)
+        days_lookback = st.slider("Days to Look Back", 1, 3, 1)
         auto_refresh = st.checkbox("Auto-refresh", value=False)
         refresh_interval = st.slider("Refresh Interval (min)", 1, 30, 10) if auto_refresh else 10
         st.markdown("---")
@@ -618,10 +412,11 @@ def run():
 
     st.title("Thinkorswim Scan Dashboard")
     col1, col2, col3 = st.columns([2, 2, 1])
-    if st.button("🔄 Refresh", use_container_width=True):
-        st.session_state.cached_data.clear()
-        st.session_state.processed_email_ids.clear()
-        st.rerun()
+    with col3:
+        if st.button("🔄 Refresh"):
+            st.session_state.cached_data.clear()
+            st.session_state.processed_email_ids.clear()
+            st.rerun()
     
     if auto_refresh and time.time() - st.session_state.last_refresh_time >= refresh_interval * 60:
         st.session_state.cached_data.clear()
@@ -629,14 +424,53 @@ def run():
         st.session_state.last_refresh_time = time.time()
         st.rerun()
     
-    # Update tabs to include new Signal Calendar and Market Breadth tabs
-    tabs = st.tabs(["All Scans Summary", "Lower Timeframe", "Daily", "High Conviction", "Live Options", "Signal Calendar", "Market Breadth"])
+    # Tabs for different scan types
+    tabs = st.tabs(["All Scans Summary", "Lower Timeframe", "Daily", "High Conviction", "Live Options"])
     
     with tabs[0]:
         st.header("All Scans Summary")
         summary_df = aggregate_all_scans(days_lookback)
+        
+        # Bullish and Bearish Summary
+        st.subheader("Today's Bullish and Bearish Signals")
+        bullish_signals, bearish_signals, stats = get_bullish_bearish_summary(summary_df)
+        
+        # Display summary statistics
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Bullish Signals", stats.get('Total Bullish Signals', 0))
+            st.metric("Unique Bullish Tickers", stats.get('Unique Bullish Tickers', 0))
+            st.write("**Bullish Signal Breakdown**")
+            for signal, count in stats.get('Bullish Signal Types', {}).items():
+                st.write(f"{signal}: {count}")
+        with col2:
+            st.metric("Total Bearish Signals", stats.get('Total Bearish Signals', 0))
+            st.metric("Unique Bearish Tickers", stats.get('Unique Bearish Tickers', 0))
+            st.write("**Bearish Signal Breakdown**")
+            for signal, count in stats.get('Bearish Signal Types', {}).items():
+                st.write(f"{signal}: {count}")
+        
+        # Display bullish signals
+        if not bullish_signals.empty:
+            st.subheader("Bullish Signals")
+            gb = GridOptionsBuilder.from_dataframe(bullish_signals)
+            gb.configure_pagination(paginationAutoPageSize=True)
+            gb.configure_side_bar()
+            grid_options = gb.build()
+            AgGrid(bullish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+        
+        # Display bearish signals
+        if not bearish_signals.empty:
+            st.subheader("Bearish Signals")
+            gb = GridOptionsBuilder.from_dataframe(bearish_signals)
+            gb.configure_pagination(paginationAutoPageSize=True)
+            gb.configure_side_bar()
+            grid_options = gb.build()
+            AgGrid(bearish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+        
+        # Existing interval-based summary
         if not summary_df.empty:
-            # Split by 30-minute intervals
+            st.subheader("All Signals by Interval")
             intervals = summary_df['Interval'].unique()
             for interval in sorted(intervals, reverse=True):
                 interval_df = summary_df[summary_df['Interval'] == interval]
@@ -687,7 +521,6 @@ def run():
                 AgGrid(high_conviction_df, grid_options=gb.build(), height=300, fit_columns_on_grid_load=True)
                 
                 csv = high_conviction_df.to_csv(index=False).encode('utf-8')
-
                 st.download_button(
                     label="Download High Conviction Data",
                     data=csv,
@@ -703,34 +536,6 @@ def run():
         st.header("Live Options Scans")
         for keyword in OPTION_KEYWORDS:
             render_dashboard_section(keyword, days_lookback, is_option=True)
-    
-    st.markdown(f"**Last Updated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    # New Signal Calendar tab
-    with tabs[5]:
-        st.header("Signal Calendar View")
-        
-        all_signals = []
-        for keyword in Lower_timeframe_KEYWORDS + DAILY_KEYWORDS:
-            df = extract_stock_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
-            if not df.empty:
-                all_signals.append(df)
-        
-        calendar_data = create_signal_calendar_data(all_signals, days_lookback)
-        render_signal_calendar(calendar_data)
-    
-    # New Market Breadth tab
-    with tabs[6]:
-        st.header("Market Breadth Indicators")
-        
-        all_signals = []
-        for keyword in Lower_timeframe_KEYWORDS + DAILY_KEYWORDS:
-            df = extract_stock_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
-            if not df.empty:
-                all_signals.append(df)
-        
-        daily_sentiment, top_tickers, signal_distribution = calculate_market_breadth(all_signals)
-        render_market_breadth(daily_sentiment, top_tickers, signal_distribution)
     
     st.markdown(f"**Last Updated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
