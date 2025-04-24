@@ -11,7 +11,6 @@ from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from st_aggrid import AgGrid, GridOptionsBuilder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -383,7 +382,17 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
             df = df.merge(metrics_df, on='Ticker', how='left')
             display_cols.extend(['Price', '% Change', 'Volume'])
         
-        st.dataframe(df[display_cols], height=300)  # Replace AgGrid with st.dataframe
+        # Use Streamlit's native dataframe instead of AgGrid
+        st.dataframe(
+            df[display_cols],
+            use_container_width=True,
+            height=300,
+            hide_index=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="$%.2f"),
+                "% Change": st.column_config.NumberColumn(format="%.2f%%")
+            }
+        )
         
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -449,20 +458,22 @@ def run():
         # Display bullish signals
         if not bullish_signals.empty:
             st.subheader("Bullish Signals")
-            gb = GridOptionsBuilder.from_dataframe(bullish_signals)
-            gb.configure_pagination(paginationAutoPageSize=True)
-            gb.configure_side_bar()
-            grid_options = gb.build()
-            AgGrid(bullish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+            st.dataframe(
+                bullish_signals,
+                use_container_width=True,
+                height=300,
+                hide_index=True
+            )
         
         # Display bearish signals
         if not bearish_signals.empty:
             st.subheader("Bearish Signals")
-            gb = GridOptionsBuilder.from_dataframe(bearish_signals)
-            gb.configure_pagination(paginationAutoPageSize=True)
-            gb.configure_side_bar()
-            grid_options = gb.build()
-            AgGrid(bearish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+            st.dataframe(
+                bearish_signals,
+                use_container_width=True,
+                height=300,
+                hide_index=True
+            )
         
         # Existing interval-based summary
         if not summary_df.empty:
@@ -471,11 +482,16 @@ def run():
             for interval in sorted(intervals, reverse=True):
                 interval_df = summary_df[summary_df['Interval'] == interval]
                 st.subheader(f"Interval: {interval.strftime('%Y-%m-%d %H:%M')}")
-                gb = GridOptionsBuilder.from_dataframe(interval_df)
-                gb.configure_pagination(paginationAutoPageSize=True)
-                gb.configure_side_bar()
-                grid_options = gb.build()
-                AgGrid(interval_df, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+                st.dataframe(
+                    interval_df,
+                    use_container_width=True,
+                    height=300,
+                    hide_index=True,
+                    column_config={
+                        "Price": st.column_config.NumberColumn(format="$%.2f"),
+                        "% Change": st.column_config.NumberColumn(format="%.2f%%")
+                    }
+                )
             
             # Download all summary data
             csv = summary_df.to_csv(index=False).encode('utf-8')
@@ -511,10 +527,17 @@ def run():
             if not high_conviction_df.empty:
                 metrics_df = fetch_stock_metrics(high_conviction_df['Ticker'].unique())
                 high_conviction_df = high_conviction_df.merge(metrics_df, on='Ticker', how='left')
-                gb = GridOptionsBuilder.from_dataframe(high_conviction_df)
-                gb.configure_pagination(paginationAutoPageSize=True)
-                gb.configure_side_bar()
-                AgGrid(high_conviction_df, grid_options=gb.build(), height=300, fit_columns_on_grid_load=True)
+                st.dataframe(
+                    high_conviction_df,
+                    use_container_width=True,
+                    height=300,
+                    hide_index=True,
+                    column_config={
+                        "Price": st.column_config.NumberColumn(format="$%.2f"),
+                        "% Change": st.column_config.NumberColumn(format="%.2f%%"),
+                        "Volume": st.column_config.NumberColumn(format="%d")
+                    }
+                )
                 
                 csv = high_conviction_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
