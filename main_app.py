@@ -10,15 +10,15 @@ import streamlit as st  # This MUST be the first Streamlit command
 st.set_page_config(layout="wide", page_title="Trading Tools Hub")
 
 from modules.flowSummary import run as flowSummary_run
-from modules.MomentumSignals import run as MomentumSignals_run
-from modules.MomentumETF import run as MomentumETF_run
+#from modules.MomentumSignals import run as MomentumSignals_run
+#from modules.MomentumETF import run as MomentumETF_run
 from modules.GexAnalysis import run as GexAnalysis_run
 from modules.finra_dashboard import run as finra_dashboard_run
 from modules.TosScan import run as TosScan_run
 from modules.StockAnalysis import run as StockAnalysis_run
 from modules.Seasonality import run as Seasonality_run
 from modules.SP500Performance import run as SP500Performance_run
-from modules.StockTrendOscillator import show_trend_oscillator
+from modules.StockTrendOscillator import StockTrendOscillator_run
 from modules.GannSwing import run as GannSwing_run
 #from modules.GannCycleAnalysis import run as GannCycle_run
 from modules.CFTC import cftc_analyzer_module
@@ -63,8 +63,8 @@ def main():
                                        "Block Trades",
                                        "Stock Trend Oscillator",
                                        "Flow Summary", 
-                                       "Momentum Signals", 
-                                       "Momentum ETF",
+                                       #"Momentum Signals", 
+                                       #"Momentum ETF",
                                        "GEX Analysis",
                                        "Stock Analysis",
                                        "TOS Scanner",
@@ -77,15 +77,15 @@ def main():
                                        "DeMark Sequential"])  # Add this option
 
     if app_selection == "Stock Trend Oscillator":
-        show_trend_oscillator()
+        StockTrendOscillator_run()
     elif app_selection == "Flow Summary":
         flowSummary_run()
     elif app_selection == "Block Trades":
         Blocktrade_run()
-    elif app_selection == "Momentum Signals":
-        MomentumSignals_run()
-    elif app_selection == "Momentum ETF":
-        MomentumETF_run()
+    #elif app_selection == "Momentum Signals":
+        #MomentumSignals_run()
+    #elif app_selection == "Momentum ETF":
+        #MomentumETF_run()
     elif app_selection == "GEX Analysis":
         GexAnalysis_run()
     elif app_selection == "FINRA Dashboard":
