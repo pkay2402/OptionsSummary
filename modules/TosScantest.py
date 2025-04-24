@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
-#from st_aggrid import AgGrid, GridOptionsBuilder
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
