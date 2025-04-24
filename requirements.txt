@@ -19,3 +19,4 @@ beautifulsoup4
 plotly
 holidays
 streamlit-aggrid
+st-aggrid
