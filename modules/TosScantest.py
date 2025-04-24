@@ -251,7 +251,7 @@ def fetch_stock_metrics(tickers):
             stock = yf.Ticker(ticker)
             hist = stock.history(period="2d")
             if not hist.empty:
-                price = round(hist['Close'].iloc[-1], 2)
+                price = round(hist['Close'].iloc[-1], 2)  
                 prev_close = hist['Close'].iloc[-2]
                 change = round(((price - prev_close) / prev_close) * 100, 2)
                 volume = int(hist['Volume'].iloc[-1])
@@ -306,13 +306,39 @@ def aggregate_all_scans(days_lookback):
         
         # Sort by Interval (descending) and Ticker
         grouped = grouped.sort_values(by=['Interval', 'Ticker'], ascending=[False, True])
+        
+        # Make sure Interval is a proper datetime column
+        if not pd.api.types.is_datetime64_any_dtype(grouped['Interval']):
+            grouped['Interval'] = pd.to_datetime(grouped['Interval'], errors='coerce')
+            
         return grouped[['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume']]
     except Exception as e:
         logger.error(f"Error in aggregate_all_scans: {e}")
         return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
 
 def get_bullish_bearish_summary(summary_df):
+    # Check if summary_df is empty or doesn't have the expected columns
+    if summary_df.empty or 'Interval' not in summary_df.columns:
+        return pd.DataFrame(), pd.DataFrame(), {}
+    
+    # Make sure Interval is a datetime column
+    if not pd.api.types.is_datetime64_any_dtype(summary_df['Interval']):
+        logger.warning("Interval column is not datetime type. Attempting to convert.")
+        try:
+            summary_df['Interval'] = pd.to_datetime(summary_df['Interval'], errors='coerce')
+        except Exception as e:
+            logger.error(f"Failed to convert Interval to datetime: {e}")
+            return pd.DataFrame(), pd.DataFrame(), {}
+    
+    # Filter for today's data
     today = datetime.date.today()
+    
+    # Check for null values before accessing .dt accessor
+    if summary_df['Interval'].isna().any():
+        logger.warning("Some Interval values are NaT. Filtering them out.")
+        summary_df = summary_df[summary_df['Interval'].notna()]
+    
+    # Now safely extract date component from datetime
     today_df = summary_df[summary_df['Interval'].dt.date == today]
     
     if today_df.empty:
@@ -320,32 +346,61 @@ def get_bullish_bearish_summary(summary_df):
     
     # Classify signals as bullish or bearish
     def classify_signal(scans):
+        if pd.isna(scans):
+            return pd.Series({'Bullish': [], 'Bearish': []})
         signals = scans.split(', ')
         bullish = [s for s in signals if s in BULLISH_SIGNALS]
         bearish = [s for s in signals if s in BEARISH_SIGNALS]
         return pd.Series({'Bullish': bullish, 'Bearish': bearish})
     
+    # Add error handling for scans column
+    if 'Scans' not in today_df.columns:
+        logger.error("Scans column not found in dataframe")
+        return pd.DataFrame(), pd.DataFrame(), {}
+    
     today_df[['Bullish', 'Bearish']] = today_df['Scans'].apply(classify_signal)
     
     # Extract bullish and bearish signals
-    bullish_signals = today_df[today_df['Bullish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bullish']]
-    bearish_signals = today_df[today_df['Bearish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bearish']]
+    bullish_signals = today_df[today_df['Bullish'].apply(len) > 0][['Interval', 'Ticker', 'Type', 'Bullish']]
+    bearish_signals = today_df[today_df['Bearish'].apply(len) > 0][['Interval', 'Ticker', 'Type', 'Bearish']]
     
     # Compute statistics
     stats = {
         'Total Bullish Signals': len(bullish_signals),
         'Total Bearish Signals': len(bearish_signals),
         'Unique Bullish Tickers': len(bullish_signals['Ticker'].unique()) if not bullish_signals.empty else 0,
-        'Unique Bearish Tickers': len(bearish_signals['Ticker'].unique()) if not bearish_signals.empty else 0,
-        'Bullish Signal Types': pd.Series([s for sublist in bullish_signals['Bullish'] for s in sublist]).value_counts().to_dict() if not bullish_signals.empty else {},
-        'Bearish Signal Types': pd.Series([s for sublist in bearish_signals['Bearish'] for s in sublist]).value_counts().to_dict() if not bearish_signals.empty else {}
+        'Unique Bearish Tickers': len(bearish_signals['Ticker'].unique()) if not bearish_signals.empty else 0
     }
     
+    # Safely compute signal type breakdowns
+    if not bullish_signals.empty:
+        try:
+            bullish_counts = pd.Series([s for sublist in bullish_signals['Bullish'] for s in sublist]).value_counts().to_dict()
+            stats['Bullish Signal Types'] = bullish_counts
+        except Exception as e:
+            logger.error(f"Error computing bullish signal breakdown: {e}")
+            stats['Bullish Signal Types'] = {}
+    else:
+        stats['Bullish Signal Types'] = {}
+        
+    if not bearish_signals.empty:
+        try:
+            bearish_counts = pd.Series([s for sublist in bearish_signals['Bearish'] for s in sublist]).value_counts().to_dict()
+            stats['Bearish Signal Types'] = bearish_counts
+        except Exception as e:
+            logger.error(f"Error computing bearish signal breakdown: {e}")
+            stats['Bearish Signal Types'] = {}
+    else:
+        stats['Bearish Signal Types'] = {}
+    
     # Format signal columns for display
-    bullish_signals = bullish_signals.copy()
-    bearish_signals = bearish_signals.copy()
-    bullish_signals['Bullish'] = bullish_signals['Bullish'].apply(lambda x: ', '.join(x))
-    bearish_signals['Bearish'] = bearish_signals['Bearish'].apply(lambda x: ', '.join(x))
+    if not bullish_signals.empty:
+        bullish_signals = bullish_signals.copy()
+        bullish_signals['Bullish'] = bullish_signals['Bullish'].apply(lambda x: ', '.join(x))
+    
+    if not bearish_signals.empty:
+        bearish_signals = bearish_signals.copy()
+        bearish_signals['Bearish'] = bearish_signals['Bearish'].apply(lambda x: ', '.join(x))
     
     return bullish_signals, bearish_signals, stats
 
@@ -436,71 +491,94 @@ def run():
         st.header("All Scans Summary")
         summary_df = aggregate_all_scans(days_lookback)
         
+        # Display raw summary dataframe info for debugging if there are issues
+        logger.info(f"Summary DF shape: {summary_df.shape}")
+        if not summary_df.empty:
+            logger.info(f"Summary DF columns: {summary_df.columns.tolist()}")
+            logger.info(f"Interval column type: {summary_df['Interval'].dtype}")
+        
         # Bullish and Bearish Summary
         st.subheader("Today's Bullish and Bearish Signals")
-        bullish_signals, bearish_signals, stats = get_bullish_bearish_summary(summary_df)
         
-        # Display summary statistics
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Total Bullish Signals", stats.get('Total Bullish Signals', 0))
-            st.metric("Unique Bullish Tickers", stats.get('Unique Bullish Tickers', 0))
-            st.write("**Bullish Signal Breakdown**")
-            for signal, count in stats.get('Bullish Signal Types', {}).items():
-                st.write(f"{signal}: {count}")
-        with col2:
-            st.metric("Total Bearish Signals", stats.get('Total Bearish Signals', 0))
-            st.metric("Unique Bearish Tickers", stats.get('Unique Bearish Tickers', 0))
-            st.write("**Bearish Signal Breakdown**")
-            for signal, count in stats.get('Bearish Signal Types', {}).items():
-                st.write(f"{signal}: {count}")
-        
-        # Display bullish signals
-        if not bullish_signals.empty:
-            st.subheader("Bullish Signals")
-            st.dataframe(
-                bullish_signals,
-                use_container_width=True,
-                height=300,
-                hide_index=True
-            )
-        
-        # Display bearish signals
-        if not bearish_signals.empty:
-            st.subheader("Bearish Signals")
-            st.dataframe(
-                bearish_signals,
-                use_container_width=True,
-                height=300,
-                hide_index=True
-            )
+        try:
+            bullish_signals, bearish_signals, stats = get_bullish_bearish_summary(summary_df)
+            
+            # Display summary statistics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Bullish Signals", stats.get('Total Bullish Signals', 0))
+                st.metric("Unique Bullish Tickers", stats.get('Unique Bullish Tickers', 0))
+                st.write("**Bullish Signal Breakdown**")
+                for signal, count in stats.get('Bullish Signal Types', {}).items():
+                    st.write(f"{signal}: {count}")
+            with col2:
+                st.metric("Total Bearish Signals", stats.get('Total Bearish Signals', 0))
+                st.metric("Unique Bearish Tickers", stats.get('Unique Bearish Tickers', 0))
+                st.write("**Bearish Signal Breakdown**")
+                for signal, count in stats.get('Bearish Signal Types', {}).items():
+                    st.write(f"{signal}: {count}")
+            
+            # Display bullish signals
+            if not bullish_signals.empty:
+                st.subheader("Bullish Signals")
+                st.dataframe(
+                    bullish_signals,
+                    use_container_width=True,
+                    height=300,
+                    hide_index=True
+                )
+            
+            # Display bearish signals
+            if not bearish_signals.empty:
+                st.subheader("Bearish Signals")
+                st.dataframe(
+                    bearish_signals,
+                    use_container_width=True,
+                    height=300,
+                    hide_index=True
+                )
+        except Exception as e:
+            st.error(f"Error analyzing bullish/bearish signals: {e}")
+            logger.error(f"Error in bullish/bearish analysis: {e}", exc_info=True)
         
         # Existing interval-based summary
         if not summary_df.empty:
             st.subheader("All Signals by Interval")
-            intervals = summary_df['Interval'].unique()
-            for interval in sorted(intervals, reverse=True):
-                interval_df = summary_df[summary_df['Interval'] == interval]
-                st.subheader(f"Interval: {interval.strftime('%Y-%m-%d %H:%M')}")
-                st.dataframe(
-                    interval_df,
-                    use_container_width=True,
-                    height=300,
-                    hide_index=True,
-                    column_config={
-                        "Price": st.column_config.NumberColumn(format="$%.2f"),
-                        "% Change": st.column_config.NumberColumn(format="%.2f%%")
-                    }
+            try:
+                # Make sure Interval is datetime before getting unique values
+                if not pd.api.types.is_datetime64_any_dtype(summary_df['Interval']):
+                    summary_df['Interval'] = pd.to_datetime(summary_df['Interval'], errors='coerce')
+                
+                # Filter out NaT values
+                summary_df = summary_df[summary_df['Interval'].notna()]
+                
+                if not summary_df.empty:
+                    intervals = summary_df['Interval'].unique()
+                    for interval in sorted(intervals, reverse=True):
+                        interval_df = summary_df[summary_df['Interval'] == interval]
+                        st.subheader(f"Interval: {interval.strftime('%Y-%m-%d %H:%M')}")
+                        st.dataframe(
+                            interval_df,
+                            use_container_width=True,
+                            height=300,
+                            hide_index=True,
+                            column_config={
+                                "Price": st.column_config.NumberColumn(format="$%.2f"),
+                                "% Change": st.column_config.NumberColumn(format="%.2f%%")
+                            }
+                        )
+                
+                # Download all summary data
+                csv = summary_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download All Scans Summary",
+                    data=csv,
+                    file_name=f"all_scans_summary_{datetime.date.today()}.csv",
+                    mime="text/csv"
                 )
-            
-            # Download all summary data
-            csv = summary_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download All Scans Summary",
-                data=csv,
-                file_name=f"all_scans_summary_{datetime.date.today()}.csv",
-                mime="text/csv"
-            )
+            except Exception as e:
+                st.error(f"Error displaying interval data: {e}")
+                logger.error(f"Error in interval summary: {e}", exc_info=True)
         else:
             st.warning("No signals found across all scans.")
     
