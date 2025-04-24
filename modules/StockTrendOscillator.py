@@ -10,13 +10,6 @@ from PIL import Image
 import logging
 logging.basicConfig(level=logging.INFO)
 
-# Page configuration
-#st.set_page_config(
-    #page_title="Advanced Stock Trend Oscillator",
-    #page_icon="📈",
-    #layout="wide"
-#)
-
 # Custom CSS for better styling
 st.markdown("""
 <style>
@@ -485,7 +478,7 @@ def create_chart(df, symbol, company_name):
         ),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
+ccd            yanchor="bottom",
             y=1.02,
             xanchor="center",
             x=0.5
@@ -524,7 +517,7 @@ def analyze_stock(symbol):
         above_ema21 = latest_price > latest['EMA21']
         above_ema50 = latest_price > latest['EMA50']
         
-        # Check for crossover patterns in the last 3 periods
+        # Check for crossover patterns in the last 3 hatched periods
         recent_df = df[-10:]
         latest_buy = recent_df['BuySignal'].notna().any()
         latest_sell = recent_df['SellSignal'].notna().any()
@@ -695,8 +688,15 @@ def refresh_data():
             if result:
                 st.session_state.stock_data.append(result)
 
-def main():
-    """Main function to show the Trend Oscillator dashboard."""
+def run():
+    """Run the Advanced Stock Trend Oscillator Dashboard."""
+    # Page configuration
+    #st.set_page_config(
+        #page_title="Advanced Stock Trend Oscillator",
+        #page_icon="📈",
+        #layout="wide"
+    #)
+
     # Header with app info and last refresh
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -738,7 +738,6 @@ def main():
             st.session_state.filter_sector = sector_filter
         
         # If no data loaded yet or refresh requested, analyze all stocks
-        # If no data loaded yet or refresh requested, analyze all stocks
         if not st.session_state.stock_data or (datetime.now() - st.session_state.last_refresh).seconds > 3600:
             refresh_data()
             
@@ -752,7 +751,6 @@ def main():
             filtered_stocks = [stock for stock in filtered_stocks if stock['Sector'] == st.session_state.filter_sector]
             
         # Sort stocks: Buy signals first, then Sell signals, then None
-        # Within each group, sort by signal strength
         filtered_stocks.sort(key=lambda x: (
             0 if x['Latest Signal'] == 'Buy' else 1 if x['Latest Signal'] == 'Sell' else 2,
             -x['Signal Strength'] if 'Signal Strength' in x else 0
@@ -760,7 +758,6 @@ def main():
         
         # Display stocks based on view mode
         if st.session_state.view_mode == "grid":
-            # Grid view: display cards in a 3-column layout
             if not filtered_stocks:
                 st.info("No stocks match your filter criteria.")
             else:
@@ -769,11 +766,9 @@ def main():
                     with cols[i % 3]:
                         render_stock_card(stock)
         else:
-            # Table view: display a sortable table
             if not filtered_stocks:
                 st.info("No stocks match your filter criteria.")
             else:
-                # Create DataFrame for the table
                 table_data = [{
                     'Symbol': stock['Symbol'],
                     'Company': stock['Company Name'],
@@ -788,7 +783,6 @@ def main():
                 
                 df_table = pd.DataFrame(table_data)
                 
-                # Display with custom formatting
                 st.dataframe(
                     df_table, 
                     column_config={
@@ -806,7 +800,6 @@ def main():
                     hide_index=True
                 )
                 
-                # Add buttons for each stock
                 selected_symbol = st.selectbox(
                     "Select a stock to view its chart:",
                     [f"{stock['Symbol']} - {stock['Company Name']}" for stock in filtered_stocks]
@@ -817,7 +810,6 @@ def main():
                     st.session_state.current_chart_symbol = selected_symbol
     
     with tab2:
-        # Chart view tab
         st.markdown('<div class="tab-header">Detailed Stock Analysis</div>', unsafe_allow_html=True)
         
         if st.session_state.current_chart_symbol:
@@ -825,7 +817,6 @@ def main():
             stock_info = next((item for item in st.session_state.stock_data if item['Symbol'] == symbol), None)
             
             if stock_info:
-                # Display stock info header
                 st.markdown(f"""
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <div>
@@ -838,13 +829,11 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Display chart
                 with st.spinner(f"Generating chart for {symbol}..."):
                     df_stock = stock_info['df']
                     fig = create_chart(df_stock, symbol, stock_info['Company Name'])
                     st.plotly_chart(fig, use_container_width=True)
                 
-                # Stock metrics in columns
                 st.markdown("### Key Metrics")
                 col1, col2, col3, col4 = st.columns(4)
                 
@@ -867,15 +856,12 @@ def main():
                     st.metric("EMA50", f"{ema50_status}")
                     st.metric("Oscillator Status", f"{stock_info['Oscillator Status']}")
                 
-                # Analysis and insights
                 st.markdown("### Analysis and Insights")
                 st.markdown('<div class="insights-box" style="padding: 20px;">', unsafe_allow_html=True)
                 
-                # Display all insights
                 for insight in stock_info['Insights']:
                     st.markdown(f'<div class="insight-title" style="margin-bottom: 10px;">→ {insight}</div>', unsafe_allow_html=True)
                 
-                # Generate additional analysis based on current conditions
                 if stock_info['Latest Signal'] == 'Buy':
                     st.markdown("""
                     <h4 style="margin-top: 20px;">Buy Signal Analysis:</h4>
@@ -910,7 +896,6 @@ def main():
                 
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                # Add button to close chart
                 if st.button("← Back to Dashboard"):
                     st.session_state.current_chart_symbol = None
                     st.experimental_rerun()
@@ -920,16 +905,12 @@ def main():
             st.info("Select a stock from the dashboard to view its detailed chart and analysis.")
 
     with tab3:
-        # Settings tab
         st.markdown('<div class="tab-header">Dashboard Settings</div>', unsafe_allow_html=True)
         
         st.subheader("Stock Watchlist")
         st.write("Manage the list of stocks you want to track in the dashboard.")
         
-        # Display current stocks with option to remove
         st.markdown("### Current Watchlist")
-        
-        # Convert to DataFrame for better display
         stocks_df = pd.DataFrame([
             {
                 'Symbol': symbol,
@@ -940,7 +921,6 @@ def main():
         
         st.dataframe(stocks_df, use_container_width=True, hide_index=True)
         
-        # Add new stock
         st.markdown("### Add New Stock")
         col1, col2, col3 = st.columns([1, 1, 1])
         
@@ -963,18 +943,13 @@ def main():
                 st.success(f"{new_symbol} added to your watchlist!")
                 st.experimental_rerun()
         
-        # App settings
         st.markdown("### Application Settings")
-        
-        # Theme settings
         st.radio("Theme:", ["Light", "Dark"], horizontal=True, 
                  help="Choose the appearance theme for the dashboard")
         
-        # Data refresh rate
         st.slider("Auto-refresh interval (minutes):", 5, 60, 15, 
                   help="How often the dashboard should automatically refresh data")
         
-        # Disclaimer
         st.markdown("""
         <div style="margin-top: 50px; padding: 15px; background-color: #f8f9fa; border-radius: 5px; font-size: 0.8rem;">
         <strong>Disclaimer:</strong> This tool is for informational purposes only. It is not financial advice, and should not be used as the basis for any investment decisions.
@@ -983,4 +958,4 @@ def main():
         """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main()
+    run()
