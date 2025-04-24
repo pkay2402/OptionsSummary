@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from st_aggrid import AgGrid, GridOptionsBuilder
+#from st_aggrid import AgGrid, GridOptionsBuilder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -383,11 +383,7 @@ def render_dashboard_section(keyword, days_lookback, is_option=False):
             df = df.merge(metrics_df, on='Ticker', how='left')
             display_cols.extend(['Price', '% Change', 'Volume'])
         
-        gb = GridOptionsBuilder.from_dataframe(df[display_cols])
-        gb.configure_pagination(paginationAutoPageSize=True)
-        gb.configure_side_bar()
-        grid_options = gb.build()
-        AgGrid(df[display_cols], grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
+        st.dataframe(df[display_cols], height=300)  # Replace AgGrid with st.dataframe
         
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
