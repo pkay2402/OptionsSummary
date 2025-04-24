@@ -688,7 +688,7 @@ def refresh_data():
             if result:
                 st.session_state.stock_data.append(result)
 
-def run():
+def StockTrendOscillator_run():
     """Run the Advanced Stock Trend Oscillator Dashboard."""
     # Page configuration
     #st.set_page_config(
@@ -958,4 +958,4 @@ def run():
         """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    run()
+    StockTrendOscillator_run()
