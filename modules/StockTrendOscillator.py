@@ -478,7 +478,7 @@ def create_chart(df, symbol, company_name):
         ),
         legend=dict(
             orientation="h",
-ccd            yanchor="bottom",
+            yanchor="bottom",
             y=1.02,
             xanchor="center",
             x=0.5
