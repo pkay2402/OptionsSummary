@@ -17,6 +17,9 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Streamlit page configuration
+#st.set_page_config(page_title="Thinkorswim Scan Dashboard", layout="wide")
+
 # Initialize session state
 def init_session_state():
     if 'processed_email_ids' not in st.session_state:
@@ -44,23 +47,34 @@ RETRY_DELAY = 2  # seconds
 
 # Keyword lists
 Lower_timeframe_KEYWORDS = ["orb_bull", "orb_bear", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["rising5sma", "falling5sma", "demark13_buy", "demark13_sell", "HighVolumeSymbols", 
-                  "Long_IT_volume", "Short_IT_volume", "LSMHG_Long", "LSMHG_Short", "StockReversalLong", 
-                  "StockReversalShort"]
+DAILY_KEYWORDS = ["rising5sma", "falling5sma","demark13_buy","demark13_sell", "HighVolumeSymbols", "Long_IT_volume", "Short_IT_volume",
+                  "LSMHG_Long", "LSMHG_Short", "StockReversalLong", "StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call", "call_swing", "put_swing"]
 
-# Keyword definitions
+# Keyword definitions (minimal example; replace with your full definitions)
 KEYWORD_DEFINITIONS = {
     "orb_bull": {"description": "10 mins 9 ema crossed above opening range high of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Below the ORB high"},
     "orb_bear": {"description": "10 mins 9 ema crossed below opening range low of 30mins", "risk_level": "high", "timeframe": "Intraday", "suggested_stop": "Above the ORB low"},
     # Add other definitions here
 }
 
-# Signal classification for bullish/bearish
-BULLISH_SIGNALS = ["orb_bull", "A+Bull_30m", "tmo_long", "rising5sma", "demark13_buy", 
-                   "Long_IT_volume", "LSMHG_Long", "StockReversalLong", "UOP_Call", "call_swing"]
-BEARISH_SIGNALS = ["orb_bear", "tmo_Short", "falling5sma", "demark13_sell", 
-                   "Short_IT_volume", "LSMHG_Short", "StockReversalShort", "put_swing"]
+@lru_cache(maxsize=2)
+def get_spy_qqq_prices():
+    try:
+        spy = yf.Ticker("SPY")
+        qqq = yf.Ticker("QQQ")
+        spy_hist = spy.history(period="2d")
+        qqq_hist = qqq.history(period="2d")
+        spy_price = round(spy_hist['Close'].iloc[-1], 2)
+        qqq_price = round(qqq_hist['Close'].iloc[-1], 2)
+        spy_prev_close = spy_hist['Close'].iloc[-2]
+        qqq_prev_close = qqq_hist['Close'].iloc[-2]
+        spy_change = round(((spy_price - spy_prev_close) / spy_prev_close) * 100, 2)
+        qqq_change = round(((qqq_price - qqq_prev_close) / qqq_prev_close) * 100, 2)
+        return spy_price, qqq_price, spy_change, qqq_change
+    except Exception as e:
+        logger.error(f"Error fetching market prices: {e}")
+        return None, None, None, None
 
 def connect_to_email(retries=MAX_RETRIES):
     for attempt in range(retries):
@@ -312,44 +326,6 @@ def aggregate_all_scans(days_lookback):
         logger.error(f"Error in aggregate_all_scans: {e}")
         return pd.DataFrame(columns=['Interval', 'Ticker', 'Type', 'Scans', 'Price', '% Change', 'Volume'])
 
-def get_bullish_bearish_summary(summary_df):
-    today = datetime.date.today()
-    today_df = summary_df[summary_df['Interval'].dt.date == today]
-    
-    if today_df.empty:
-        return pd.DataFrame(), pd.DataFrame(), {}
-    
-    # Classify signals as bullish or bearish
-    def classify_signal(scans):
-        signals = scans.split(', ')
-        bullish = [s for s in signals if s in BULLISH_SIGNALS]
-        bearish = [s for s in signals if s in BEARISH_SIGNALS]
-        return pd.Series({'Bullish': bullish, 'Bearish': bearish})
-    
-    today_df[['Bullish', 'Bearish']] = today_df['Scans'].apply(classify_signal)
-    
-    # Extract bullish and bearish signals
-    bullish_signals = today_df[today_df['Bullish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bullish']]
-    bearish_signals = today_df[today_df['Bearish'].str.len() > 0][['Interval', 'Ticker', 'Type', 'Bearish']]
-    
-    # Compute statistics
-    stats = {
-        'Total Bullish Signals': len(bullish_signals),
-        'Total Bearish Signals': len(bearish_signals),
-        'Unique Bullish Tickers': len(bullish_signals['Ticker'].unique()) if not bullish_signals.empty else 0,
-        'Unique Bearish Tickers': len(bearish_signals['Ticker'].unique()) if not bearish_signals.empty else 0,
-        'Bullish Signal Types': pd.Series([s for sublist in bullish_signals['Bullish'] for s in sublist]).value_counts().to_dict() if not bullish_signals.empty else {},
-        'Bearish Signal Types': pd.Series([s for sublist in bearish_signals['Bearish'] for s in sublist]).value_counts().to_dict() if not bearish_signals.empty else {}
-    }
-    
-    # Format signal columns for display
-    bullish_signals = bullish_signals.copy()
-    bearish_signals = bearish_signals.copy()
-    bullish_signals['Bullish'] = bullish_signals['Bullish'].apply(lambda x: ', '.join(x))
-    bearish_signals['Bearish'] = bearish_signals['Bearish'].apply(lambda x: ', '.join(x))
-    
-    return bullish_signals, bearish_signals, stats
-
 def render_dashboard_section(keyword, days_lookback, is_option=False):
     if is_option:
         df = extract_option_symbols_from_email(EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback)
@@ -412,6 +388,13 @@ def run():
 
     st.title("Thinkorswim Scan Dashboard")
     col1, col2, col3 = st.columns([2, 2, 1])
+    spy_price, qqq_price, spy_change, qqq_change = get_spy_qqq_prices()
+    with col1:
+        if spy_price:
+            st.metric("SPY", f"${spy_price}", f"{spy_change:+.2f}%")
+    with col2:
+        if qqq_price:
+            st.metric("QQQ", f"${qqq_price}", f"{qqq_change:+.2f}%")
     with col3:
         if st.button("🔄 Refresh"):
             st.session_state.cached_data.clear()
@@ -424,53 +407,14 @@ def run():
         st.session_state.last_refresh_time = time.time()
         st.rerun()
     
-    # Tabs for different scan types
+    # Tabs for different scan types, with All Scans Summary as first
     tabs = st.tabs(["All Scans Summary", "Lower Timeframe", "Daily", "High Conviction", "Live Options"])
     
     with tabs[0]:
         st.header("All Scans Summary")
         summary_df = aggregate_all_scans(days_lookback)
-        
-        # Bullish and Bearish Summary
-        st.subheader("Today's Bullish and Bearish Signals")
-        bullish_signals, bearish_signals, stats = get_bullish_bearish_summary(summary_df)
-        
-        # Display summary statistics
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Total Bullish Signals", stats.get('Total Bullish Signals', 0))
-            st.metric("Unique Bullish Tickers", stats.get('Unique Bullish Tickers', 0))
-            st.write("**Bullish Signal Breakdown**")
-            for signal, count in stats.get('Bullish Signal Types', {}).items():
-                st.write(f"{signal}: {count}")
-        with col2:
-            st.metric("Total Bearish Signals", stats.get('Total Bearish Signals', 0))
-            st.metric("Unique Bearish Tickers", stats.get('Unique Bearish Tickers', 0))
-            st.write("**Bearish Signal Breakdown**")
-            for signal, count in stats.get('Bearish Signal Types', {}).items():
-                st.write(f"{signal}: {count}")
-        
-        # Display bullish signals
-        if not bullish_signals.empty:
-            st.subheader("Bullish Signals")
-            gb = GridOptionsBuilder.from_dataframe(bullish_signals)
-            gb.configure_pagination(paginationAutoPageSize=True)
-            gb.configure_side_bar()
-            grid_options = gb.build()
-            AgGrid(bullish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
-        
-        # Display bearish signals
-        if not bearish_signals.empty:
-            st.subheader("Bearish Signals")
-            gb = GridOptionsBuilder.from_dataframe(bearish_signals)
-            gb.configure_pagination(paginationAutoPageSize=True)
-            gb.configure_side_bar()
-            grid_options = gb.build()
-            AgGrid(bearish_signals, grid_options=grid_options, height=300, fit_columns_on_grid_load=True)
-        
-        # Existing interval-based summary
         if not summary_df.empty:
-            st.subheader("All Signals by Interval")
+            # Split by 30-minute intervals
             intervals = summary_df['Interval'].unique()
             for interval in sorted(intervals, reverse=True):
                 interval_df = summary_df[summary_df['Interval'] == interval]
@@ -521,6 +465,7 @@ def run():
                 AgGrid(high_conviction_df, grid_options=gb.build(), height=300, fit_columns_on_grid_load=True)
                 
                 csv = high_conviction_df.to_csv(index=False).encode('utf-8')
+
                 st.download_button(
                     label="Download High Conviction Data",
                     data=csv,
