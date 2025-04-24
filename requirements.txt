@@ -18,5 +18,4 @@ nest_asyncio
 beautifulsoup4
 plotly
 holidays
-streamlit-aggrid
-st-aggrid
+streamlit-aggrid==1.1.14
