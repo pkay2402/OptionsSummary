@@ -37,7 +37,7 @@ STOCK_LISTS = {
     "Sector ETF": ["XLF", "XLE", "XLV", "XLY", "XLC", "XLI", "XLB", "XLRE", "XLU", "XLP", "XBI", "XOP", "XME", "XRT", "XHB"],
     "Tech Giants": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSM", "AVGO", "ADBE", 
                "CRM", "ORCL", "CSCO", "AMD", "INTC", "IBM", "TXN", "QCOM", "AMAT", "MU", "NOW"],
-    "Dow Components": ["AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW", "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT"],
+    "Dow Components": ["AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT"],
     "Financial Sector": ["JPM", "BAC", "WFC", "C", "GS", "MS", "BLK", "AXP", "USB", "PNC"],
     "Healthcare Leaders": ["JNJ", "PFE", "MRK", "ABBV", "BMY", "LLY", "AMGN", "GILD", "REGN", "BIIB"],
     "Energy Stocks": ["XOM", "CVX", "COP", "EOG", "SLB", "PXD", "OXY", "DVN", "MPC", "PSX"],
