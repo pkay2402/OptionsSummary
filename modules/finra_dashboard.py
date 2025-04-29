@@ -1236,8 +1236,8 @@ def run():
     
     # Cumulative Volume Tab
     with tabs[6]:
-        st.subheader("Cumulative Volume Analysis (Last 7 Days)")
-        st.write("Stocks where cumulative bought volume exceeds cumulative sold volume over the last 7 days, sorted by Buy/Sell Ratio.")
+        st.subheader("Cumulative Volume Analysis (Last 4 Days)")
+        st.write("Stocks where cumulative bought volume exceeds cumulative sold volume over the last 4 days, sorted by Buy/Sell Ratio.")
         
         if st.button("Generate Cumulative Volume Analysis"):
             with st.spinner("Analyzing cumulative volume data..."):
