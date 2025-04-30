@@ -1,5 +1,3 @@
-import appdirs as ad
-ad.user_cache_dir = lambda *args: "/tmp"
 yfinance==0.2.57
 streamlit
 requests
@@ -15,8 +13,6 @@ nest_asyncio
 newsapi-python
 kaleido
 scipy
-seaborn
-nest_asyncio
 beautifulsoup4
 plotly
 holidays
