@@ -28,7 +28,7 @@ theme_mapping = {
         "SPXL", "UPRO", "TQQQ", "SOXL", "UDOW", "FAS", "SPUU", "TNA"
     ],
     "Bear Leverage ETF": [
-        "SQQQ", "SPXS", "SOXS", "SDOW", "FAZ", "SPDN", "TZA", "SPXU"
+        "SQQQ", "SPXS", "SOXS", "SDOW", "FAZ","SPDN", "TZA", "SPXU"
     ],
     "Volatility": [
         "VXX", "VIXY", "UVXY"
@@ -515,60 +515,6 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
         high_sell_df['buy_to_sell_ratio'] = high_sell_df['buy_to_sell_ratio'].round(2)
     return high_buy_df, high_sell_df, latest_date
 
-# Cumulative Volume Analysis
-def generate_cumulative_volume_analysis(lookback_days=4, min_avg_ratio=1.1, max_stocks=40):
-    symbol_themes = {}
-    for theme, symbols in theme_mapping.items():
-        for symbol in symbols:
-            if symbol not in symbol_themes:
-                symbol_themes[symbol] = theme
-    all_symbols = list(symbol_themes.keys())
-    
-    cumulative_data = []
-    for symbol in all_symbols:
-        cumulative_bought = 0
-        cumulative_sold = 0
-        buy_sell_ratios = []
-        valid_days = 0
-        
-        for i in range(lookback_days):
-            date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
-            data = download_finra_short_sale_data(date)
-            if data:
-                df = process_finra_short_sale_data(data)
-                symbol_data = df[df['Symbol'] == symbol]
-                if not symbol_data.empty:
-                    row = symbol_data.iloc[0]
-                    total_volume = row.get('TotalVolume', 0)
-                    metrics = calculate_metrics(row, total_volume)
-                    cumulative_bought += metrics['bought_volume']
-                    cumulative_sold += metrics['sold_volume']
-                    buy_sell_ratios.append(metrics['buy_to_sell_ratio'])
-                    valid_days += 1
-        
-        if valid_days > 0 and cumulative_bought > cumulative_sold:
-            avg_buy_sell_ratio = sum(buy_sell_ratios) / len(buy_sell_ratios) if buy_sell_ratios else 0
-            if avg_buy_sell_ratio > min_avg_ratio:
-                buy_sell_ratio = cumulative_bought / cumulative_sold if cumulative_sold > 0 else float('inf')
-                stock_info = get_stock_info_from_db(symbol)
-                cumulative_data.append({
-                    'Symbol': symbol,
-                    'Theme': symbol_themes[symbol],
-                    'Cumulative Bought Volume': int(cumulative_bought),
-                    'Cumulative Sold Volume': int(cumulative_sold),
-                    'Buy/Sell Ratio': round(buy_sell_ratio, 2),
-                    'Avg Buy/Sell Ratio': round(avg_buy_sell_ratio, 2),
-                    'Price': round(stock_info['price'], 2),
-                    'Market Cap (M)': round(stock_info['market_cap'] / 1_000_000, 2),
-                    'Days Analyzed': valid_days
-                })
-    
-    df = pd.DataFrame(cumulative_data)
-    if not df.empty:
-        df = df.sort_values(by='Buy/Sell Ratio', ascending=False)
-        df = df.head(max_stocks)  # Limit to max_stocks
-    return df, datetime.now().strftime("%Y%m%d")
-
 # Alert check
 def check_alerts(df_results: pd.DataFrame, symbol: str, threshold: float = 2.0) -> None:
     if not df_results.empty and df_results['buy_to_sell_ratio'].max() > threshold:
@@ -638,14 +584,12 @@ def process_natural_language_query(query: str, theme_mapping: dict) -> dict:
         result['params']['min_price'] = 5.0
         result['params']['min_market_cap'] = 500
         result['params']['use_price_validation'] = True
-    elif any(keyword in query for keyword in ['cumulative', 'volume', 'bought volume', 'sold volume']):
-        result['intent'] = 'cumulative_volume'
-        result['params']['lookback_days'] = extract_days(query)
     else:
         result['error'] = f"Unrecognized query: {query}. Try phrases like 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days', 'Show accumulation patterns', or 'Summarize sentiment for Financials'."
     return result
 
 def run():
+    #st.set_page_config(page_title="FINRA Short Sale Analysis")
     st.markdown("""
         <style>
         .stButton>button {
@@ -678,12 +622,11 @@ def run():
         st.session_state['theme_summary'] = None
     if 'stock_summary' not in st.session_state:
         st.session_state['stock_summary'] = None
-    if 'cumulative_volume' not in st.session_state:
-        st.session_state['cumulative_volume'] = None
+    
     
     # Natural Language Query Interface
     st.subheader("Ask a Question")
-    query = st.text_input("Enter your query (e.g., 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days', 'Show accumulation patterns', 'Show cumulative volume')", "")
+    query = st.text_input("Enter your query (e.g., 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days', 'Show accumulation patterns')", "")
     if query:
         with st.spinner("Processing your query..."):
             query_result = process_natural_language_query(query, theme_mapping)
@@ -747,7 +690,7 @@ def run():
                         with metrics_col3:
                             st.metric(f"Days Above {threshold}", significant_days)
                         check_alerts(results_df, symbol)
-                        fig = px.line(results_df, x='date', y='buy_to_sell_ratio',
+                        fig = px.line(results_df, x='date shaky ', y='buy_to_sell_ratio',
                                       title=f"{symbol} Buy/Sell Ratio Over Time",
                                       hover_data=['total_volume', 'short_volume_ratio'])
                         fig.add_hline(y=threshold, line_dash="dash", line_color="red",
@@ -867,37 +810,9 @@ def run():
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.write(f"No {pattern_type} patterns detected with current filters.")
-                
-                elif intent == 'cumulative_volume':
-                    lookback_days = params['lookback_days']
-                    cumulative_df, latest_date = generate_cumulative_volume_analysis(lookback_days)
-                    st.session_state['cumulative_volume'] = {'df': cumulative_df, 'date': latest_date}
-                    st.write(f"### Cumulative Volume Analysis (Last {lookback_days} Days)")
-                    if not cumulative_df.empty:
-                        st.dataframe(cumulative_df.style.format({
-                            'Buy/Sell Ratio': '{:.2f}',
-                            'Cumulative Bought Volume': '{:,.0f}',
-                            'Cumulative Sold Volume': '{:,.0f}',
-                            'Price': '{:.2f}',
-                            'Market Cap (M)': '{:,.2f}',
-                            'Days Analyzed': '{:d}'
-                        }))
-                        fig = px.bar(
-                            cumulative_df.head(10),
-                            x='Symbol',
-                            y='Buy/Sell Ratio',
-                            color='Theme',
-                            title="Top 10 Stocks by Cumulative Buy/Sell Ratio",
-                            hover_data=['Cumulative Bought Volume', 'Cumulative Sold Volume', 'Price', 'Market Cap (M)']
-                        )
-                        fig.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.write("No stocks found with cumulative bought volume exceeding sold volume.")
     
     # Create tabs
-    tab_names = ["Recommendations", "Theme Summary", "Stock Summary", "Single Stock", 
-                 "Theme Analysis", "Accumulation/Distribution", "Cumulative Volume"]
+    tab_names = ["Recommendations", "Theme Summary", "Stock Summary", "Single Stock", "Theme Analysis", "Accumulation/Distribution"]
     tabs = st.tabs(tab_names)
     
     # Recommendations Tab
@@ -1200,6 +1115,7 @@ def run():
             pattern_type = st.selectbox("Pattern Type", ["Accumulation", "Distribution"], index=0)
         if st.button("Find Patterns"):
             with st.spinner(f"Updating stock data and finding {pattern_type.lower()} patterns..."):
+                # Automatically update database with all symbols from theme_mapping
                 all_symbols = set()
                 for symbols in theme_mapping.values():
                     all_symbols.update(symbols)
@@ -1219,7 +1135,7 @@ def run():
             if not pattern_df.empty:
                 st.dataframe(pattern_df.style.background_gradient(
                     subset=['Avg Buy/Sell Ratio'],
-                    cmap='Greens' if pattern_type.lower() == 'accumulation' else 'Reds'
+                    cmap='Greens' if pattern_type == 'accumulation' else 'Reds'
                 ), use_container_width=True)
                 fig = px.bar(
                     pattern_df.head(10),
@@ -1233,50 +1149,6 @@ def run():
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.write(f"No {pattern_type.lower()} patterns detected with current filters. Try relaxing volume, price, or market cap filters, or disabling price validation.")
-    
-    # Cumulative Volume Tab
-    with tabs[6]:
-        st.subheader("Cumulative Volume Analysis (Last 4 Days)")
-        st.write("Stocks where cumulative bought volume exceeds cumulative sold volume over the last 4 days, sorted by Buy/Sell Ratio.")
-        
-        if st.button("Generate Cumulative Volume Analysis"):
-            with st.spinner("Analyzing cumulative volume data..."):
-                cumulative_df, latest_date = generate_cumulative_volume_analysis()
-                st.session_state['cumulative_volume'] = {'df': cumulative_df, 'date': latest_date}
-        
-            if 'cumulative_volume' in st.session_state and st.session_state['cumulative_volume'] is not None:
-                cumulative_data = st.session_state['cumulative_volume']
-                cumulative_df = cumulative_data['df']
-                latest_date = cumulative_data['date']
-            
-            if latest_date:
-                st.write(f"Data analyzed up to: {latest_date}")
-            
-            if not cumulative_df.empty:
-                def highlight_cumulative(row):
-                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
-                
-                st.dataframe(cumulative_df.style.apply(highlight_cumulative, axis=1).format({
-                    'Buy/Sell Ratio': '{:.2f}',
-                    'Cumulative Bought Volume': '{:,.0f}',
-                    'Cumulative Sold Volume': '{:,.0f}',
-                    'Price': '{:.2f}',
-                    'Market Cap (M)': '{:,.2f}',
-                    'Days Analyzed': '{:d}'
-                }))
-                
-                fig = px.bar(
-                    cumulative_df.head(10),
-                    x='Symbol',
-                    y='Buy/Sell Ratio',
-                    color='Theme',
-                    title="Top 10 Stocks by Cumulative Buy/Sell Ratio",
-                    hover_data=['Cumulative Bought Volume', 'Cumulative Sold Volume', 'Price', 'Market Cap (M)']
-                )
-                fig.update_layout(xaxis_tickangle=-45)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.write("No stocks found with cumulative bought volume exceeding sold volume.")
 
 if __name__ == "__main__":
     run()
