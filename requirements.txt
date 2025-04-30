@@ -1,4 +1,4 @@
-yfinance==0.2.57  # Use the version you need
+yfinance==0.2.57
 streamlit
 requests
 streamlit-autorefresh
