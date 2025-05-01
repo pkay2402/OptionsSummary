@@ -1,4 +1,4 @@
-yfinance
+yfinance==0.2.57
 streamlit
 requests
 streamlit-autorefresh
