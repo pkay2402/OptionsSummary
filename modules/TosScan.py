@@ -38,8 +38,8 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 # Define keywords for different scan types
-Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "A+Bull_30m", "tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "bull_Daily_sqz", 
+Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "sqz_30", "tmo_long", "tmo_Short"]
+DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "demark13_buy", "demark13_sell","bull_Daily_sqz", 
 "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short","StockReversalLong","StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call","call_swing","put_swing"]
 
@@ -74,12 +74,6 @@ KEYWORD_DEFINITIONS = {
         "risk_level": "high",
         "timeframe": "Intraday. Enter at vwap test/and trading above 9 ema on 10mins",
         "suggested_stop": "below vwap"
-    },
-    "A+Bull_30m": {
-        "description": "oversold stocks entering bullish zone",
-        "risk_level": "medium",
-        "timeframe": "2 weeks",
-        "suggested_stop": "below recent low/support"
     },
     "tmo_long": {
         "description": "oversold stocks entering bullish momentum on 60mins",
