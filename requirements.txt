@@ -18,3 +18,4 @@ plotly
 holidays
 streamlit-aggrid
 appdirs==1.4.4
+curl-cffi
