@@ -10,13 +10,16 @@ import numpy as np
 from math import ceil
 from datetime import datetime, timedelta, date
 from scipy import stats
-import requests
+from curl_cffi import requests
 import io
 from io import StringIO
 import pytz
 import logging
 from typing import List, Optional
 import holidays
+
+# Create a session impersonating Chrome
+session = requests.Session(impersonate="chrome")
 
 last_fetch_time = datetime.now()
 
@@ -85,7 +88,7 @@ def fetch_options_flow_data(urls: List[str], ticker: str) -> pd.DataFrame:
 def get_current_price(ticker: str) -> float:
     """Fetch the current price of the ticker using yfinance."""
     try:
-        stock = yf.Ticker(ticker)
+        stock = yf.Ticker(ticker,session=session)
         return stock.history(period="1d")['Close'].iloc[-1]
     except Exception as e:
         logger.error(f"Error fetching current price for {ticker}: {e}")
