@@ -19,7 +19,12 @@ from typing import List, Optional
 import holidays
 
 # Create a session impersonating Chrome
-session = requests.Session(impersonate="chrome")
+proxies = {
+    "http": "http://your_proxy_ip:proxy_port",
+    "https": "http://your_proxy_ip:proxy_port",
+}
+
+session = requests.Session(impersonate="chrome", proxies=proxies)
 
 last_fetch_time = datetime.now()
 
