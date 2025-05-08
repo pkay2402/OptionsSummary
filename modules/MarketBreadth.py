@@ -4,15 +4,8 @@ import pandas as pd
 import ta
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import requests
-import time
 
 # --- Streamlit Configuration ---
-st.set_page_config(
-    page_title="Breadth Analysis Dashboard (Nasdaq 100 & S&P 500)",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS for styling
 st.markdown(
@@ -58,7 +51,8 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Define ticker lists
+# Define ticker lists before using them in the sidebar
+# Static lists of tickers
 nasdaq_100_tickers = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "AVGO", "PEP", "COST",
     "CSCO", "ADBE", "TXN", "CMCSA", "NFLX", "QCOM", "AMD", "INTC", "HON", "AMAT",
@@ -67,6 +61,7 @@ nasdaq_100_tickers = [
     "ORLY", "MCHP", "SNPS", "FTNT", "CDNS", "AEP", "XEL", "IDXX"
 ]
 
+# Top 50 S&P 500 stocks by market cap (as of recent data)
 sp_500_top_50_tickers = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "UNH",
     "V", "MA", "HD", "PG", "DIS", "ADBE", "NFLX", "CRM", "KO", "PEP",
@@ -80,21 +75,13 @@ with st.sidebar:
     st.header("📊 Dashboard Settings")
     st.markdown("Configure the analysis parameters below:")
     
-    # Polygon.io API Key Input
-    try:
-        POLYGON_API_KEY = st.secrets["polygon"]["api_key"]
-    except (KeyError, FileNotFoundError):
-        POLYGON_API_KEY = st.text_input("Enter Polygon.io API Key", type="password")
-        if not POLYGON_API_KEY:
-            st.warning("Please provide a Polygon.io API key to fetch data.")
-    
     # Index selection
     index_choice = st.selectbox("Select Index", ["Nasdaq 100 (QQQ)", "S&P 500 (SPY)"])
     index_ticker = "QQQ" if index_choice == "Nasdaq 100 (QQQ)" else "SPY"
     index_name = "Nasdaq 100" if index_choice == "Nasdaq 100 (QQQ)" else "S&P 500"
     
     today = datetime.now().date()
-    three_months_ago = today - timedelta(days=90)
+    three_months_ago = today - timedelta(days=20)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -118,6 +105,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"### Stocks Used for {index_name}")
     
+    # Select tickers based on index choice
     if index_choice == "Nasdaq 100 (QQQ)":
         st.write(f"Using {len(nasdaq_100_tickers)} stocks from Nasdaq 100 index")
         if st.checkbox("Show all stocks"):
@@ -137,52 +125,11 @@ st.markdown('<div class="subheader">1. Data Acquisition</div>', unsafe_allow_htm
 tickers = nasdaq_100_tickers if index_ticker == "QQQ" else sp_500_top_50_tickers
 
 @st.cache_data
-def fetch_polygon_data(ticker, start, end, api_key):
-    """
-    Fetch stock data from Polygon.io for a given ticker and date range.
-    Returns a pandas DataFrame or None if data is unavailable.
-    """
-    try:
-        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
-        params = {
-            "adjusted": "true",
-            "sort": "asc",
-            "apiKey": api_key
-        }
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get("resultsCount", 0) == 0 or "results" not in data:
-            return None
-        
-        # Convert Polygon.io data to DataFrame
-        df = pd.DataFrame(data["results"])
-        df["date"] = pd.to_datetime(df["t"], unit="ms")
-        df.set_index("date", inplace=True)
-        df = df.rename(columns={
-            "o": "Open",
-            "h": "High",
-            "l": "Low",
-            "c": "Close",
-            "v": "Volume"
-        })
-        df = df[["Open", "High", "Low", "Close", "Volume"]]
-        return df
-    except Exception as e:
-        st.warning(f"Polygon.io error for {ticker}: {e}")
-        return None
-
-@st.cache_data
-def fetch_yfinance_data(ticker, start, end):
-    """
-    Fetch stock data from yfinance as a fallback.
-    Returns a pandas DataFrame or None if data is unavailable.
-    """
+def fetch_stock_data(ticker, start, end):
     try:
         data = yf.download(ticker, start=start, end=end, progress=False)
         if data.empty:
-            st.warning(f"No yfinance data returned for {ticker}")
+            st.warning(f"No data returned for {ticker}")
             return None
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
@@ -191,25 +138,12 @@ def fetch_yfinance_data(ticker, start, end):
             return None
         return data
     except Exception as e:
-        st.warning(f"yfinance error for {ticker}: {e}")
+        st.warning(f"Could not fetch data for {ticker}: {e}")
         return None
-
-@st.cache_data
-def fetch_stock_data(ticker, start, end, api_key):
-    """
-    Fetch stock data, prioritizing Polygon.io and falling back to yfinance.
-    """
-    if api_key:
-        data = fetch_polygon_data(ticker, start, end, api_key)
-        if data is not None and not data.empty:
-            return data
-        st.warning(f"Falling back to yfinance for {ticker} due to Polygon.io data issue.")
-    
-    return fetch_yfinance_data(ticker, start, end)
 
 # Fetch index data (QQQ or SPY)
 with st.spinner(f"Fetching {index_ticker} data..."):
-    index_data = fetch_stock_data(index_ticker, start_date, end_date, POLYGON_API_KEY)
+    index_data = fetch_stock_data(index_ticker, start_date, end_date)
     if index_data is None or index_data.empty:
         st.warning(f"Invalid or missing {index_ticker} data.")
         st.stop()
@@ -221,13 +155,10 @@ status_text = st.empty()
 stock_data = {}
 for i, ticker in enumerate(tickers):
     status_text.text(f"Fetching data for {ticker}...")
-    data = fetch_stock_data(ticker, start_date, end_date, POLYGON_API_KEY)
+    data = fetch_stock_data(ticker, start_date, end_date)
     if data is not None and not data.empty:
         stock_data[ticker] = data
     progress_bar.progress((i + 1) / len(tickers))
-    # Respect Polygon.io rate limits (5 calls/min for free tier)
-    if POLYGON_API_KEY and i % 5 == 0:
-        time.sleep(12)  # Wait 12 seconds after every 5 calls
 progress_bar.empty()
 status_text.empty()
 
@@ -276,6 +207,7 @@ with st.spinner("Calculating moving averages..."):
     processed_stock_data = {}
     for ticker, df in stock_data.items():
         processed_stock_data[ticker] = calculate_moving_averages(df, ma_windows)
+
     index_data = calculate_moving_averages(index_data, ma_windows)
 
 # --- Breadth Analysis ---
@@ -297,23 +229,27 @@ def calculate_breadth(data_dict, ma_windows):
         for ticker, df in data_dict.items():
             if df is not None and not df.empty:
                 df_filtered = df[df.index.isin(common_dates) &
-                                df['Close'].notna() &
-                                df[f'MA_{ma}'].notna()]
+                                  df['Close'].notna() &
+                                  df[f'MA_{ma}'].notna()]
                 if not df_filtered.empty:
                     valid = df_filtered['Close'] > df_filtered[f'MA_{ma}']
                     above_ma += valid.groupby(df_filtered.index).sum().reindex(common_dates, fill_value=0).astype(int)
         breadth_df[f'Above_MA_{ma}'] = above_ma
         breadth_df[f'Below_MA_{ma}'] = len(data_dict) - above_ma
+
     return breadth_df
 
 with st.spinner("Performing breadth analysis..."):
     breadth_df = calculate_breadth(processed_stock_data, ma_windows)
 
-# --- Trend Analysis ---
+# --- Now we can do the trend analysis after breadth_df is defined ---
 st.markdown(f'<div class="subheader">Current Trend Analysis for {index_ticker}</div>', unsafe_allow_html=True)
 
 if not breadth_df.empty:
+    # Analyze trends based on breadth and price movements
     trend_insights = []
+    
+    # 1. Breadth Trend: Percentage of stocks above MA over the last 5 days
     recent_breadth = breadth_df.tail(5)
     for ma in ma_windows:
         avg_above_ma = recent_breadth[f'Above_MA_{ma}'].mean() / len(stock_data) * 100
@@ -324,6 +260,7 @@ if not breadth_df.empty:
         else:
             trend_insights.append(f"**{ma}-day MA Breadth**: Neutral ({avg_above_ma:.1f}% of stocks above MA)")
     
+    # 2. Price vs. Moving Averages: Check if index price is above/below MAs
     index_aligned = index_data.join(breadth_df, how='inner')
     latest_data = index_aligned.tail(1)
     for ma in ma_windows:
@@ -332,6 +269,7 @@ if not breadth_df.empty:
         else:
             trend_insights.append(f"**Price vs. {ma}-day MA**: Bearish (Price below MA)")
     
+    # 3. Price Momentum: Percentage change over the last 5 days
     recent_prices = index_aligned['Close'].tail(5)
     if len(recent_prices) >= 5:
         price_change = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0] * 100
@@ -342,6 +280,7 @@ if not breadth_df.empty:
         else:
             trend_insights.append(f"**Price Momentum**: Neutral ({price_change:.1f}% change over 5 days)")
     
+    # Overall Trend Summary
     bullish_signals = sum(1 for insight in trend_insights if "Bullish" in insight)
     bearish_signals = sum(1 for insight in trend_insights if "Bearish" in insight)
     
@@ -454,7 +393,7 @@ else:
 st.markdown("---")
 st.markdown(
     '<div style="text-align: center; color: #666;">'
-    'Breadth Analysis Dashboard | Powered by Streamlit, Polygon.io & yfinance | Data as of May 2025'
+    'Breadth Analysis Dashboard | Powered by Streamlit & yfinance | Data as of May 2025'
     '</div>',
     unsafe_allow_html=True
 )
