@@ -14,7 +14,7 @@ newsapi-python
 kaleido
 scipy
 beautifulsoup4
-plotly
+plotly==5.23.0
 holidays
 streamlit-aggrid
 appdirs==1.4.4
