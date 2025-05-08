@@ -39,6 +39,9 @@ theme_mapping = {
     "Commodities": [
         "SPY", "GLD", "SLV", "USO", "UNG", "DBA", "DBB", "DBC"
     ],
+    "Crypto": [
+        "IBIT", "FBTC", "MSTR", "COIN", "HOOD", "ETHU"
+    ],
     "Metals": [
         "GLD", "SLV", "GDX", "GDXJ", "IAU", "SIVR"
     ],
