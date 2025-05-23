@@ -39,6 +39,9 @@ theme_mapping = {
     "Commodities": [
         "SPY", "GLD", "SLV", "USO", "UNG", "DBA", "DBB", "DBC"
     ],
+    "Nuclear Power": [
+        "CEG", "NNE", "GEV", "OKLO", "UUUU", "ASPI", "CCJ"
+    ],
     "Crypto": [
         "IBIT", "FBTC", "MSTR", "COIN", "HOOD", "ETHU"
     ],
