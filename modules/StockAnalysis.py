@@ -1,516 +1,612 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import numpy as np
-from math import ceil
 from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
 
-# Constants
-DEFAULT_STOCK_LIST = {
-    'AAPL': 'Apple Inc.',
-    'MSFT': 'Microsoft',
-    'GOOGL': 'Alphabet',
-    'AMZN': 'Amazon',
-    'NVDA': 'NVIDIA',
-    'META': 'Meta Platforms',
-    'TSLA': 'Tesla',
-    'AMD': 'AMD',
-    'NFLX': 'Netflix',
-    'SPY': 'SP500',
-    'QQQ': 'NQ100'
-}
+# Configure Streamlit page
+#st.set_page_config(page_title="Stock Trading Setup Scanner", layout="wide")
 
-# Technical Analysis Functions
-def calculate_rsi(data, periods=14):
-    """Calculate Relative Strength Index"""
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_wilders_ma(data, periods):
-    """Calculate Wilder's Moving Average"""
-    return data.ewm(alpha=1/periods, adjust=False).mean()
-
-def calculate_trend_oscillator(df, l1=20, l2=50):
-    """Calculate Trend Oscillator using higher timeframe data"""
-    price_change = df['Close'] - df['Close'].shift(1)
-    abs_price_change = abs(price_change)
-    
-    a1 = calculate_wilders_ma(price_change, l1)
-    a2 = calculate_wilders_ma(abs_price_change, l1)
-    
-    a3 = np.where(a2 != 0, a1 / a2, 0)
-    trend_osc = 50 * (a3 + 1)
-    
-    ema = pd.Series(trend_osc).ewm(span=l2, adjust=False).mean()
-    
-    return pd.Series(trend_osc), pd.Series(ema)
-
-def calculate_relative_strength(symbol_hist, spy_hist, lookback=20):
-    """Calculate relative strength compared to SPY"""
-    common_dates = symbol_hist.index.intersection(spy_hist.index)
-    if len(common_dates) < 2:
-        return 0, "N/A"
-    
-    symbol_change = symbol_hist['Close'].loc[common_dates].pct_change(periods=lookback).iloc[-1]
-    spy_change = spy_hist['Close'].loc[common_dates].pct_change(periods=lookback).iloc[-1]
-    
-    if spy_change != 0:
-        rs = ((1 + symbol_change) / (1 + spy_change) - 1) * 100
-        rs_status = "Strong" if rs > 0 else "Weak"
-        return round(rs, 2), rs_status
-    return 0, "N/A"
-
-def get_rsi_status(rsi):
-    """Get RSI status based on value"""
-    if rsi > 70:
-        return "Overbought"
-    elif rsi > 50:
-        return "Strong"
-    elif rsi > 30:
-        return "Weak"
-    else:
-        return "Oversold"
-
-# Data Fetching and Processing
-def fetch_stock_data(symbol, period="1d", interval="5m", spy_hist=None):
-    """Fetch and process stock data with technical indicators"""
-    try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(period=period, interval=interval)
-        if hist.empty:
-            raise ValueError(f"No data available for {symbol}")
+class TechnicalAnalyzer:
+    def __init__(self, symbol, period="3mo"):
+        self.symbol = symbol
+        self.period = period
+        self.data = None
+        self.signals = {}
         
-        # Calculate basic indicators
-        hist['Cumulative_Volume'] = hist['Volume'].cumsum()
-        hist['Cumulative_PV'] = (hist['Close'] * hist['Volume']).cumsum()
-        hist['VWAP'] = hist['Cumulative_PV'] / hist['Cumulative_Volume']
-        hist['RSI'] = calculate_rsi(hist)
-        hist['EMA21'] = hist['Close'].ewm(span=21, adjust=False).mean()
-        hist['EMA9'] = hist['Close'].ewm(span=9, adjust=False).mean()
-        hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
-        
-        # Calculate relative strength
-        rs_value, rs_status = calculate_relative_strength(hist, spy_hist) if spy_hist is not None else (0, "N/A")
-        
-        # Calculate price levels
-        today_data = hist.iloc[-1]
-        current_price = round(today_data["Close"], 2)
-        vwap = round(hist['VWAP'].iloc[-1], 2)
-        ema_21 = round(hist['EMA21'].iloc[-1], 2)
-        daily_pivot = round((hist["High"].iloc[-1] + hist["Low"].iloc[-1] + current_price) / 3, 2)
-        
-        # Determine market conditions
-        if current_price > hist['EMA9'].iloc[-1] and current_price > ema_21 and current_price > hist['EMA50'].iloc[-1]:
-            key_mas = "Bullish"
-        elif current_price < hist['EMA9'].iloc[-1] and current_price < ema_21 and current_price < hist['EMA50'].iloc[-1]:
-            key_mas = "Bearish"
-        else:
-            key_mas = "Mixed"
+    def fetch_data(self):
+        """Fetch stock data from yfinance"""
+        try:
+            ticker = yf.Ticker(self.symbol)
+            self.data = ticker.history(period=self.period)
+            return True
+        except Exception as e:
+            st.error(f"Error fetching data for {self.symbol}: {str(e)}")
+            return False
+    
+    def calculate_indicators(self):
+        """Calculate technical indicators using pandas and numpy"""
+        if self.data is None or len(self.data) < 50:
+            return False
             
-        if current_price > vwap and current_price > today_data["Open"]:
-            direction = "Bullish"
-        elif current_price < vwap and current_price < today_data["Open"]:
-            direction = "Bearish"
-        else:
-            direction = "Neutral"
+        df = self.data.copy()
+        
+        # Moving Averages
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        df['EMA_12'] = df['Close'].ewm(span=12).mean()
+        df['EMA_26'] = df['Close'].ewm(span=26).mean()
+        
+        # RSI Calculation
+        def calculate_rsi(prices, window=14):
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+        
+        df['RSI'] = calculate_rsi(df['Close'])
+        
+        # MACD Calculation
+        df['MACD'] = df['EMA_12'] - df['EMA_26']
+        df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
+        df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+        
+        # Bollinger Bands
+        def calculate_bollinger_bands(prices, window=20, num_std=2):
+            rolling_mean = prices.rolling(window=window).mean()
+            rolling_std = prices.rolling(window=window).std()
+            upper_band = rolling_mean + (rolling_std * num_std)
+            lower_band = rolling_mean - (rolling_std * num_std)
+            return upper_band, rolling_mean, lower_band
+        
+        df['BB_Upper'], df['BB_Middle'], df['BB_Lower'] = calculate_bollinger_bands(df['Close'])
+        
+        # Volume indicators
+        df['Volume_SMA'] = df['Volume'].rolling(window=20).mean()
+        
+        # Support and Resistance levels
+        df['Resistance'] = df['High'].rolling(window=20).max()
+        df['Support'] = df['Low'].rolling(window=20).min()
+        
+        # Drop any NaN values to avoid issues
+        df = df.dropna()
+        
+        self.data = df
+        return True
+    
+    def detect_patterns(self):
+        """Detect various technical patterns"""
+        if self.data is None:
+            return {}
             
-        return pd.DataFrame({
-            "Symbol": [symbol],
-            "Current Price": [current_price],
-            "VWAP": [vwap],
-            "EMA21": [ema_21],
-            "Rel Strength SPY": [rs_status],
-            "Daily Pivot": [daily_pivot],
-            "Price_Vwap": [direction],
-            "KeyMAs": [key_mas],
-            "RSI_Status": [get_rsi_status(hist['RSI'].iloc[-1])]
-        }), hist.round(2)
-    except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-
-# Visualization Functions
-def plot_candlestick(data, symbol, show_trend_oscillator=False):
-    """Create candlestick chart with optional trend oscillator"""
-    if show_trend_oscillator:
-        fig = make_subplots(rows=2, cols=1, 
-                           shared_xaxes=True,
-                           vertical_spacing=0.05,
-                           row_heights=[0.7, 0.3])
-    else:
-        fig = go.Figure()
-
-    # Add candlestick
-    fig.add_trace(
-        go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name=symbol
-        ),
-        row=1, col=1
-    )
+        df = self.data
+        current_price = df['Close'].iloc[-1]
+        current_volume = df['Volume'].iloc[-1]
+        avg_volume = df['Volume_SMA'].iloc[-1]
+        
+        patterns = {}
+        
+        # 1. Breakout Setup
+        resistance_level = df['Resistance'].iloc[-2]
+        if current_price > resistance_level * 1.001:  # 0.1% above resistance
+            patterns['Breakout'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': resistance_level * 0.98,
+                'short_target': current_price * 1.03,
+                'medium_target': current_price * 1.08,
+                'confidence': 'HIGH' if current_volume > avg_volume * 1.5 else 'MEDIUM'
+            }
+        
+        # 2. Pullback to Support
+        support_level = df['Support'].iloc[-2]
+        sma_20 = df['SMA_20'].iloc[-1]
+        if (current_price <= support_level * 1.02 and 
+            current_price > support_level * 0.98 and
+            current_price > sma_20):
+            patterns['Support_Bounce'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': support_level * 0.97,
+                'short_target': current_price * 1.04,
+                'medium_target': current_price * 1.10,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 3. RSI Oversold Bounce
+        rsi = df['RSI'].iloc[-1]
+        rsi_prev = df['RSI'].iloc[-2]
+        if rsi < 35 and rsi > rsi_prev and current_price > df['SMA_20'].iloc[-1]:
+            patterns['RSI_Oversold'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': current_price * 0.95,
+                'short_target': current_price * 1.05,
+                'medium_target': current_price * 1.12,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 4. MACD Bullish Crossover
+        macd = df['MACD'].iloc[-1]
+        macd_signal = df['MACD_Signal'].iloc[-1]
+        macd_prev = df['MACD'].iloc[-2]
+        macd_signal_prev = df['MACD_Signal'].iloc[-2]
+        
+        if (macd > macd_signal and macd_prev <= macd_signal_prev and macd < 0):
+            patterns['MACD_Bullish'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': current_price * 0.94,
+                'short_target': current_price * 1.06,
+                'medium_target': current_price * 1.15,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 5. Bollinger Band Squeeze Breakout
+        bb_upper = df['BB_Upper'].iloc[-1]
+        bb_lower = df['BB_Lower'].iloc[-1]
+        bb_width = (bb_upper - bb_lower) / df['BB_Middle'].iloc[-1]
+        bb_width_avg = ((df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']).rolling(20).mean().iloc[-1]
+        
+        if bb_width < bb_width_avg * 0.8 and current_price > bb_upper:
+            patterns['BB_Breakout'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': df['BB_Middle'].iloc[-1],
+                'short_target': current_price * 1.04,
+                'medium_target': current_price * 1.10,
+                'confidence': 'HIGH' if current_volume > avg_volume * 1.3 else 'MEDIUM'
+            }
+        
+        # 6. Moving Average Golden Cross (shorter timeframe)
+        ema_12 = df['EMA_12'].iloc[-1]
+        ema_26 = df['EMA_26'].iloc[-1]
+        ema_12_prev = df['EMA_12'].iloc[-2]
+        ema_26_prev = df['EMA_26'].iloc[-2]
+        
+        if ema_12 > ema_26 and ema_12_prev <= ema_26_prev:
+            patterns['Golden_Cross'] = {
+                'signal': 'BUY',
+                'entry': current_price,
+                'stop_loss': ema_26 * 0.97,
+                'short_target': current_price * 1.05,
+                'medium_target': current_price * 1.12,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 7. Gap Fill Opportunity (Both Long and Short)
+        if len(df) > 1:
+            prev_close = df['Close'].iloc[-2]
+            today_open = df['Open'].iloc[-1]
+            gap_percent = abs(today_open - prev_close) / prev_close
+            
+            if gap_percent > 0.02:  # 2% gap
+                # Gap down - potential long setup
+                if today_open < prev_close and current_price > (today_open + prev_close) / 2:
+                    patterns['Gap_Fill_Long'] = {
+                        'signal': 'BUY',
+                        'entry': current_price,
+                        'stop_loss': today_open * 0.98,
+                        'short_target': prev_close * 0.99,
+                        'medium_target': prev_close * 1.02,
+                        'confidence': 'MEDIUM'
+                    }
+                # Gap up - potential short setup
+                elif today_open > prev_close and current_price < (today_open + prev_close) / 2:
+                    patterns['Gap_Fill_Short'] = {
+                        'signal': 'SHORT',
+                        'entry': current_price,
+                        'stop_loss': today_open * 1.02,
+                        'short_target': prev_close * 1.01,
+                        'medium_target': prev_close * 0.99,
+                        'confidence': 'MEDIUM'
+                    }
+        
+        # 8. Resistance Rejection (Short Setup)
+        if current_price <= resistance_level * 0.999 and current_price >= resistance_level * 0.985:
+            patterns['Resistance_Rejection'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': resistance_level * 1.02,
+                'short_target': current_price * 0.97,
+                'medium_target': current_price * 0.92,
+                'confidence': 'HIGH' if current_volume > avg_volume * 1.5 else 'MEDIUM'
+            }
+        
+        # 9. RSI Overbought Rejection (Short Setup)
+        if rsi > 70 and rsi < rsi_prev and current_price < df['SMA_20'].iloc[-1]:
+            patterns['RSI_Overbought'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': current_price * 1.05,
+                'short_target': current_price * 0.95,
+                'medium_target': current_price * 0.88,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 10. MACD Bearish Crossover (Short Setup)
+        if (macd < macd_signal and macd_prev >= macd_signal_prev and macd > 0):
+            patterns['MACD_Bearish'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': current_price * 1.06,
+                'short_target': current_price * 0.94,
+                'medium_target': current_price * 0.85,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 11. Death Cross (Short Setup)
+        if ema_12 < ema_26 and ema_12_prev >= ema_26_prev:
+            patterns['Death_Cross'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': ema_12 * 1.03,
+                'short_target': current_price * 0.95,
+                'medium_target': current_price * 0.88,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 12. Bollinger Band Upper Rejection (Short Setup)
+        if (current_price >= bb_upper * 0.995 and 
+            current_price <= bb_upper * 1.005 and 
+            df['Close'].iloc[-2] > bb_upper):
+            patterns['BB_Upper_Rejection'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': bb_upper * 1.02,
+                'short_target': df['BB_Middle'].iloc[-1],
+                'medium_target': bb_lower,
+                'confidence': 'MEDIUM'
+            }
+        
+        # 13. Failed Breakout (Short Setup)
+        if (df['High'].iloc[-2] > resistance_level and 
+            current_price < resistance_level * 0.98 and
+            current_volume > avg_volume):
+            patterns['Failed_Breakout'] = {
+                'signal': 'SHORT',
+                'entry': current_price,
+                'stop_loss': resistance_level * 1.01,
+                'short_target': current_price * 0.96,
+                'medium_target': support_level * 1.02,
+                'confidence': 'HIGH'
+            }
+        
+        # 14. Double Top Pattern (Short Setup)
+        highs = df['High'].rolling(5).max()
+        if len(highs) >= 10:
+            recent_high = highs.iloc[-1]
+            prev_high = highs.iloc[-6:-1].max()
+            if (abs(recent_high - prev_high) / prev_high < 0.02 and  # Within 2%
+                current_price < recent_high * 0.97):
+                patterns['Double_Top'] = {
+                    'signal': 'SHORT',
+                    'entry': current_price,
+                    'stop_loss': recent_high * 1.02,
+                    'short_target': current_price * 0.95,
+                    'medium_target': current_price * 0.90,
+                    'confidence': 'HIGH'
+                }
+        
+        return patterns
     
-    # Add VWAP and EMAs
-    fig.add_trace(
-        go.Scatter(
-            x=data.index,
-            y=data['VWAP'],
-            name='VWAP',
-            line=dict(color='purple', width=2)
-        ),
-        row=1, col=1
-    )
-    
-    fig.add_trace(
-        go.Scatter(
-            x=data.index,
-            y=data['EMA21'],
-            name='21 EMA',
-            line=dict(color='orange', width=2)
-        ),
-        row=1, col=1
-    )
-
-    if show_trend_oscillator:
-        # Add Trend Oscillator
-        trend_osc, ema = calculate_trend_oscillator(data)
+    def create_chart(self):
+        """Create interactive chart with indicators"""
+        if self.data is None:
+            return None
+            
+        df = self.data.tail(50)  # Last 50 days
+        
+        fig = make_subplots(
+            rows=4, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.02,
+            subplot_titles=('Price & Technical Indicators', 'Volume', 'RSI', 'MACD'),
+            row_heights=[0.5, 0.15, 0.175, 0.175],
+            specs=[[{"secondary_y": False}],
+                   [{"secondary_y": False}],
+                   [{"secondary_y": False}],
+                   [{"secondary_y": False}]]
+        )
+        
+        # Candlestick chart
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df['Open'],
+                high=df['High'],
+                low=df['Low'],
+                close=df['Close'],
+                name='Price',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+        
+        # Moving averages
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['SMA_20'], name='SMA 20', 
+                      line=dict(color='orange', width=1)),
+            row=1, col=1
+        )
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['SMA_50'], name='SMA 50', 
+                      line=dict(color='blue', width=1)),
+            row=1, col=1
+        )
+        
+        # Bollinger Bands
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['BB_Upper'], name='BB Upper', 
+                      line=dict(color='gray', dash='dash', width=1),
+                      fill=None),
+            row=1, col=1
+        )
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['BB_Lower'], name='BB Lower', 
+                      line=dict(color='gray', dash='dash', width=1),
+                      fill='tonexty', fillcolor='rgba(128,128,128,0.1)'),
+            row=1, col=1
+        )
+        
+        # Volume on separate subplot
+        colors = ['red' if df['Close'].iloc[i] < df['Open'].iloc[i] else 'green' 
+                 for i in range(len(df))]
         
         fig.add_trace(
-            go.Scatter(
-                x=data.index,
-                y=trend_osc,
-                name='Trend Oscillator',
-                line=dict(color='green', width=2)
-            ),
+            go.Bar(x=df.index, y=df['Volume'], name='Volume', 
+                  marker_color=colors, opacity=0.7, showlegend=False),
             row=2, col=1
         )
         
+        # Volume moving average
         fig.add_trace(
-            go.Scatter(
-                x=data.index,
-                y=ema,
-                name='Signal Line',
-                line=dict(color='red', width=2)
-            ),
-            row=2, col=1
-        )
-
-        # Add buy/sell signals
-        buy_signals = ((trend_osc > ema) & (trend_osc.shift(1) <= ema.shift(1)))
-        sell_signals = ((trend_osc < ema) & (trend_osc.shift(1) >= ema.shift(1)))
-        
-        fig.add_trace(
-            go.Scatter(
-                x=data.index[buy_signals],
-                y=trend_osc[buy_signals],
-                mode='markers',
-                marker=dict(symbol='triangle-up', size=12, color='green'),
-                name='Buy Signal'
-            ),
+            go.Scatter(x=df.index, y=df['Volume_SMA'], name='Vol MA', 
+                      line=dict(color='black', width=1)),
             row=2, col=1
         )
         
+        # RSI
         fig.add_trace(
-            go.Scatter(
-                x=data.index[sell_signals],
-                y=trend_osc[sell_signals],
-                mode='markers',
-                marker=dict(symbol='triangle-down', size=12, color='red'),
-                name='Sell Signal'
-            ),
-            row=2, col=1
+            go.Scatter(x=df.index, y=df['RSI'], name='RSI', 
+                      line=dict(color='purple', width=2), showlegend=False),
+            row=3, col=1
         )
-
-    # Update layout
-    title = f'{symbol} Chart with Indicators'
-    if show_trend_oscillator:
-        title += ' and Trend Oscillator'
-    
-    fig.update_layout(
-        title=title,
-        yaxis_title='Price',
-        template='plotly_white' if not show_trend_oscillator else 'plotly_dark',
-        height=800 if show_trend_oscillator else 600,
-        xaxis_rangeslider_visible=False
-    )
-    
-    return fig
+        
+        # RSI levels
+        fig.add_hline(y=70, line_dash="dash", line_color="red", 
+                     annotation_text="Overbought", row=3, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", 
+                     annotation_text="Oversold", row=3, col=1)
+        fig.add_hline(y=50, line_dash="dot", line_color="gray", row=3, col=1)
+        
+        # MACD
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['MACD'], name='MACD', 
+                      line=dict(color='blue', width=2)),
+            row=4, col=1
+        )
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['MACD_Signal'], name='Signal', 
+                      line=dict(color='red', width=2)),
+            row=4, col=1
+        )
+        
+        # MACD Histogram
+        colors_macd = ['green' if val >= 0 else 'red' for val in df['MACD_Hist']]
+        fig.add_trace(
+            go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', 
+                  marker_color=colors_macd, opacity=0.6, showlegend=False),
+            row=4, col=1
+        )
+        
+        # Add zero line for MACD
+        fig.add_hline(y=0, line_dash="dash", line_color="black", row=4, col=1)
+        
+        # Update layout
+        fig.update_layout(
+            title=f'{self.symbol} - Technical Analysis',
+            xaxis_rangeslider_visible=False,
+            height=900,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        # Update y-axes labels
+        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+        fig.update_yaxes(title_text="Volume", row=2, col=1)
+        fig.update_yaxes(title_text="RSI", row=3, col=1, range=[0, 100])
+        fig.update_yaxes(title_text="MACD", row=4, col=1)
+        
+        # Remove x-axis labels for all but bottom chart
+        fig.update_xaxes(showticklabels=False, row=1, col=1)
+        fig.update_xaxes(showticklabels=False, row=2, col=1)
+        fig.update_xaxes(showticklabels=False, row=3, col=1)
+        fig.update_xaxes(title_text="Date", row=4, col=1)
+        
+        return fig
 
 def run():
-    """Main application function"""
-    # Page configuration for better spacing
-    #st.set_page_config(layout="wide", page_title="Stock Analysis Dashboard")
+    """Run the Stock Trading Setup Scanner application"""
+    st.title("🎯 Stock Trading Setup Scanner")
+    st.markdown("Analyze stocks for technical trading setups with price targets")
     
-    # Custom CSS for better spacing and styling
-    st.markdown("""
-        <style>
-        .stButton button {
-            width: 100%;
-            padding: 0.5rem;
-            background-color: #2c3e50;
-            color: white;
-            border: none;
-            border-radius: 0.5rem;
-        }
-        .stButton button:hover {
-            background-color: #34495e;
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        div[data-testid="stVerticalBlock"] > div {
-            padding: 0.5rem 0;
-        }
-        div[data-baseweb="select"] > div {
-            background-color: #2c3e50;
-            border-radius: 0.5rem;
-        }
-        .stTextArea textarea {
-            background-color: #2c3e50;
-            color: white;
-            border-radius: 0.5rem;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    # Sidebar for inputs
+    st.sidebar.header("Configuration")
     
-    # Initialize session state
-    if 'chart_symbol' not in st.session_state:
-        st.session_state['chart_symbol'] = None
+    # Default stock list
+    default_stocks = "AAPL,GOOGL,MSFT,TSLA,NVDA,AMZN,META,NFLX,AMD,PLTR,ADBE,ADI,ADP,AMAT,ASML,AVGO,JPM,CRM,CSCO,GS,DELL,EBAY,FTNT,CEG,IBM,MMM,KLAC,LRCX,MCHP,FSLR,MRVL,MU,NOW,NTAP,ORCL,PANW,PAYX,PLTR,PTC,QCOM,GE,TEAM,QQQ,TXN,UNH,WDAY,SPY,ZS"
     
-    # Main title with custom styling
-    st.markdown("""
-        <h1 style='text-align: center; color: #3498db; padding: 1rem 0;'>
-            📈 Stock Analysis Dashboard
-        </h1>
-    """, unsafe_allow_html=True)
+    # Stock input
+    stock_input = st.sidebar.text_area(
+        "Enter stock symbols (comma-separated):",
+        value=default_stocks,
+        help="Enter stock symbols separated by commas"
+    )
     
-    # Settings section with better spacing
-    st.markdown("### 🛠️ Dashboard Configuration")
-    st.markdown("<br>", unsafe_allow_html=True)
+    # Time period
+    period = st.sidebar.selectbox(
+        "Analysis Period:",
+        ["1mo", "3mo", "6mo", "1y"],
+        index=1
+    )
     
-    # Layout for settings with improved spacing
-    settings_col1, settings_col2, settings_col3, settings_col4 = st.columns([3, 2, 2, 2])
+    # Minimum confidence filter
+    min_confidence = st.sidebar.selectbox(
+        "Minimum Confidence Level:",
+        ["ALL", "MEDIUM", "HIGH"],
+        index=0
+    )
     
-    with settings_col1:
-        st.markdown("##### Enter Stock Symbols")
-        stock_list = st.text_area(
-            "",  # Remove label as we're using markdown above
-            "SPY, QQQ, AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA",
-            height=100
-        ).upper()
-        symbols = [s.strip() for s in stock_list.split(",")]
-
-    with settings_col2:
-        st.markdown("##### Time Frame")
-        time_frames = {
-            "1 Day": "1d", "5 Days": "5d", "1 Month": "1mo",
-            "3 Months": "3mo", "6 Months": "6mo", "1 Year": "1y"
-        }
-        selected_timeframe = st.selectbox("", list(time_frames.keys()), index=0)
-        period = time_frames[selected_timeframe]
-
-    with settings_col3:
-        st.markdown("##### Chart Interval")
-        intervals = ["1m", "5m", "15m", "30m", "1h", "1d"]
-        selected_interval = st.selectbox("", intervals, index=1)
-
-    with settings_col4:
-        st.markdown("##### Additional Options")
-        show_oscillator = st.checkbox("Show Trend Oscillator", value=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        auto_refresh = st.checkbox("Auto Refresh (5m)")
-
-    # Divider
-    st.markdown("<hr style='margin: 2rem 0; border-color: #3498db33;'>", unsafe_allow_html=True)
-
-    # Data display section with improved title
-    st.markdown(f"""
-        <h3 style='color: #3498db; display: flex; align-items: center; gap: 0.5rem;'>
-            📊 Market Data <span style='color: #7f8c8d; font-size: 1rem;'>
-            ({selected_timeframe}, {selected_interval})</span>
-        </h3>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Main content columns with better proportions
-    main_col1, main_col2 = st.columns([1.2, 1])
-
-    with main_col1:
-        # Fetch SPY data first for relative strength calculations
-        spy_data, spy_hist = fetch_stock_data("SPY", period=period, interval=selected_interval)
-        stock_histories = {"SPY": spy_hist}
-        all_data = pd.DataFrame()
+    if st.sidebar.button("🔍 Scan for Setups", type="primary"):
+        stock_list = [s.strip().upper() for s in stock_input.split(",") if s.strip()]
         
-        # Create an improved grid layout for stock buttons
-        num_symbols = len(symbols)
-        num_cols = 4  # Increased number of columns for better spacing
-        num_rows = ceil(num_symbols / num_cols)
+        if not stock_list:
+            st.error("Please enter at least one stock symbol")
+            return
         
-        st.markdown("""
-            <style>
-            div[data-testid="column"] > div > div > div > div > div[data-testid="stHorizontalBlock"] {
-                gap: 1rem;
-                margin-bottom: 1rem;
-            }
-            </style>
-        """, unsafe_allow_html=True)
+        # Create progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        for i in range(num_rows):
-            cols = st.columns(num_cols)
-            for j in range(num_cols):
-                idx = i * num_cols + j
-                if idx < num_symbols:
-                    symbol = symbols[idx]
-                    if symbol == "SPY":
-                        data = spy_data
-                        history = spy_hist
-                    else:
-                        data, history = fetch_stock_data(
-                            symbol, 
-                            period=period, 
-                            interval=selected_interval, 
-                            spy_hist=spy_hist
-                        )
-                    
-                    if not data.empty:
-                        all_data = pd.concat([all_data, data], ignore_index=True)
-                        stock_histories[symbol] = history
-                        
-                        # Enhanced button styling with conditional colors
-                        if not data.empty:
-                            price_direction = data.iloc[0]['Price_Vwap']
-                            button_color = ('#2ecc71' if price_direction == 'Bullish' 
-                                          else '#e74c3c' if price_direction == 'Bearish' 
-                                          else '#7f8c8d')
-                            
-                            # Create styled button container
-                            button_container = cols[j].container()
-                            
-                            # Add styled button with background color based on price direction
-                            if button_container.button(
-                                f"📈 {symbol}",
-                                key=f'btn_{symbol}',
-                                help=f"Click to view {symbol} chart",
-                                use_container_width=True
-                            ):
-                                st.session_state['chart_symbol'] = symbol
-                            
-                            # Add custom styling for the button
-                            button_container.markdown(f"""
-                                <style>
-                                    div[data-testid="stButton"] button {{
-                                        background-color: {button_color};
-                                        border: none;
-                                        padding: 0.5rem;
-                                        font-weight: bold;
-                                        color: white;
-                                        transition: all 0.3s ease;
-                                    }}
-                                    div[data-testid="stButton"] button:hover {{
-                                        filter: brightness(1.2);
-                                        transform: translateY(-2px);
-                                    }}
-                                </style>
-                            """, unsafe_allow_html=True)
-
-        # Display data table with styling
-        if not all_data.empty:
-            # Enhanced styling for the dataframe
-            styled_df = all_data.style.format({
-                'Current Price': '${:.2f}',
-                'VWAP': '${:.2f}',
-                'Daily Pivot': '${:.2f}',
-                'EMA21': '${:.2f}'
-            }).applymap(
-                lambda val: (
-                    'background-color: rgba(46, 204, 113, 0.2); color: #2ecc71; font-weight: bold;' 
-                        if val in ["Bullish", "Strong"]
-                    else 'background-color: rgba(231, 76, 60, 0.2); color: #e74c3c; font-weight: bold;' 
-                        if val in ["Bearish", "Weak"]
-                    else 'background-color: rgba(149, 165, 166, 0.2); color: #95a5a6; font-weight: bold;' 
-                        if val in ["Neutral", "Mixed"]
-                    else 'background-color: rgba(142, 68, 173, 0.2); color: #8e44ad; font-weight: bold;' 
-                        if val == "Overbought"
-                    else 'background-color: rgba(52, 152, 219, 0.2); color: #3498db; font-weight: bold;' 
-                        if val == "Oversold"
-                    else ''
-                ),
-                subset=['Price_Vwap', 'KeyMAs', 'RSI_Status', 'Rel Strength SPY']
-            ).set_properties(**{
-                'background-color': '#1a1a1a',
-                'color': '#ffffff',
-                'border-color': '#2c3e50'
-            }).set_table_styles([
-                {'selector': 'th', 'props': [
-                    ('background-color', '#2c3e50'),
-                    ('color', '#ffffff'),
-                    ('font-weight', 'bold'),
-                    ('padding', '12px'),
-                    ('border', '1px solid #34495e')
-                ]},
-                {'selector': 'td', 'props': [
-                    ('padding', '12px'),
-                    ('border', '1px solid #34495e')
-                ]}
-            ])
+        results = []
+        
+        for i, symbol in enumerate(stock_list):
+            status_text.text(f"Analyzing {symbol}...")
+            progress_bar.progress((i + 1) / len(stock_list))
             
-            st.dataframe(styled_df, use_container_width=True)
-
-    # Chart display
-    with main_col2:
-        if st.session_state['chart_symbol'] and st.session_state['chart_symbol'] in stock_histories:
-            symbol = st.session_state['chart_symbol']
-            fig = plot_candlestick(stock_histories[symbol], symbol, show_oscillator)
-            st.plotly_chart(fig, use_container_width=True)
+            analyzer = TechnicalAnalyzer(symbol, period)
             
-            if show_oscillator:
-                # Display trend oscillator metrics
-                trend_osc, ema = calculate_trend_oscillator(stock_histories[symbol])
+            if analyzer.fetch_data() and analyzer.calculate_indicators():
+                patterns = analyzer.detect_patterns()
                 
-                metric_col1, metric_col2, metric_col3 = st.columns(3)
-                with metric_col1:
-                    st.metric("Trend Oscillator", f"{trend_osc.iloc[-1]:.2f}")
-                with metric_col2:
-                    st.metric("Signal Line", f"{ema.iloc[-1]:.2f}")
-                with metric_col3:
-                    trend = "Bullish" if trend_osc.iloc[-1] > ema.iloc[-1] else "Bearish"
-                    st.metric("Current Trend", trend)
+                if patterns:
+                    for pattern_name, pattern_data in patterns.items():
+                        if min_confidence == "ALL" or pattern_data['confidence'] == min_confidence or (min_confidence == "MEDIUM" and pattern_data['confidence'] in ["MEDIUM", "HIGH"]):
+                            results.append({
+                                'Symbol': symbol,
+                                'Pattern': pattern_name,
+                                'Signal': pattern_data['signal'],
+                                'Entry': f"${pattern_data['entry']:.2f}",
+                                'Stop Loss': f"${pattern_data['stop_loss']:.2f}",
+                                'Short Target': f"${pattern_data['short_target']:.2f}",
+                                'Medium Target': f"${pattern_data['medium_target']:.2f}",
+                                'Confidence': pattern_data['confidence'],
+                                'Risk/Reward': f"{((pattern_data['short_target'] - pattern_data['entry']) / (pattern_data['entry'] - pattern_data['stop_loss'])):.2f}:1"
+                            })
+        
+        status_text.empty()
+        progress_bar.empty()
+        
+        # Display results
+        if results:
+            st.success(f"Found {len(results)} trading setups!")
+            
+            # Convert to DataFrame
+            df_results = pd.DataFrame(results)
+            
+            # Display summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Setups", len(results))
+            with col2:
+                st.metric("High Confidence", len(df_results[df_results['Confidence'] == 'HIGH']))
+            with col3:
+                st.metric("Buy Signals", len(df_results[df_results['Signal'] == 'BUY']))
+            with col4:
+                st.metric("Short Signals", len(df_results[df_results['Signal'] == 'SHORT']))
+            
+            # Results table
+            st.subheader("📊 Trading Setups")
+            
+            # Color code by confidence
+            def highlight_confidence(row):
+                if row['Confidence'] == 'HIGH':
+                    return ['background-color: #d4edda'] * len(row)
+                elif row['Confidence'] == 'MEDIUM':
+                    return ['background-color: #fff3cd'] * len(row)
+                else:
+                    return [''] * len(row)
+            
+            styled_df = df_results.style.apply(highlight_confidence, axis=1)
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # Detailed analysis for selected stock
+            st.subheader("📈 Detailed Analysis")
+            selected_symbol = st.selectbox("Select a stock for detailed chart:", 
+                                         sorted(list(set(df_results['Symbol']))))
+            
+            if selected_symbol:
+                analyzer = TechnicalAnalyzer(selected_symbol, period)
+                if analyzer.fetch_data() and analyzer.calculate_indicators():
+                    chart = analyzer.create_chart()
+                    if chart:
+                        st.plotly_chart(chart, use_container_width=True)
+                    
+                    # Current stock info
+                    current_data = analyzer.data.iloc[-1]
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Current Price", f"${current_data['Close']:.2f}")
+                    with col2:
+                        st.metric("RSI", f"{current_data['RSI']:.1f}")
+                    with col3:
+                        st.metric("Volume vs Avg", f"{(current_data['Volume']/current_data['Volume_SMA']):.1f}x")
+                    with col4:
+                        change_pct = ((current_data['Close'] - current_data['Open']) / current_data['Open']) * 100
+                        st.metric("Day Change", f"{change_pct:.2f}%")
+        
+        else:
+            st.warning("No trading setups found with the current criteria. Try adjusting the confidence level or stock list.")
+    
+    # Information section
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📚 Long Patterns")
+    st.sidebar.markdown("""
+    - **Breakout**: Price above resistance
+    - **Support Bounce**: Price near support level
+    - **RSI Oversold**: RSI < 35 with upward momentum
+    - **MACD Bullish**: MACD crosses above signal
+    - **BB Breakout**: Bollinger Band squeeze breakout
+    - **Golden Cross**: EMA 12 crosses above EMA 26
+    - **Gap Fill Long**: Gap down reversion
+    """)
+    
+    st.sidebar.markdown("### 📉 Short Patterns")
+    st.sidebar.markdown("""
+    - **Resistance Rejection**: Price fails at resistance
+    - **RSI Overbought**: RSI > 70 with downward momentum
+    - **MACD Bearish**: MACD crosses below signal
+    - **Death Cross**: EMA 12 crosses below EMA 26
+    - **BB Upper Rejection**: Rejection at upper band
+    - **Failed Breakout**: Breakout failure with volume
+    - **Double Top**: Classic reversal pattern
+    - **Gap Fill Short**: Gap up reversion
+    """)
+    
+    st.sidebar.markdown("### ⚠️ Risk Disclaimer")
+    st.sidebar.markdown("""
+    This tool is for educational purposes only. 
+    Always do your own research and manage risk appropriately.
+    Past performance does not guarantee future results.
+    """)
 
-    # Tooltip information
-    tooltips = {
-        "Current Price": "The latest closing price for the stock",
-        "VWAP": "Volume Weighted Average Price - Average price weighted by volume",
-        "EMA21": "21-period Exponential Moving Average",
-        "Rel Strength SPY": "Relative strength compared to SPY (Strong: outperforming, Weak: underperforming)",
-        "Daily Pivot": "Calculated as (High + Low + Close) / 3",
-        "Price_Vwap": "Bullish: Price > VWAP & Open, Bearish: Price < VWAP & Open, Neutral: Mixed conditions",
-        "KeyMAs": "Based on 9, 21, 50 EMAs - Bullish: Price > all EMAs, Bearish: Price < all EMAs, Mixed: Other conditions",
-        "RSI_Status": "RSI indicator status - Overbought(>70), Strong(50-70), Weak(30-50), Oversold(<30)"
-    }
-
-    with st.expander("ℹ️ Column Descriptions"):
-        for col, desc in tooltips.items():
-            st.markdown(f"**{col}**: {desc}")
-
-    # Refresh controls
-    if st.button("🔄 Refresh Data"):
-        st.rerun()
-
-    if auto_refresh:
-        st.info("Auto-refresh active. Data will update every 5 minutes.")
-        import time
-        time.sleep(300)
-        st.rerun()
+def main():
+    """Main entry point for the application"""
+    run()
 
 if __name__ == "__main__":
-    run()
+    main()
