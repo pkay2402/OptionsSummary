@@ -716,7 +716,7 @@ def run():
         default_confidence = st.multiselect(
             "Default confidence levels",
             ["HIGH", "MEDIUM"],
-            default=["HIGH", "MEDIUM"]
+            default=["HIGH"]
         )
         
         # Scan button - Make it prominent
