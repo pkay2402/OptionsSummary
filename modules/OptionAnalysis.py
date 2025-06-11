@@ -1,365 +1,509 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import requests
+from datetime import datetime, timedelta
 import os
 
-# Function to load and process the CSV file
-def load_csv(uploaded_file):
+# Function to load and process CSV file
+def load_csv(file):
     try:
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(file)
         
-        # Map columns by position if needed
-        if not all(col in df.columns for col in ['Ticker', 'Expiration Date', 'Contract Type']):
-            positional_mapping = {
-                'Trade ID': 0,
-                'Trade Time': 1,
-                'Ticker': 2,
-                'Expiration Date': 3,
-                'Days Until Expiration': 4,
-                'Strike Price': 5,
-                'Contract Type': 6,
-                'Reference Price': 7,
-                'Size': 8,
-                'Option Price': 9,
-                'Ask Price': 10,
-                'Bid Price': 11,
-                'Premium Price': 12,
-                'Trade Type': 13,
-                'Consolidation Type': 14,
-                'Is Unusual': 15,
-                'Is Golden Sweep': 16,
-                'Is Opening Position': 17,
-                'Money Type': 18,
-                'Side Code': 19  # Added Side Code to mapping
+        # Define expected columns
+        required_columns = ['Ticker', 'Expiration Date', 'Contract Type', 'Strike Price', 
+                           'Reference Price', 'Size', 'Premium Price', 'Side Code', 
+                           'Is Opening Position', 'Money Type', 'Is Unusual', 'Is Golden Sweep']
+        
+        # Map columns by position if names don't match
+        if not all(col in df.columns for col in required_columns):
+            column_mapping = {
+                2: 'Ticker', 3: 'Expiration Date', 4: 'Days Until Expiration',
+                5: 'Strike Price', 6: 'Contract Type', 7: 'Reference Price',
+                8: 'Size', 9: 'Option Price', 12: 'Premium Price', 19: 'Side Code',
+                15: 'Is Unusual', 16: 'Is Golden Sweep', 17: 'Is Opening Position',
+                18: 'Money Type'
             }
-            
-            new_columns = df.columns.tolist()
-            renamed_df = df.copy()
-            renamed_df.columns = [positional_mapping.get(i, col) for i, col in enumerate(new_columns)]
-            df = renamed_df
-
-        # Convert 'Expiration Date' to datetime for filtering
-        df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
+            df.columns = [column_mapping.get(i, col) for i, col in enumerate(df.columns)]
         
-        # Ensure numeric columns are properly converted
-        numeric_columns = ['Days Until Expiration', 'Strike Price', 'Reference Price', 
-                         'Size', 'Option Price', 'Premium Price']
+        # Convert and clean data
+        df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
+        numeric_cols = ['Strike Price', 'Reference Price', 'Size', 'Premium Price']
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace('[\$,]', '', regex=True), 
+                                  errors='coerce')
         
-        for col in numeric_columns:
-            if col in df.columns:
-                if df[col].dtype == 'object':
-                    df[col] = df[col].astype(str).str.replace('$', '').str.replace(',', '')
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        categorical_cols = ['Ticker', 'Contract Type', 'Side Code', 'Is Unusual', 
+                          'Is Golden Sweep', 'Is Opening Position', 'Money Type']
+        for col in categorical_cols:
+            df[col] = df[col].fillna('N/A').astype(str).str.strip().str.upper()
         
-        # Ensure categorical columns are strings and handle Side Code
-        categorical_columns = ['Trade Type', 'Ticker', 'Contract Type', 'Is Unusual', 
-                             'Is Golden Sweep', 'Is Opening Position', 'Money Type', 'Side Code']
-        for col in categorical_columns:
-            if col in df.columns:
-                df[col] = df[col].fillna('N/A').astype(str).str.strip()
-                if col == 'Ticker':
-                    df[col] = df[col].str.upper()
-        
-        # Filter for OUT_THE_MONEY flows only and Is Opening Position == Yes
-        df = df[(df['Money Type'] == 'OUT_THE_MONEY') & (df['Is Opening Position'] == 'Yes')]
+        # Filter for OTM and opening positions
+        df = df[(df['Money Type'] == 'OUT_THE_MONEY') & (df['Is Opening Position'] == 'YES')]
         
         return df
     except Exception as e:
-        st.error(f"Failed to load CSV: {e}")
+        st.error(f"Error loading CSV: {e}")
         return None
 
 # Function to split content for Discord
-def split_message(content: str, max_length: int = 2000) -> list:
-    """
-    Split content into parts under max_length characters while preserving line breaks.
-    """
+def split_for_discord(content, max_length=2000):
     if len(content) <= max_length:
         return [content]
     
-    messages = []
+    parts = []
     current_part = ""
-    
     for line in content.split('\n'):
         if len(current_part) + len(line) + 1 > max_length:
-            if current_part:
-                messages.append(current_part.strip())
+            parts.append(current_part.strip())
             current_part = line
         else:
             current_part += f"\n{line}" if current_part else line
-            
+    
     if current_part:
-        messages.append(current_part.strip())
-        
-    # Handle case where a single line is too long
-    final_messages = []
-    for msg in messages:
-        if len(msg) > max_length:
-            for i in range(0, len(msg), max_length):
-                final_messages.append(msg[i:i + max_length])
-        else:
-            final_messages.append(msg)
-            
-    return final_messages
+        parts.append(current_part.strip())
+    
+    return parts
 
-# Function to send content to Discord with splitting
+# Function to send content to Discord
 def send_to_discord(content, webhook_url):
-    DISCORD_CHAR_LIMIT = 2000
     try:
-        parts = split_message(content, DISCORD_CHAR_LIMIT)
-        
+        parts = split_for_discord(content)
         for i, part in enumerate(parts, 1):
-            data = {"content": f"Part {i}/{len(parts)}:\n{part}"}
-            response = requests.post(webhook_url, json=data)
+            payload = {"content": f"**Part {i}/{len(parts)}**\n{part}"}
+            response = requests.post(webhook_url, json=payload)
             if response.status_code != 204:
-                return f"Failed to send part {i} to Discord: {response.status_code} {response.text}"
-        
-        return f"Newsletter sent successfully to Discord in {len(parts)} parts."
+                return f"Failed to send part {i}: {response.status_code}"
+        return f"Sent newsletter in {len(parts)} parts."
     except Exception as e:
-        return f"Error sending to Discord: {e}"
+        return f"Discord send error: {e}"
 
-def generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, tickers, sort_by):
-    if df is None:
-        return "No data available for newsletter generation."
+# Function to generate newsletter
+def generate_newsletter(df, top_n=10, min_premium=250000, side_codes=['A', 'AA'], 
+                      tickers=None, sort_by='Premium Price'):
+    if df is None or df.empty:
+        return "No valid data for newsletter."
     
-    if df.empty:
-        return "No OUT_THE_MONEY flows found in the dataset."
+    today = pd.to_datetime("today").normalize()
+    max_date = today + timedelta(days=32)  # Next 2 weeks
+    exclude_tickers = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT'}
     
-    current_date = pd.to_datetime("today")
-    current_date_str = current_date.strftime("%b %d, %Y")
-    
-    exclude_tickers = ['SPX', 'SPY', 'IWM', 'QQQ']
-    
-    newsletter = f"📈 OUT-THE-MONEY OPTIONS FLOW SUMMARY - {current_date_str} 📈\n\n"
-    
-    # Section 1: Market Update (SPY & QQQ)
-    newsletter += "=== MARKET UPDATE (OTM FLOWS) ===\n"
-    market_tickers = ['SPY', 'QQQ', 'DIA', 'IWM','VXX','SMH']
-    market_df = df[df['Ticker'].isin(market_tickers)].copy()
-    
-    if market_df.empty:
-        newsletter += "No OTM market index flows (SPY/QQQ) detected today.\n\n"
-    else:
-        max_expiry = current_date + pd.Timedelta(days=7)
-        market_df = market_df[(market_df['Expiration Date'] <= max_expiry) & 
-                            (market_df['Expiration Date'] > current_date)]
-        
-        if market_df.empty:
-            newsletter += "No near-term (next week) OTM flows for SPY/QQQ detected after excluding today.\n"
-        else:
-            call_premium = market_df[market_df['Contract Type'] == 'CALL']['Premium Price'].sum()
-            put_premium = market_df[market_df['Contract Type'] == 'PUT']['Premium Price'].sum()
-            total_volume = market_df['Size'].sum()
-            pc_ratio = put_premium / call_premium if call_premium > 0 else float('inf')
-            
-            sentiment = "🟢" if pc_ratio < 0.7 else "🔴" if pc_ratio > 1.5 else "NEUTRAL"
-            newsletter += f"Market Sentiment: {sentiment}\n"
-            newsletter += f"Total Premium: ${call_premium + put_premium:,.2f}\n"
-            newsletter += f"Total Contracts: {total_volume:,}\n"
-            newsletter += f"Put/Call Premium Ratio: {pc_ratio:.2f}\n\n"
-            
-            key_flows = market_df.nlargest(7, 'Premium Price')
-            newsletter += "Key Market Flows:\n"
-            for idx, flow in key_flows.iterrows():
-                move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
-                sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                            "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                            "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                            "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
-                flags = []
-                if flow['Is Unusual'] == 'Yes':
-                    flags.append("UNUSUAL")
-                if flow['Is Golden Sweep'] == 'Yes':
-                    flags.append("GOLDEN SWEEP")
-                if flow['Is Opening Position'] == 'Yes':
-                    flags.append("OPENING")
-                flags_str = f" [{' '.join(flags)}]" if flags else ""
-                newsletter += (f"• {flow['Ticker']} {flow['Contract Type']} ${flow['Strike Price']:,.2f} "
-                             f"exp {flow['Expiration Date'].date()} - ${flow['Premium Price']:,.2f} "
-                             f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
-        newsletter += "\n"
-    
-    # Section 2: Aggressive Flows
-    newsletter += "=== OTM FLOWS ===\n"
-    aggressive_df = df[
-        (df['Expiration Date'] > current_date) &
-        (df['Premium Price'] >= premium_price) &
+    # Filter data
+    filtered_df = df[
+        (df['Expiration Date'] > today) &
+        (df['Expiration Date'] <= max_date) &
+        (df['Premium Price'] >= min_premium) &
         (df['Side Code'].isin(side_codes)) &
-        (df['Ticker'].isin(tickers)) &
         (~df['Ticker'].isin(exclude_tickers))
     ]
     
-    if aggressive_df.empty:
-        newsletter += "No aggressive OTM flows detected after applying the filters.\n\n"
-    else:
-        if sort_by == "Premium Price":
-            aggressive_df = aggressive_df.sort_values(by=["Premium Price", "Ticker"], ascending=[False, True])
-            newsletter += "Top Aggressive Flows (Sorted by Premium Price):\n"
-            for idx, flow in aggressive_df.head(top_n_aggressive_flows).iterrows():
-                move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
-                sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                            "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                            "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                            "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
-                flags = []
-                if flow['Is Unusual'] == 'Yes':
-                    flags.append("UNUSUAL")
-                if flow['Is Golden Sweep'] == 'Yes':
-                    flags.append("GOLDEN SWEEP")
-                if flow['Is Opening Position'] == 'Yes':
-                    flags.append("OPENING")
-                flags_str = f" [{' '.join(flags)}]" if flags else ""
-                newsletter += (f"• {flow['Ticker']} {flow['Contract Type']} ${flow['Strike Price']:,.2f} "
-                             f"exp {flow['Expiration Date'].date()} - ${flow['Premium Price']:,.2f} "
-                             f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
-        else:
-            aggressive_df = aggressive_df.sort_values(['Ticker', 'Premium Price'], ascending=[True, False])
-            newsletter += "Top Aggressive Flows (Grouped by Ticker):\n"
-            grouped_aggressive_df = aggressive_df.groupby('Ticker')
-            for ticker, group in grouped_aggressive_df:
-                newsletter += f"\nTicker: {ticker}\n"
-                for idx, flow in group.head(top_n_aggressive_flows).iterrows():
-                    move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-                    side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
-                    sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                                "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                                "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                                "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
-                    flags = []
-                    if flow['Is Unusual'] == 'Yes':
-                        flags.append("UNUSUAL")
-                    if flow['Is Golden Sweep'] == 'Yes':
-                        flags.append("GOLDEN SWEEP")
-                    if flow['Is Opening Position'] == 'Yes':
-                        flags.append("OPENING")
-                    flags_str = f" [{' '.join(flags)}]" if flags else ""
-                    newsletter += (f"• {flow['Ticker']} {flow['Contract Type']} ${flow['Strike Price']:,.2f} "
-                                 f"exp {flow['Expiration Date'].date()} - ${flow['Premium Price']:,.2f} "
-                                 f"({flow['Size']} contracts, {move_pct:.1f}% move, {sentiment}, {side}){flags_str}\n")
-        newsletter += "\n"
+    if tickers:
+        filtered_df = filtered_df[filtered_df['Ticker'].isin(tickers)]
     
-    newsletter += "Only for education purpose!"
+    if filtered_df.empty:
+        return "No OTM flows match the criteria."
+    
+    # Initialize newsletter
+    newsletter = f"📊 **Options Flow Newsletter - {today.strftime('%B %d, %Y')}** 📊\n\n"
+    newsletter += "🔍 Analyzing OUT-THE-MONEY opening positions for the next 4 weeks\n\n"
+    
+    # Long Plays (Bullish: CALL A/AA or PUT B/BB)
+    long_df = filtered_df[
+        ((filtered_df['Contract Type'] == 'CALL') & (filtered_df['Side Code'].isin(['A', 'AA']))) |
+        ((filtered_df['Contract Type'] == 'PUT') & (filtered_df['Side Code'].isin(['B', 'BB'])))
+    ]
+    
+    newsletter += "**📈 Top Long Plays**\n"
+    if long_df.empty:
+        newsletter += "No bullish OTM flows detected.\n"
+    else:
+        if sort_by == 'Premium Price':
+            long_df = long_df.sort_values('Premium Price', ascending=False)
+        else:
+            long_df = long_df.sort_values(['Ticker', 'Premium Price'])
+        
+        for _, row in long_df.head(top_n).iterrows():
+            move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
+                          row['Reference Price'] * 100)
+            flags = []
+            if row['Is Unusual'] == 'YES':
+                flags.append("UNUSUAL")
+            if row['Is Golden Sweep'] == 'YES':
+                flags.append("GOLDEN")
+            flags_str = f" [{' '.join(flags)}]" if flags else ""
+            
+            newsletter += (
+                f"• **{row['Ticker']}** {row['Contract Type']} ${row['Strike Price']:,.2f} "
+                f"exp {row['Expiration Date'].strftime('%Y-%m-%d')} - "
+                f"${row['Premium Price']:,.0f} ({row['Size']} contracts, "
+                f"{move_pct:.1f}% move, 🟢 {row['Side Code']}){flags_str}\n"
+            )
+    
+    newsletter += "\n"
+    
+    # Short Plays (Bearish: CALL B/BB or PUT A/AA)
+    short_df = filtered_df[
+        ((filtered_df['Contract Type'] == 'CALL') & (filtered_df['Side Code'].isin(['B', 'BB']))) |
+        ((filtered_df['Contract Type'] == 'PUT') & (filtered_df['Side Code'].isin(['A', 'AA'])))
+    ]
+    
+    newsletter += "**📉 Top Short Plays**\n"
+    if short_df.empty:
+        newsletter += "No bearish OTM flows detected.\n"
+    else:
+        if sort_by == 'Premium Price':
+            short_df = short_df.sort_values('Premium Price', ascending=False)
+        else:
+            short_df = short_df.sort_values(['Ticker', 'Premium Price'])
+        
+        for _, row in short_df.head(top_n).iterrows():
+            move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
+                          row['Reference Price'] * 100)
+            flags = []
+            if row['Is Unusual'] == 'YES':
+                flags.append("UNUSUAL")
+            if row['Is Golden Sweep'] == 'YES':
+                flags.append("GOLDEN")
+            flags_str = f" [{' '.join(flags)}]" if flags else ""
+            
+            newsletter += (
+                f"• **{row['Ticker']}** {row['Contract Type']} ${row['Strike Price']:,.2f} "
+                f"exp {row['Expiration Date'].strftime('%Y-%m-%d')} - "
+                f"${row['Premium Price']:,.0f} ({row['Size']} contracts, "
+                f"{move_pct:.1f}% move, 🔴 {row['Side Code']}){flags_str}\n"
+            )
+    
+    newsletter += "\n⚠️ **For educational purposes only. Not financial advice.**"
     return newsletter
 
-def display_symbol_flows(df, symbol):
-    """Display flows for a specific symbol with opening positions, premium > 250000, and expiration date > today's date"""
+# Function to generate Twitter newsletter
+def generate_twitter_newsletter(df, top_n=5, min_premium=500000, side_codes=['A', 'AA'], 
+                               tickers=None, sort_by='Premium Price'):
     if df is None or df.empty:
-        st.warning("No data available to display symbol flows.")
+        return "No valid data for Twitter newsletter."
+    
+    today = pd.to_datetime("today").normalize()
+    max_date = today + timedelta(days=32)
+    exclude_tickers = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT'}
+    
+    # Filter data
+    filtered_df = df[
+        (df['Expiration Date'] > today) &
+        (df['Expiration Date'] <= max_date) &
+        (df['Premium Price'] >= min_premium) &
+        (df['Side Code'].isin(side_codes)) &
+        (~df['Ticker'].isin(exclude_tickers))
+    ]
+    
+    if tickers:
+        filtered_df = filtered_df[filtered_df['Ticker'].isin(tickers)]
+    
+    if filtered_df.empty:
+        return "No OTM flows match the criteria for Twitter."
+    
+    # Twitter newsletter - shorter format
+    twitter_post = f"📊 OPTIONS FLOW ALERT - {today.strftime('%m/%d/%Y')}\n\n"
+    twitter_post += "🎯 TOP OTM PLAYS:\n\n"
+    
+    # Combine long and short plays, sorted by premium
+    all_flows = filtered_df.copy()
+    if sort_by == 'Premium Price':
+        all_flows = all_flows.sort_values('Premium Price', ascending=False)
+    else:
+        all_flows = all_flows.sort_values(['Ticker', 'Premium Price'])
+    
+    for i, (_, row) in enumerate(all_flows.head(top_n).iterrows(), 1):
+        # Determine sentiment
+        is_bullish = ((row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']) or
+                     (row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']))
+        sentiment = "🟢" if is_bullish else "🔴"
+        
+        move_pct = abs((row['Strike Price'] - row['Reference Price']) / row['Reference Price'] * 100)
+        
+        # Flags
+        flags = []
+        if row['Is Unusual'] == 'YES':
+            flags.append("🔥")
+        if row['Is Golden Sweep'] == 'YES':
+            flags.append("⚡")
+        flag_str = " ".join(flags)
+        
+        twitter_post += (f"{i}. {sentiment} ${row['Ticker']} "
+                        f"{row['Contract Type']} ${row['Strike Price']:,.0f}\n"
+                        f"   Exp: {row['Expiration Date'].strftime('%m/%d')} | "
+                        f"${row['Premium Price']/1000000:.1f}M | "
+                        f"{move_pct:.0f}% move {flag_str}\n\n")
+    
+    twitter_post += "⚠️ Educational only. Not financial advice.\n"
+    twitter_post += "#OptionsFlow #Trading #StockMarket"
+    
+    return twitter_post
+
+# Function to display flows for a specific symbol
+def display_symbol_flows(df, symbol):
+    if df is None or df.empty:
+        st.warning("No data available.")
         return
     
-    # Filter for specific symbol, opening positions, premium > 250000, and expiration date > today's date
-    today = pd.to_datetime("today")
+    today = pd.to_datetime("today").normalize()
     symbol_df = df[
         (df['Ticker'] == symbol.upper()) &
-        (df['Is Opening Position'] == 'Yes') &
+        (df['Is Opening Position'] == 'YES') &
         (df['Premium Price'] > 250000) &
         (df['Expiration Date'] > today)
-    ].copy()
+    ].sort_values(['Expiration Date', 'Premium Price'])
     
     if symbol_df.empty:
-        st.warning(f"No opening position flows found for {symbol} with premium > $250,000 and expiration date > today")
+        st.warning(f"No qualifying flows for {symbol}.")
         return
     
-    # Sort by Expiration Date (ascending) and Premium Price (descending)
-    symbol_df = symbol_df.sort_values(by=['Expiration Date', 'Premium Price'], ascending=[True, False])
-    
-    st.subheader(f"Opening Position Flows for {symbol} (Premium > $250,000, Expiration Date > Today)")
-    
-    # Format the display
-    for idx, flow in symbol_df.iterrows():
-        move_pct = abs((flow['Strike Price'] - flow['Reference Price']) / flow['Reference Price'] * 100)
-        side = flow['Side Code'] if pd.notna(flow['Side Code']) and flow['Side Code'] != 'N/A' else "N/A"
-        sentiment = ("🟢" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['A', 'AA'] else
-                    "🔴" if flow['Contract Type'] == 'CALL' and flow['Side Code'] in ['B', 'BB'] else
-                    "🔴" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['A', 'AA'] else
-                    "🟢" if flow['Contract Type'] == 'PUT' and flow['Side Code'] in ['B', 'BB'] else "N/A")
+    st.subheader(f"Flows for {symbol} (Premium > $250K)")
+    for _, row in symbol_df.iterrows():
+        move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
+                      row['Reference Price'] * 100)
+        sentiment = (
+            "🟢" if (row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']) or
+                    (row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']) else
+            "🔴" if (row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']) or
+                    (row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']) else "N/A"
+        )
         flags = []
-        if flow['Is Unusual'] == 'Yes':
+        if row['Is Unusual'] == 'YES':
             flags.append("UNUSUAL")
-        if flow['Is Golden Sweep'] == 'Yes':
-            flags.append("GOLDEN SWEEP")
+        if row['Is Golden Sweep'] == 'YES':
+            flags.append("GOLDEN")
         flags_str = f" [{' '.join(flags)}]" if flags else ""
         
-        flow_str = (
-            f"• {flow['Contract Type']} | "
-            f"Strike: ${flow['Strike Price']:,.2f} | "
-            f"Exp: {flow['Expiration Date'].date()} | "
-            f"Premium: ${flow['Premium Price']:,.2f} | "
-            f"Contracts: {flow['Size']} | "
-            f"Move: {move_pct:.1f}% | "
-            f"Sentiment: {sentiment} | "
-            f"Side: {side} {flags_str}"
+        st.markdown(
+            f"• **{row['Contract Type']}** | Strike: ${row['Strike Price']:,.2f} | "
+            f"Exp: {row['Expiration Date'].strftime('%Y-%m-%d')} | "
+            f"Premium: ${row['Premium Price']:,.0f} | Contracts: {row['Size']} | "
+            f"Move: {move_pct:.1f}% | Sentiment: {sentiment} | Side: {row['Side Code']}{flags_str}"
         )
-        
-        st.markdown(flow_str)
     
-    # Display raw data table as an option
-    with st.expander("View Raw Data"):
+    with st.expander("Raw Data"):
         st.dataframe(symbol_df)
 
-def main():
-    st.set_page_config(
-        page_title="Smart Options Flow Analyzer",
-        page_icon="📈",
-        layout="wide"
+# Function to display repeat flows grouped by ticker
+def display_repeat_flows(df, min_premium=30000):
+    if df is None or df.empty:
+        st.warning("No data available.")
+        return
+    
+    # Filter by minimum premium and opening positions
+    filtered_df = df[
+        (df['Premium Price'] >= min_premium) &
+        (df['Is Opening Position'] == 'YES')
+    ].copy()
+    
+    if filtered_df.empty:
+        st.warning(f"No flows found with premium >= ${min_premium:,}")
+        return
+    
+    # Create a composite key for similar contracts
+    filtered_df['Contract_Key'] = (
+        filtered_df['Ticker'] + '_' + 
+        filtered_df['Contract Type'] + '_' + 
+        filtered_df['Strike Price'].astype(str) + '_' + 
+        filtered_df['Expiration Date'].dt.strftime('%Y-%m-%d')
     )
     
-    default_webhook = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1341974407102595082/HTKke4FEZIQe6Xd9AUv2IgVDJp0yx89Uhosv_iM-7BZBTn2jk2T-dP_TFbX2PgMuF75D")
+    # Group by ticker and contract key to find repeats
+    grouped = filtered_df.groupby(['Ticker', 'Contract_Key']).agg({
+        'Premium Price': ['count', 'sum', 'mean'],
+        'Size': 'sum',
+        'Contract Type': 'first',
+        'Strike Price': 'first',
+        'Expiration Date': 'first',
+        'Reference Price': 'first',
+        'Side Code': lambda x: list(x),
+        'Is Unusual': lambda x: 'YES' if 'YES' in x.values else 'NO',
+        'Is Golden Sweep': lambda x: 'YES' if 'YES' in x.values else 'NO'
+    }).reset_index()
     
-    st.title("🔍 Smart Options Flow Analyzer")
-    st.markdown("Generate a newsletter or view specific symbol flows for OUT-THE-MONEY options")
-     
-    uploaded_file = st.file_uploader("Upload your options flow CSV file", type=["csv"])
+    # Flatten column names
+    grouped.columns = ['Ticker', 'Contract_Key', 'Flow_Count', 'Total_Premium', 'Avg_Premium',
+                      'Total_Contracts', 'Contract_Type', 'Strike_Price', 'Expiration_Date',
+                      'Reference_Price', 'Side_Codes', 'Has_Unusual', 'Has_Golden']
     
-    if uploaded_file is not None:
-        with st.spinner("Processing options data..."):
+    # Filter for repeat flows (more than 1 occurrence)
+    repeat_flows = grouped[grouped['Flow_Count'] > 1].copy()
+    
+    if repeat_flows.empty:
+        st.warning("No repeat flows found with the specified criteria.")
+        return
+    
+    # Sort by total premium
+    repeat_flows = repeat_flows.sort_values('Total_Premium', ascending=False)
+    
+    st.subheader(f"🔄 Repeat Flows (Premium >= ${min_premium:,})")
+    st.markdown(f"Found **{len(repeat_flows)}** contracts with multiple flows")
+    
+    # Group by ticker for display
+    for ticker in repeat_flows['Ticker'].unique():
+        ticker_flows = repeat_flows[repeat_flows['Ticker'] == ticker]
+        
+        with st.expander(f"📈 {ticker} ({len(ticker_flows)} repeat contracts)", expanded=True):
+            for _, row in ticker_flows.iterrows():
+                move_pct = abs((row['Strike_Price'] - row['Reference_Price']) / 
+                              row['Reference_Price'] * 100)
+                
+                # Determine predominant sentiment
+                side_codes = row['Side_Codes']
+                bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
+                bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
+                
+                if row['Contract_Type'] == 'CALL':
+                    if bullish_sides > bearish_sides:
+                        sentiment = "🟢 Bullish"
+                    elif bearish_sides > bullish_sides:
+                        sentiment = "🔴 Bearish"
+                    else:
+                        sentiment = "⚪ Mixed"
+                else:  # PUT
+                    if bullish_sides > bearish_sides:
+                        sentiment = "🔴 Bearish"
+                    elif bearish_sides > bullish_sides:
+                        sentiment = "🟢 Bullish"
+                    else:
+                        sentiment = "⚪ Mixed"
+                
+                flags = []
+                if row['Has_Unusual'] == 'YES':
+                    flags.append("🔥 UNUSUAL")
+                if row['Has_Golden'] == 'YES':
+                    flags.append("⚡ GOLDEN")
+                flags_str = f" [{' '.join(flags)}]" if flags else ""
+                
+                # Display the flow information
+                st.markdown(f"""
+                **{row['Contract_Type']} ${row['Strike_Price']:,.2f}** exp {row['Expiration_Date'].strftime('%Y-%m-%d')}
+                - **{row['Flow_Count']} flows** totaling **${row['Total_Premium']:,.0f}** 
+                - Avg Premium: ${row['Avg_Premium']:,.0f} | Total Contracts: {row['Total_Contracts']:,}
+                - Move Required: {move_pct:.1f}% | Sentiment: {sentiment}
+                - Side Codes: {', '.join(map(str, row['Side_Codes']))}{flags_str}
+                """)
+                st.divider()
+    
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Repeat Contracts", len(repeat_flows))
+    
+    with col2:
+        total_premium = repeat_flows['Total_Premium'].sum()
+        st.metric("Total Premium", f"${total_premium/1000000:.1f}M")
+    
+    with col3:
+        avg_flows_per_contract = repeat_flows['Flow_Count'].mean()
+        st.metric("Avg Flows per Contract", f"{avg_flows_per_contract:.1f}")
+    
+    with col4:
+        most_active = repeat_flows.loc[repeat_flows['Flow_Count'].idxmax(), 'Ticker']
+        max_flows = repeat_flows['Flow_Count'].max()
+        st.metric("Most Active", f"{most_active} ({max_flows} flows)")
+    
+    # Show raw data
+    with st.expander("Raw Repeat Flows Data"):
+        display_df = repeat_flows.copy()
+        display_df['Side_Codes'] = display_df['Side_Codes'].apply(lambda x: ', '.join(map(str, x)))
+        st.dataframe(display_df, use_container_width=True)
+
+# Main Streamlit app
+def main():
+    st.set_page_config(page_title="Options Flow Analyzer", page_icon="📊", layout="wide")
+    st.title("🔍 Options Flow Analyzer")
+    st.markdown("Generate a newsletter or view OTM option flows for the next 2 weeks.")
+    
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    
+    if uploaded_file:
+        with st.spinner("Loading data..."):
             df = load_csv(uploaded_file)
+        
+        if df is not None:
+            tab1, tab2, tab3 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows"])
             
-            if df is not None:
-                # Tabs for different views
-                tab1, tab2 = st.tabs(["Newsletter Generator", "Individual Symbol Flows"])
+            with tab1:
+                st.subheader("Generate Newsletter")
                 
-                # Tab 1: Newsletter Generator (original functionality)
-                with tab1:
-                    st.subheader("Options Flow Newsletter")
-                    st.markdown("Generate a newsletter summarizing today's OUT-THE-MONEY flows for your Discord group")
-                    
-                    top_n_aggressive_flows = st.number_input("Number of Flows to Display", min_value=1, max_value=200, value=100)
-                    premium_price = st.number_input("Minimum Premium Price", min_value=0, value=250000)
-                    side_codes = st.multiselect("Side Codes", options=['A', 'AA', 'B', 'BB'], default=['AA', 'A'])
-                    with st.expander("Select Tickers", expanded=False):
-                        tickers = st.multiselect("Tickers", options=df['Ticker'].unique().tolist(), default=df['Ticker'].unique().tolist())
-                    sort_by = st.selectbox("Sort By", options=["Ticker", "Premium Price"])
-                    
-                    with st.expander("Discord Integration"):
-                        webhook_url = st.text_input(
-                            "Discord Webhook URL (Newsletter)",
-                            value=default_webhook,
-                            type="password",
-                            help="Enter your Discord webhook URL to send the newsletter"
-                        )
-                        send_to_discord_enabled = st.checkbox("Send newsletter to Discord", value=False)
-                    
-                    if st.button("Generate Newsletter", type="primary"):
-                        with st.spinner("Generating newsletter..."):
-                            newsletter_content = generate_newsletter(df, top_n_aggressive_flows, premium_price, side_codes, tickers, sort_by)
-                            st.markdown(f"```\n{newsletter_content}\n```")
-                            
-                            if send_to_discord_enabled:
-                                with st.spinner("Sending newsletter to Discord..."):
-                                    discord_result = send_to_discord(newsletter_content, webhook_url)
-                                    st.info(discord_result)
+                # Create two columns for different newsletter types
+                col1, col2 = st.columns(2)
                 
-                # Tab 2: Individual Symbol Flows
-                with tab2:
-                    st.subheader("View Individual Symbol Flows")
-                    st.markdown("View opening position flows with premium > $250,000 for a specific symbol")
+                with col1:
+                    st.markdown("### 📄 Full Newsletter")
+                    top_n = st.number_input("Number of Flows", min_value=1, max_value=50, value=20, key="full_top_n")
+                    min_premium = st.number_input("Min Premium ($)", min_value=0, value=250000, key="full_premium")
+                    side_codes = st.multiselect("Side Codes", ['A', 'AA', 'B', 'BB'], default=['A', 'AA'], key="full_sides")
+                    with st.expander("Ticker Filter", expanded=False):
+                        tickers = st.multiselect("Tickers", df['Ticker'].unique(), default=df['Ticker'].unique(), key="full_tickers")
+                    sort_by = st.selectbox("Sort By", ["Premium Price", "Ticker"], key="full_sort")
                     
-                    symbol_input = st.text_input("Enter Symbol (e.g., AAPL)", "").upper()
-                    if symbol_input:
-                        display_symbol_flows(df, symbol_input)
+                    webhook_url = st.text_input(
+                        "Discord Webhook URL", 
+                        value=os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1379692595961401406/D4v1I-h-7YKrk5KUutByAlBfheBfZmMbKydoX6_gcVnXM9AQYZXgC4twC-1T69O1MZ7h"), 
+                        type="password"
+                    )
+                    send_discord = st.checkbox("Send to Discord")
+                    
+                    if st.button("Generate Full Newsletter"):
+                        with st.spinner("Generating..."):
+                            newsletter = generate_newsletter(df, top_n, min_premium, side_codes, 
+                                                          tickers, sort_by)
+                            st.markdown(f"```\n{newsletter}\n```")
+                            if send_discord and webhook_url:
+                                result = send_to_discord(newsletter, webhook_url)
+                                st.info(result)
+                
+                with col2:
+                    st.markdown("### 🐦 Twitter Newsletter")
+                    twitter_top_n = st.number_input("Number of Flows", min_value=1, max_value=10, value=5, key="twitter_top_n")
+                    twitter_min_premium = st.number_input("Min Premium ($)", min_value=0, value=500000, key="twitter_premium")
+                    twitter_side_codes = st.multiselect("Side Codes", ['A', 'AA', 'B', 'BB'], default=['A', 'AA'], key="twitter_sides")
+                    with st.expander("Ticker Filter", expanded=False):
+                        twitter_tickers = st.multiselect("Tickers", df['Ticker'].unique(), default=df['Ticker'].unique(), key="twitter_tickers")
+                    twitter_sort_by = st.selectbox("Sort By", ["Premium Price", "Ticker"], key="twitter_sort")
+                    
+                    if st.button("Generate Twitter Post"):
+                        with st.spinner("Generating Twitter post..."):
+                            twitter_newsletter = generate_twitter_newsletter(df, twitter_top_n, twitter_min_premium, 
+                                                                           twitter_side_codes, twitter_tickers, twitter_sort_by)
+                            st.markdown("**Copy this for Twitter:**")
+                            st.text_area("Twitter Post", twitter_newsletter, height=400, key="twitter_output")
+
+            with tab2:
+                st.subheader("View Symbol Flows")
+                symbol = st.text_input("Enter Symbol (e.g., AAPL)").upper()
+                if symbol:
+                    display_symbol_flows(df, symbol)
+            
+            with tab3:
+                st.subheader("🔄 Repeat Flows Analysis")
+                st.markdown("Identify contracts with multiple flows throughout the day")
+                
+                # Controls for repeat flows
+                col1, col2 = st.columns([1, 3])
+                
+                with col1:
+                    repeat_min_premium = st.number_input(
+                        "Minimum Premium ($)", 
+                        min_value=0, 
+                        value=15000, 
+                        step=5000,
+                        key="repeat_premium"
+                    )
+                
+                with col2:
+                    st.markdown("**Instructions:**")
+                    st.markdown("- Shows contracts that appeared multiple times")
+                    st.markdown("- Groups by ticker, contract type, strike, and expiration")
+                    st.markdown("- Useful for spotting accumulation patterns")
+                
+                if st.button("Analyze Repeat Flows", key="analyze_repeats"):
+                    with st.spinner("Analyzing repeat flows..."):
+                        display_repeat_flows(df, repeat_min_premium)
+                else:
+                    st.info("Click 'Analyze Repeat Flows' to see contracts with multiple flows")
 
 if __name__ == "__main__":
     main()
