@@ -290,44 +290,43 @@ def display_smart_money_flows(tech_flow):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# List of tech stocks
-tech_stocks = [
-    "MSFT", "AAPL", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "TSM", "AVGO", "ASML", "SNOW", "MSTR", "COIN",
-    "ORCL", "ADBE", "CRM", "INTC", "CSCO", "AMD", "QCOM", "TXN", "AMAT", "LRCX", "HOOD", "PLTR",
-    "JNJ", "PFE", "MRK", "ABBV", "UNH",
-    "NFLX", "DIS", "HD", "LOW", "NKE",
-    "JPM", "GS", "MS", "BAC", "WFC",
-    "CAT", "DE", "HON", "GE", "MMM",
-    "PEP", "KO", "COST", "WMT", "TGT",
-    "QQQ", "SPY", "TQQQ", "SQQQ", "SMH", "UVXY", "IBIT"
-]
+def validate_symbols(symbols: List[str]) -> List[str]:
+    """Validate stock symbols using yfinance."""
+    valid_symbols = []
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol.upper())
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                valid_symbols.append(symbol.upper())
+        except:
+            continue
+    return valid_symbols
 
-def main():
-    st.set_page_config(
-        page_title="Advanced Options Flow", 
-        layout="wide",
-        initial_sidebar_state="collapsed"  # Add this line
-    )
+def display_custom_flows(custom_symbols: List[str], min_premium: int, days_limit: int, show_otm_only: bool):
+    """Display flows for custom symbols."""
+    if not custom_symbols:
+        st.info("Please enter stock symbols to search for flows.")
+        return
     
-    # Initialize session state
-    if 'auto_refresh' not in st.session_state:
-        st.session_state.auto_refresh = True
-
-    # Sidebar for filters
-    with st.sidebar:
-        st.markdown("### ⚙️ Filters")
-        st.session_state.auto_refresh = st.checkbox("Enable Auto-Refresh (every 10 min)", value=st.session_state.auto_refresh)
-        min_premium = st.slider("Min Premium ($)", 100000, 10000000, 300000, step=100000)
-        days_limit = st.slider("Max Days to Expiry", 7, 90, 45)
-        selected_symbols = st.multiselect("Select Symbols", options=tech_stocks, default=tech_stocks)
-        show_otm_only = st.checkbox("Show OTM Flows Only", value=True)
-
-    st.title("🚀 Options Flow: 15mins delayed")
-
-    # Fetch stock prices
+    st.markdown(f"### 🔍 Custom Search Results for: {', '.join(custom_symbols)}")
+    
+    # Validate symbols
+    with st.spinner("Validating symbols..."):
+        valid_symbols = validate_symbols(custom_symbols)
+        
+        if not valid_symbols:
+            st.error("No valid symbols found. Please check your input.")
+            return
+        
+        if len(valid_symbols) < len(custom_symbols):
+            invalid_symbols = [s for s in custom_symbols if s.upper() not in valid_symbols]
+            st.warning(f"Invalid symbols skipped: {', '.join(invalid_symbols)}")
+    
+    # Fetch stock prices for valid symbols
     with st.spinner("Fetching stock prices..."):
         price_data = []
-        for symbol in selected_symbols:
+        for symbol in valid_symbols:
             try:
                 ticker = yf.Ticker(symbol)
                 hist = ticker.history(period="1d")
@@ -345,9 +344,9 @@ def main():
                     })
             except Exception:
                 pass
-
+        
         prices_df = pd.DataFrame(price_data)
-
+    
     # Fetch options flow data
     with st.spinner("Fetching options flow data..."):
         urls = [
@@ -356,32 +355,31 @@ def main():
             "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
             "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
         ]
-
+        
         data = fetch_data_from_urls(urls)
         if data.empty:
-            st.warning("No options flow data fetched.")
+            st.warning("No options flow data fetched from CBOE.")
             return
-
-        exclude_symbols = ["TLRY"]
-        flow_data = filter_options_flow(data, exclude_symbols, days_limit=days_limit, min_premium=min_premium)
         
-        # Optionally filter for OTM
+        # Filter for custom symbols
+        flow_data = filter_options_flow(data, [], days_limit=days_limit, min_premium=min_premium)
+        
+        # Filter for OTM if requested
         if show_otm_only:
             flow_data = filter_otm_flows(flow_data, prices_df)
         
-        # Filter to selected symbols
-        tech_flow = flow_data[flow_data['Symbol'].isin(selected_symbols)]
-
-    if tech_flow.empty:
-        st.warning("No options flow data found for selected symbols.")
+        # Filter to valid symbols
+        custom_flow = flow_data[flow_data['Symbol'].isin(valid_symbols)]
+    
+    if custom_flow.empty:
+        st.warning(f"No options flow data found for {', '.join(valid_symbols)} with current filters.")
         return
-
-    # Display last updated in sidebar
-    with st.sidebar:
-        st.markdown(f"**Last updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
+    
+    # Display results
+    st.success(f"Found {len(custom_flow)} flows for {len(valid_symbols)} symbols")
+    
     # Compute sentiment analysis
-    symbol_group = tech_flow.groupby(['Symbol', 'Call/Put'])['Total Premium ($)'].sum().unstack(fill_value=0)
+    symbol_group = custom_flow.groupby(['Symbol', 'Call/Put'])['Total Premium ($)'].sum().unstack(fill_value=0)
     if 'C' in symbol_group.columns and 'P' in symbol_group.columns:
         symbol_group.columns = ['Call Premium', 'Put Premium']
     elif 'C' in symbol_group.columns:
@@ -393,12 +391,12 @@ def main():
     else:
         st.warning("No call or put data found.")
         return
-
+    
     symbol_group['Total Premium'] = symbol_group['Call Premium'] + symbol_group['Put Premium']
     symbol_group['Net Sentiment'] = (symbol_group['Call Premium'] - symbol_group['Put Premium']) / symbol_group['Total Premium'].replace(0, 1)
     
     # Calculate flow counts
-    flow_counts = tech_flow.groupby('Symbol').size().rename('Flow Count')
+    flow_counts = custom_flow.groupby('Symbol').size().rename('Flow Count')
     
     sentiment_df = symbol_group.reset_index()
     sentiment_df = sentiment_df.set_index('Symbol').join(flow_counts).reset_index().fillna(0)
@@ -411,10 +409,237 @@ def main():
     bullish_df = merged_df[merged_df['Net Sentiment'] > 0].sort_values('Call Premium', ascending=False)
     bearish_df = merged_df[merged_df['Net Sentiment'] < 0].sort_values('Put Premium', ascending=False)
     
-    # Only show used tabs
-    tab1, tab2 = st.tabs(["📊 Overview", "🧠 Smart Money"])
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_bullish_premium = bullish_df['Call Premium'].sum()
+        st.metric("💚 Total Bullish Premium", f"${total_bullish_premium/1000000:.1f}M")
+    
+    with col2:
+        total_bearish_premium = bearish_df['Put Premium'].sum()
+        st.metric("❤️ Total Bearish Premium", f"${total_bearish_premium/1000000:.1f}M")
+    
+    with col3:
+        total_flows = len(bullish_df) + len(bearish_df)
+        st.metric("📊 Total Active Symbols", total_flows)
+    
+    with col4:
+        if (total_bullish_premium + total_bearish_premium) > 0:
+            net_sentiment = (total_bullish_premium - total_bearish_premium) / (total_bullish_premium + total_bearish_premium) * 100
+        else:
+            net_sentiment = 0
+        st.metric("🎯 Net Sentiment", f"{net_sentiment:.1f}%")
+    
+    st.markdown("---")
+    
+    # Stock price table
+    if not prices_df.empty:
+        st.markdown("#### 📈 Stock Prices")
+        st.dataframe(prices_df.style.format({
+            'Open': '${:.2f}',
+            'High': '${:.2f}',
+            'Close': '${:.2f}',
+            'Change %': '{:.2f}%'
+        }), use_container_width=True)
+    
+    # Bulls & Bears display
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🟢 Bullish Flows")
+        
+        if not bullish_df.empty:
+            for _, row in bullish_df.iterrows():
+                # Get detailed flow for this symbol
+                symbol_flows = custom_flow[
+                    (custom_flow['Symbol'] == row['Symbol']) & 
+                    (custom_flow['Call/Put'] == 'C')
+                ].sort_values('Total Premium ($)', ascending=False)
+                
+                if not symbol_flows.empty:
+                    top_flow = symbol_flows.iloc[0]
+                    strike = top_flow['Strike Price']
+                    expiry = top_flow['Expiry Dates']
+                    current_price = row['Close']
+                    otm_distance = ((strike - current_price) / current_price * 100) if current_price > 0 else 0
+                    
+                    st.markdown(f"""
+                    <div style="background: rgba(76, 175, 80, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #4CAF50;">
+                        <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
+                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                        <span style="color: #4CAF50; font-weight: bold;">${row['Call Premium']/1000000:.1f}M</span><br>
+                        <span style="color: #888; font-size: 0.9em;">${strike:.0f} CALL • {expiry}</span><br>
+                        <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("No bullish flows found")
+    
+    with col2:
+        st.markdown("### 🔴 Bearish Flows")
+        
+        if not bearish_df.empty:
+            for _, row in bearish_df.iterrows():
+                # Get detailed flow for this symbol
+                symbol_flows = custom_flow[
+                    (custom_flow['Symbol'] == row['Symbol']) & 
+                    (custom_flow['Call/Put'] == 'P')
+                ].sort_values('Total Premium ($)', ascending=False)
+                
+                if not symbol_flows.empty:
+                    top_flow = symbol_flows.iloc[0]
+                    strike = top_flow['Strike Price']
+                    expiry = top_flow['Expiry Dates']
+                    current_price = row['Close']
+                    otm_distance = ((current_price - strike) / current_price * 100) if current_price > 0 else 0
+                    
+                    st.markdown(f"""
+                    <div style="background: rgba(244, 67, 54, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #f44336;">
+                        <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
+                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                        <span style="color: #f44336; font-weight: bold;">-${row['Put Premium']/1000000:.1f}M</span><br>
+                        <span style="color: #888; font-size: 0.9em;">${strike:.0f} PUT • {expiry}</span><br>
+                        <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("No bearish flows found")
+    
+    # Detailed flow data
+    with st.expander("📊 Detailed Flow Data"):
+        display_df = custom_flow[['Symbol', 'Strike Price', 'Call/Put', 'Total Premium ($)', 
+                                  'Total Volume', 'Expiry Dates', 'Days to Expiry']].copy()
+        display_df['Total Premium ($)'] = display_df['Total Premium ($)'].apply(lambda x: f"${x:,.0f}")
+        display_df['Total Volume'] = display_df['Total Volume'].apply(lambda x: f"{x:,}")
+        st.dataframe(display_df, use_container_width=True)
+
+# List of tech stocks (same as before)
+tech_stocks = [
+    "MSFT", "AAPL", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "TSM", "AVGO", "ASML", "SNOW", "MSTR", "COIN",
+    "ORCL", "ADBE", "CRM", "INTC", "CSCO", "AMD", "QCOM", "TXN", "AMAT", "LRCX", "HOOD", "PLTR",
+    "JNJ", "PFE", "MRK", "ABBV", "UNH",
+    "NFLX", "DIS", "HD", "LOW", "NKE",
+    "JPM", "GS", "MS", "BAC", "WFC",
+    "CAT", "DE", "HON", "GE", "MMM",
+    "PEP", "KO", "COST", "WMT", "TGT",
+    "QQQ", "SPY", "TQQQ", "SQQQ", "SMH", "UVXY", "IBIT"
+]
+
+def main():
+    st.set_page_config(
+        page_title="Advanced Options Flow", 
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
+    
+    # Initialize session state
+    if 'auto_refresh' not in st.session_state:
+        st.session_state.auto_refresh = True
+
+    # Sidebar for filters
+    with st.sidebar:
+        st.markdown("### ⚙️ Filters")
+        st.session_state.auto_refresh = st.checkbox("Enable Auto-Refresh (every 10 min)", value=st.session_state.auto_refresh)
+        min_premium = st.slider("Min Premium ($)", 100000, 10000000, 300000, step=100000)
+        days_limit = st.slider("Max Days to Expiry", 7, 90, 45)
+        selected_symbols = st.multiselect("Select Symbols", options=tech_stocks, default=tech_stocks)
+        show_otm_only = st.checkbox("Show OTM Flows Only", value=True)
+
+    st.title("🚀 Options Flow: 15mins delayed")
+
+    # Create tabs - Added Custom Search tab
+    tab1, tab2, tab3 = st.tabs(["📊 Overview", "🧠 Smart Money", "🔍 Custom Search"])
     
     with tab1:
+        # Existing overview tab logic
+        # Fetch stock prices
+        with st.spinner("Fetching stock prices..."):
+            price_data = []
+            for symbol in selected_symbols:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    hist = ticker.history(period="1d")
+                    if not hist.empty:
+                        open_p = hist['Open'].iloc[0]
+                        high = hist['High'].iloc[0]
+                        close = hist['Close'].iloc[0]
+                        change_pct = (close - open_p) / open_p * 100 if open_p != 0 else 0
+                        price_data.append({
+                            'Symbol': symbol,
+                            'Open': round(open_p, 2),
+                            'High': round(high, 2),
+                            'Close': round(close, 2),
+                            'Change %': round(change_pct, 2)
+                        })
+                except Exception:
+                    pass
+
+            prices_df = pd.DataFrame(price_data)
+
+        # Fetch options flow data
+        with st.spinner("Fetching options flow data..."):
+            urls = [
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
+            ]
+
+            data = fetch_data_from_urls(urls)
+            if data.empty:
+                st.warning("No options flow data fetched.")
+                return
+
+            exclude_symbols = ["TLRY"]
+            flow_data = filter_options_flow(data, exclude_symbols, days_limit=days_limit, min_premium=min_premium)
+            
+            # Optionally filter for OTM
+            if show_otm_only:
+                flow_data = filter_otm_flows(flow_data, prices_df)
+            
+            # Filter to selected symbols
+            tech_flow = flow_data[flow_data['Symbol'].isin(selected_symbols)]
+
+        if tech_flow.empty:
+            st.warning("No options flow data found for selected symbols.")
+            return
+
+        # Display last updated in sidebar
+        with st.sidebar:
+            st.markdown(f"**Last updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Compute sentiment analysis
+        symbol_group = tech_flow.groupby(['Symbol', 'Call/Put'])['Total Premium ($)'].sum().unstack(fill_value=0)
+        if 'C' in symbol_group.columns and 'P' in symbol_group.columns:
+            symbol_group.columns = ['Call Premium', 'Put Premium']
+        elif 'C' in symbol_group.columns:
+            symbol_group.columns = ['Call Premium']
+            symbol_group['Put Premium'] = 0
+        elif 'P' in symbol_group.columns:
+            symbol_group.columns = ['Put Premium']
+            symbol_group['Call Premium'] = 0
+        else:
+            st.warning("No call or put data found.")
+            return
+
+        symbol_group['Total Premium'] = symbol_group['Call Premium'] + symbol_group['Put Premium']
+        symbol_group['Net Sentiment'] = (symbol_group['Call Premium'] - symbol_group['Put Premium']) / symbol_group['Total Premium'].replace(0, 1)
+        
+        # Calculate flow counts
+        flow_counts = tech_flow.groupby('Symbol').size().rename('Flow Count')
+        
+        sentiment_df = symbol_group.reset_index()
+        sentiment_df = sentiment_df.set_index('Symbol').join(flow_counts).reset_index().fillna(0)
+        
+        # Merge with prices
+        merged_df = prices_df.merge(sentiment_df, on='Symbol', how='left').fillna(0)
+        merged_df = merged_df[merged_df['Total Premium'] > 0]
+        
+        # Separate bullish and bearish flows
+        bullish_df = merged_df[merged_df['Net Sentiment'] > 0].sort_values('Call Premium', ascending=False)
+        bearish_df = merged_df[merged_df['Net Sentiment'] < 0].sort_values('Put Premium', ascending=False)
+        
         # Summary metrics
         st.markdown("---")
         col1, col2, col3, col4 = st.columns(4)
@@ -505,9 +730,54 @@ def main():
                 st.info("No bearish flows found")
 
     with tab2:
-        display_smart_money_flows(tech_flow)
+        # Smart Money tab
+        if 'tech_flow' in locals():
+            display_smart_money_flows(tech_flow)
+        else:
+            st.info("Please run the Overview tab first to load data.")
 
-    # Auto-refresh
+    with tab3:
+        # Custom Search tab
+        st.markdown("### 🔍 Custom Stock Search")
+        st.markdown("Enter up to 5 stock symbols separated by commas (e.g., AAPL, MSFT, GOOGL)")
+        
+        # Input for custom symbols
+        custom_input = st.text_input(
+            "Stock Symbols",
+            placeholder="Enter symbols like: AAPL, MSFT, GOOGL, AMZN, TSLA",
+            help="Enter up to 5 stock symbols separated by commas"
+        )
+        
+        # Custom filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            custom_min_premium = st.selectbox(
+                "Min Premium", 
+                [100000, 300000, 500000, 1000000, 2000000], 
+                index=1,
+                format_func=lambda x: f"${x/1000000:.1f}M"
+            )
+        with col2:
+            custom_days_limit = st.selectbox("Max Days to Expiry", [7, 14, 30, 45, 90], index=3)
+        with col3:
+            custom_otm_only = st.checkbox("OTM Only", value=True)
+        
+        if st.button("🔍 Search Flows", type="primary"):
+            if custom_input:
+                # Parse input
+                custom_symbols = [s.strip().upper() for s in custom_input.split(',') if s.strip()]
+                
+                # Limit to 5 symbols
+                if len(custom_symbols) > 5:
+                    st.warning("Only the first 5 symbols will be processed.")
+                    custom_symbols = custom_symbols[:5]
+                
+                # Display custom flows
+                display_custom_flows(custom_symbols, custom_min_premium, custom_days_limit, custom_otm_only)
+            else:
+                st.warning("Please enter at least one stock symbol.")
+
+    # Auto-refresh (only for overview tab)
     if st.session_state.auto_refresh:
         st_autorefresh(interval=REFRESH_INTERVAL * 1000, key="optionsflowrefresh")
 
