@@ -696,7 +696,7 @@ def run():
                         with metrics_col3:
                             st.metric(f"Days Above {threshold}", significant_days)
                         check_alerts(results_df, symbol)
-                        fig = px.line(results_df, x='date shaky ', y='buy_to_sell_ratio',
+                        fig = px.line(results_df, x='date', y='buy_to_sell_ratio',
                                       title=f"{symbol} Buy/Sell Ratio Over Time",
                                       hover_data=['total_volume', 'short_volume_ratio'])
                         fig.add_hline(y=threshold, line_dash="dash", line_color="red",
@@ -818,7 +818,7 @@ def run():
                         st.write(f"No {pattern_type} patterns detected with current filters.")
     
     # Create tabs
-    tab_names = ["Recommendations", "Theme Summary", "Stock Summary", "Single Stock", "Theme Analysis", "Accumulation/Distribution"]
+    tab_names = ["Recommendations", "Theme Summary", "Stock Summary", "Single Stock", "Theme Analysis", "Accumulation/Distribution", "High Volume High Ratio"]
     tabs = st.tabs(tab_names)
     
     # Recommendations Tab
@@ -1155,6 +1155,55 @@ def run():
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.write(f"No {pattern_type.lower()} patterns detected with current filters. Try relaxing volume, price, or market cap filters, or disabling price validation.")
+
+    # High Volume High Ratio Tab
+    with tabs[6]:
+        st.subheader("Stocks with Total Volume > 500,000 and Buy/Sell Ratio > 1.25")
+        st.write("Showing all stocks meeting the criteria based on the latest FINRA short sale data.")
+        if st.button("Load Data"):
+            with st.spinner("Fetching and analyzing latest data..."):
+                latest_df, latest_date = get_latest_data()
+                if not latest_df.empty:
+                    metrics_list = []
+                    for _, row in latest_df.iterrows():
+                        total_volume = row.get('TotalVolume', 0)
+                        metrics = calculate_metrics(row, total_volume)
+                        metrics['Symbol'] = row['Symbol']
+                        metrics['total_volume'] = total_volume
+                        metrics_list.append(metrics)
+                    df = pd.DataFrame(metrics_list)
+                    filtered_df = df[(df['total_volume'] > 500000) & (df['buy_to_sell_ratio'] > 1.25)]
+                    filtered_df = filtered_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+                    st.session_state['analysis_results']['high_volume_high_ratio'] = {'df': filtered_df, 'date': latest_date}
+                else:
+                    st.session_state['analysis_results']['high_volume_high_ratio'] = None
+        if 'high_volume_high_ratio' in st.session_state['analysis_results']:
+            high_volume_high_ratio = st.session_state['analysis_results']['high_volume_high_ratio']
+            if high_volume_high_ratio:
+                filtered_df = high_volume_high_ratio['df']
+                latest_date = high_volume_high_ratio['date']
+                st.write(f"Showing {len(filtered_df)} stocks for {latest_date}")
+                display_df = filtered_df[['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio']].copy()
+                for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                    display_df[col] = display_df[col].astype(int)
+                def highlight_row(row):
+                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
+                st.dataframe(display_df.style.apply(highlight_row, axis=1).format({
+                    'buy_to_sell_ratio': '{:.2f}',
+                    'short_volume_ratio': '{:.4f}',
+                    'total_volume': '{:,.0f}',
+                    'bought_volume': '{:,.0f}',
+                    'sold_volume': '{:,.0f}'
+                }))
+                if not filtered_df.empty:
+                    fig = px.bar(filtered_df.head(20), x='Symbol', y='buy_to_sell_ratio',
+                                 title="Top 20 Stocks by Buy/Sell Ratio",
+                                 hover_data=['total_volume', 'bought_volume', 'sold_volume'],
+                                 color_discrete_sequence=['#4CAF50'])
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig)
+            else:
+                st.write("No data available.")
 
 if __name__ == "__main__":
     run()
