@@ -373,7 +373,6 @@ def generate_recommendations() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str
         total_volume = row.get('TotalVolume', 0)
         metrics = calculate_metrics(row, total_volume)
         metrics['Symbol'] = row['Symbol']
-        metrics['TotalVolume'] = total_volume
         metrics_list.append(metrics)
     df = pd.DataFrame(metrics_list)
     df = df.drop_duplicates(subset=['Symbol'], keep='first')
@@ -454,7 +453,6 @@ def generate_theme_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
         total_volume = row.get('TotalVolume', 0)
         metrics = calculate_metrics(row, total_volume)
         metrics['Symbol'] = row['Symbol']
-        metrics['TotalVolume'] = total_volume
         metrics_list.append(metrics)
     df = pd.DataFrame(metrics_list)
     df = df.drop_duplicates(subset=['Symbol'], keep='first')
@@ -501,7 +499,6 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
         total_volume = row.get('TotalVolume', 0)
         metrics = calculate_metrics(row, total_volume)
         metrics['Symbol'] = row['Symbol']
-        metrics['TotalVolume'] = total_volume
         metrics_list.append(metrics)
     df = pd.DataFrame(metrics_list)
     df = df.drop_duplicates(subset=['Symbol'], keep='first')
@@ -603,7 +600,7 @@ def get_ticker_info(symbol: str) -> dict:
         hist = ticker.history(period='3mo')
         returns = {}
         if not hist.empty:
-            current = hist['Close'][-1]
+            current = hist['Close'].iloc[-1]
             for period, label in [(7, '1w'), (30, '1m'), (90, '3m')]:
                 past_date = datetime.now() - timedelta(days=period)
                 past_price = hist['Close'].asof(past_date)
@@ -795,7 +792,7 @@ def run():
                             total_volume = row.get('TotalVolume', 0)
                             metrics = calculate_metrics(row, total_volume)
                             metrics['Symbol'] = row['Symbol']
-                            metrics['TotalVolume'] = total_volume
+                            # Removed redundant line: metrics['TotalVolume'] = total_volume
                             metrics_list.append(metrics)
                         theme_df = pd.DataFrame(metrics_list)
                         theme_df = theme_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
@@ -1096,7 +1093,6 @@ def run():
                 total_volume = row.get('TotalVolume', 0)
                 metrics = calculate_metrics(row, total_volume)
                 metrics['Symbol'] = row['Symbol']
-                metrics['TotalVolume'] = total_volume
                 metrics_list.append(metrics)
             theme_df = pd.DataFrame(metrics_list)
             theme_df = theme_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
@@ -1198,7 +1194,7 @@ def run():
                         total_volume = row.get('TotalVolume', 0)
                         metrics = calculate_metrics(row, total_volume)
                         metrics['Symbol'] = row['Symbol']
-                        metrics['total_volume'] = total_volume
+                        # Removed redundant line: metrics['total_volume'] = total_volume
                         metrics_list.append(metrics)
                     df = pd.DataFrame(metrics_list)
                     filtered_df = df[(df['total_volume'] > 500000) & (df['buy_to_sell_ratio'] > 1.25)]
@@ -1213,13 +1209,13 @@ def run():
                             progress_bar.progress((i + 1) / len(symbols))
                         info_df = pd.DataFrame(info_list)
                         merged_df = filtered_df.merge(info_df, left_on='Symbol', right_on='symbol').drop(columns=['symbol'])
-                        st.session_state['analysis_results']['high_volume_high_ratio'] = {'df': merged_df, 'date': latest_date}
+                        st.session_state['analysis_results']['high_volume_high_ratio_v2'] = {'df': merged_df, 'date': latest_date}
                     else:
-                        st.session_state['analysis_results']['high_volume_high_ratio'] = None
+                        st.session_state['analysis_results']['high_volume_high_ratio_v2'] = None
                 else:
-                    st.session_state['analysis_results']['high_volume_high_ratio'] = None
-        if 'high_volume_high_ratio' in st.session_state['analysis_results']:
-            high_volume_high_ratio = st.session_state['analysis_results']['high_volume_high_ratio']
+                    st.session_state['analysis_results']['high_volume_high_ratio_v2'] = None
+        if 'high_volume_high_ratio_v2' in st.session_state['analysis_results']:
+            high_volume_high_ratio = st.session_state['analysis_results']['high_volume_high_ratio_v2']
             if high_volume_high_ratio:
                 merged_df = high_volume_high_ratio['df']
                 latest_date = high_volume_high_ratio['date']
@@ -1229,10 +1225,10 @@ def run():
                 if select_type != "All":
                     type_map = {"Stocks": "EQUITY", "ETFs": "ETF"}
                     display_df = display_df[display_df['quote_type'] == type_map[select_type]]
-                column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio', 'price', '1w', '1m', '3m']
-                display_df = display_df[column_order]
                 for col in ['total_volume', 'bought_volume', 'sold_volume']:
                     display_df[col] = display_df[col].astype(int)
+                column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio', 'price', '1w', '1m', '3m']
+                display_df = display_df[column_order]
                 display_df = display_df.rename(columns={'price': 'Price', '1w': '1w Return (%)', '1m': '1m Return (%)', '3m': '3m Return (%)'})
                 def highlight_row(row):
                     return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
