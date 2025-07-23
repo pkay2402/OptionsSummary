@@ -600,13 +600,23 @@ def get_ticker_info(symbol: str) -> dict:
         hist = ticker.history(period='3mo')
         returns = {}
         if not hist.empty:
+            # Convert index to timezone-naive if needed
+            if hist.index.tz is not None:
+                hist.index = hist.index.tz_convert(None)
+            
             current = hist['Close'].iloc[-1]
             for period, label in [(7, '1w'), (30, '1m'), (90, '3m')]:
-                past_date = (datetime.now() - timedelta(days=period)).strftime('%Y-%m-%d')
-                past_price = hist['Close'].asof(past_date)
-                if not pd.isna(past_price):
-                    ret = (current - past_price) / past_price * 100 if past_price != 0 else 0
-                    returns[label] = round(ret, 2)
+                if len(hist) > period:
+                    # Use index-based approach instead of date-based
+                    try:
+                        past_price = hist['Close'].iloc[-period-1]
+                        if past_price > 0:
+                            ret = (current - past_price) / past_price * 100
+                            returns[label] = round(ret, 2)
+                        else:
+                            returns[label] = 0.0
+                    except IndexError:
+                        returns[label] = 0.0
                 else:
                     returns[label] = 0.0
         else:
@@ -971,7 +981,6 @@ def run():
                                 color_discrete_map={'Bullish': '#4CAF50', 'Bearish': '#F44336'},
                                 hover_data=['Theme', 'Ratio'])
                     fig.update_layout(barmode='group', xaxis_tickangle=-45)
-                    fig.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Neutral Line")
                     st.plotly_chart(fig)
     
     # Stock Summary Tab
@@ -1181,76 +1190,362 @@ def run():
             else:
                 st.write(f"No {pattern_type.lower()} patterns detected with current filters. Try relaxing volume, price, or market cap filters, or disabling price validation.")
 
-    # High Volume High Ratio Tab
+    # High Volume High Ratio Tab - Enhanced Version
     with tabs[6]:
-        st.subheader("Stocks with Total Volume > 500,000 and Buy/Sell Ratio > 1.25")
-        st.write("Showing all stocks meeting the criteria based on the latest FINRA short sale data.")
-        if st.button("Load Data"):
-            with st.spinner("Fetching and analyzing latest data..."):
+        st.subheader("🔥 High Volume High Ratio Scanner")
+        st.write("Advanced screening for stocks with significant institutional activity")
+        
+        # Enhanced Controls in Sidebar
+        with st.sidebar:
+            st.markdown("### 📊 Scanner Settings")
+            
+            # Volume and Ratio Filters
+            min_volume = st.number_input("Min Volume", value=500000, step=100000, format="%d")
+            min_ratio = st.number_input("Min Buy/Sell Ratio", value=1.25, step=0.05, format="%.2f")
+            max_ratio = st.number_input("Max Buy/Sell Ratio", value=10.0, step=0.5, format="%.2f")
+            
+            # Price Filters
+            min_price = st.number_input("Min Price ($)", value=1.0, step=0.5)
+            max_price = st.number_input("Max Price ($)", value=1000.0, step=10.0)
+            
+            # Market Cap Filter
+            market_cap_filter = st.selectbox("Market Cap", 
+                ["All", "Micro (<$300M)", "Small ($300M-$2B)", "Mid ($2B-$10B)", "Large (>$10B)"])
+            
+            # Performance Filters
+            min_1w_return = st.slider("Min 1W Return (%)", -50, 50, -100, step=5)
+            max_1w_return = st.slider("Max 1W Return (%)", -50, 50, 100, step=5)
+            
+            # Advanced Filters
+            st.markdown("### 🎯 Advanced Filters")
+            filter_by_sector = st.multiselect("Include Sectors", 
+                ["Technology", "Healthcare", "Financials", "Energy", "Consumer"], 
+                default=[])
+            
+            exclude_penny_stocks = st.checkbox("Exclude Penny Stocks (<$5)", value=True)
+            include_only_liquid = st.checkbox("High Liquidity Only (>1M volume)", value=False)
+            
+            # Sorting Options
+            sort_by = st.selectbox("Sort By", 
+                ["Buy/Sell Ratio", "Total Volume", "1W Return", "Price", "Market Cap"])
+            sort_order = st.radio("Sort Order", ["Descending", "Ascending"])
+        
+        # Main Content
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            scan_button = st.button("🚀 Run Enhanced Scan", type="primary", use_container_width=True)
+        
+        with col2:
+            if st.button("📥 Export Results"):
+                if 'enhanced_scan_results' in st.session_state:
+                    csv = st.session_state['enhanced_scan_results']['df'].to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name=f"high_volume_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
+        
+        with col3:
+            auto_refresh = st.checkbox("Auto Refresh (5min)")
+            if auto_refresh:
+                st.rerun()
+        
+        if scan_button:
+            with st.spinner("🔍 Scanning market for opportunities..."):
+                # Fetch latest data
                 latest_df, latest_date = get_latest_data()
+                
                 if not latest_df.empty:
+                    # Calculate metrics
                     metrics_list = []
                     for _, row in latest_df.iterrows():
                         total_volume = row.get('TotalVolume', 0)
                         metrics = calculate_metrics(row, total_volume)
                         metrics['Symbol'] = row['Symbol']
                         metrics_list.append(metrics)
+                    
                     df = pd.DataFrame(metrics_list)
-                    filtered_df = df[(df['total_volume'] > 500000) & (df['buy_to_sell_ratio'] > 1.25)]
-                    filtered_df = filtered_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
+                    
+                    # Apply basic filters
+                    filtered_df = df[
+                        (df['total_volume'] >= min_volume) & 
+                        (df['buy_to_sell_ratio'] >= min_ratio) &
+                        (df['buy_to_sell_ratio'] <= max_ratio)
+                    ]
+                    
                     if not filtered_df.empty:
+                        # Get enhanced data with progress bar
                         symbols = filtered_df['Symbol'].tolist()
                         progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
                         info_list = []
                         for i, symbol in enumerate(symbols):
+                            status_text.text(f"Fetching data for {symbol}... ({i+1}/{len(symbols)})")
                             info = get_ticker_info(symbol)
                             info_list.append(info)
                             progress_bar.progress((i + 1) / len(symbols))
+                        
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        # Merge data
                         info_df = pd.DataFrame(info_list)
                         merged_df = filtered_df.merge(info_df, left_on='Symbol', right_on='symbol').drop(columns=['symbol'])
-                        st.session_state['analysis_results']['high_volume_high_ratio_v2'] = {'df': merged_df, 'date': latest_date}
+                        
+                        # Apply advanced filters
+                        if exclude_penny_stocks:
+                            merged_df = merged_df[merged_df['price'] >= 5.0]
+                        
+                        merged_df = merged_df[
+                            (merged_df['price'] >= min_price) & 
+                            (merged_df['price'] <= max_price)
+                        ]
+                        
+                        if include_only_liquid:
+                            merged_df = merged_df[merged_df['total_volume'] >= 1000000]
+                        
+                        # Filter by returns
+                        merged_df = merged_df[
+                            (merged_df['1w'] >= min_1w_return) & 
+                            (merged_df['1w'] <= max_1w_return)
+                        ]
+                        
+                        # Market cap filtering
+                        if market_cap_filter != "All":
+                            # You'd need to add market cap data to get_ticker_info function
+                            pass
+                        
+                        # Sector filtering
+                        if filter_by_sector:
+                            # Map symbols to sectors (you'd need a symbol-to-sector mapping)
+                            symbol_to_theme = {}
+                            for theme, symbols in theme_mapping.items():
+                                if theme in filter_by_sector:
+                                    for symbol in symbols:
+                                        symbol_to_theme[symbol] = theme
+                            
+                            merged_df = merged_df[merged_df['Symbol'].isin(symbol_to_theme.keys())]
+                            merged_df['Sector'] = merged_df['Symbol'].map(symbol_to_theme)
+                        
+                        # Add scoring system
+                        if not merged_df.empty:
+                            # Calculate composite score
+                            merged_df['volume_score'] = (merged_df['total_volume'] / merged_df['total_volume'].max()) * 30
+                            merged_df['ratio_score'] = (merged_df['buy_to_sell_ratio'] / merged_df['buy_to_sell_ratio'].max()) * 40
+                            merged_df['momentum_score'] = merged_df['1w'].clip(-20, 20) + 10  # -20 to +20 becomes -10 to +30
+                            merged_df['composite_score'] = (
+                                merged_df['volume_score'] + 
+                                merged_df['ratio_score'] + 
+                                merged_df['momentum_score']
+                            ).round(1)
+                            
+                            # Add risk signals
+                            merged_df['risk_level'] = merged_df.apply(lambda row: 
+                                'High' if row['buy_to_sell_ratio'] > 3.0 and row['1w'] > 20 else
+                                'Medium' if row['buy_to_sell_ratio'] > 2.0 else 'Low', axis=1)
+                            
+                            # Sort results
+                            ascending = sort_order == "Ascending"
+                            sort_column_map = {
+                                "Buy/Sell Ratio": "buy_to_sell_ratio",
+                                "Total Volume": "total_volume", 
+                                "1W Return": "1w",
+                                "Price": "price",
+                                "Market Cap": "price"  # placeholder
+                            }
+                            merged_df = merged_df.sort_values(
+                                sort_column_map[sort_by], 
+                                ascending=ascending
+                            )
+                            
+                            # Store results
+                            st.session_state['enhanced_scan_results'] = {
+                                'df': merged_df, 
+                                'date': latest_date,
+                                'total_scanned': len(df),
+                                'filtered_count': len(merged_df)
+                            }
+                        
+                        else:
+                            st.warning("No stocks found matching your criteria. Try relaxing the filters.")
+                            st.session_state['enhanced_scan_results'] = None
                     else:
-                        st.session_state['analysis_results']['high_volume_high_ratio_v2'] = None
+                        st.error("No stocks meet the basic volume and ratio criteria.")
+                        st.session_state['enhanced_scan_results'] = None
                 else:
-                    st.session_state['analysis_results']['high_volume_high_ratio_v2'] = None
-        if 'high_volume_high_ratio_v2' in st.session_state['analysis_results']:
-            high_volume_high_ratio = st.session_state['analysis_results']['high_volume_high_ratio_v2']
-            if high_volume_high_ratio:
-                merged_df = high_volume_high_ratio['df']
-                latest_date = high_volume_high_ratio['date']
-                st.write(f"Showing {len(merged_df)} symbols for {latest_date}")
+                    st.error("Unable to fetch market data. Please try again later.")
+                    st.session_state['enhanced_scan_results'] = None
+    
+        # Display Results
+        if 'enhanced_scan_results' in st.session_state and st.session_state['enhanced_scan_results']:
+            results = st.session_state['enhanced_scan_results']
+            merged_df = results['df']
+            latest_date = results['date']
+            
+            # Summary Stats
+            st.markdown("### 📊 Scan Results Summary")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Scanned", f"{results['total_scanned']:,}")
+            with col2:
+                st.metric("Opportunities Found", f"{results['filtered_count']:,}")
+            with col3:
+                avg_ratio = merged_df['buy_to_sell_ratio'].mean()
+                st.metric("Avg Buy/Sell Ratio", f"{avg_ratio:.2f}")
+            with col4:
+                st.metric("Data Date", latest_date)
+            
+            # Risk Distribution
+            if 'risk_level' in merged_df.columns:
+                risk_counts = merged_df['risk_level'].value_counts()
+                st.markdown("### ⚠️ Risk Distribution")
+                risk_col1, risk_col2, risk_col3 = st.columns(3)
+                
+                with risk_col1:
+                    st.metric("Low Risk", risk_counts.get('Low', 0), delta="Safest")
+                with risk_col2:
+                    st.metric("Medium Risk", risk_counts.get('Medium', 0), delta="Moderate")
+                with risk_col3:
+                    st.metric("High Risk", risk_counts.get('High', 0), delta="Riskiest")
+            
+            # Filtering options for display
+            st.markdown("### 🎛️ Display Options")
+            display_col1, display_col2 = st.columns(2)
+            
+            with display_col1:
                 select_type = st.selectbox("Filter by Type", ["All", "Stocks", "ETFs"])
-                display_df = merged_df.copy()
-                if select_type != "All":
-                    type_map = {"Stocks": "EQUITY", "ETFs": "ETF"}
-                    display_df = display_df[display_df['quote_type'] == type_map[select_type]]
-                for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                top_n = st.selectbox("Show Top N", [10, 20, 50, 100, "All"])
+            
+            with display_col2:
+                risk_filter = st.multiselect("Risk Levels", ["Low", "Medium", "High"], default=["Low", "Medium", "High"])
+                show_score = st.checkbox("Show Composite Score", value=True)
+            
+            # Apply display filters
+            display_df = merged_df.copy()
+            
+            if select_type != "All":
+                type_map = {"Stocks": "EQUITY", "ETFs": "ETF"}
+                display_df = display_df[display_df['quote_type'] == type_map[select_type]]
+            
+            if 'risk_level' in display_df.columns:
+                display_df = display_df[display_df['risk_level'].isin(risk_filter)]
+            
+            if top_n != "All":
+                display_df = display_df.head(int(top_n))
+            
+            # Prepare display columns
+            base_columns = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 
+                           'sold_volume', 'short_volume_ratio', 'price', '1w', '1m', '3m']
+            
+            if show_score and 'composite_score' in display_df.columns:
+                base_columns.insert(2, 'composite_score')
+            
+            if 'risk_level' in display_df.columns:
+                base_columns.append('risk_level')
+            
+            # Format data for display
+            for col in ['total_volume', 'bought_volume', 'sold_volume']:
+                if col in display_df.columns:
                     display_df[col] = display_df[col].astype(int)
-                column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio', 'price', '1w', '1m', '3m']
-                display_df = display_df[column_order]
-                display_df = display_df.rename(columns={'price': 'Price', '1w': '1w Return (%)', '1m': '1m Return (%)', '3m': '3m Return (%)'})
-                def highlight_row(row):
-                    return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
-                st.dataframe(display_df.style.apply(highlight_row, axis=1).applymap(color_returns, subset=['1w Return (%)', '1m Return (%)', '3m Return (%)']).format({
-                    'buy_to_sell_ratio': '{:.2f}',
-                    'short_volume_ratio': '{:.4f}',
-                    'total_volume': '{:,.0f}',
-                    'bought_volume': '{:,.0f}',
-                    'sold_volume': '{:,.0f}',
-                    'Price': '{:.2f}',
-                    '1w Return (%)': '{:.2f}%',
-                    '1m Return (%)': '{:.2f}%',
-                    '3m Return (%)': '{:.2f}%'
-                }))
-                if not display_df.empty:
-                    fig = px.bar(display_df.head(20), x='Symbol', y='buy_to_sell_ratio',
-                                 title="Top 20 Symbols by Buy/Sell Ratio",
-                                 hover_data=['total_volume', 'bought_volume', 'sold_volume', 'Price', '1w Return (%)', '1m Return (%)', '3m Return (%)'],
-                                 color_discrete_sequence=['#4CAF50'])
-                    fig.update_layout(xaxis_tickangle=-45)
-                    st.plotly_chart(fig)
-            else:
-                st.write("No data available or no symbols meet the criteria.")
+            
+            # Rename columns for better display
+            display_df = display_df[base_columns]
+            column_renames = {
+                'price': 'Price', 
+                '1w': '1W Return (%)', 
+                '1m': '1M Return (%)', 
+                '3m': '3M Return (%)',
+                'composite_score': 'Score',
+                'risk_level': 'Risk'
+            }
+            display_df = display_df.rename(columns=column_renames)
+            
+            # Enhanced styling function
+            def enhanced_highlight_row(row):
+                if 'Score' in row and row['Score'] > 70:
+                    return ['background-color: rgba(0, 255, 0, 0.4)'] * len(row)  # Bright green for high scores
+                elif row['buy_to_sell_ratio'] > 2.0:
+                    return ['background-color: rgba(144, 238, 144, 0.4)'] * len(row)  # Light green for good ratios
+                else:
+                    return ['background-color: rgba(144, 238, 144, 0.2)'] * len(row)  # Very light green
+            
+            # Display the enhanced table
+            st.markdown("### 📋 Detailed Results")
+            
+            format_dict = {
+                'buy_to_sell_ratio': '{:.2f}',
+                'short_volume_ratio': '{:.4f}',
+                'total_volume': '{:,.0f}',
+                'bought_volume': '{:,.0f}',
+                'sold_volume': '{:,.0f}',
+                'Price': '${:.2f}',
+                '1W Return (%)': '{:.1f}%',
+                '1M Return (%)': '{:.1f}%',
+                '3M Return (%)': '{:.1f}%'
+            }
+            
+            if 'Score' in display_df.columns:
+                format_dict['Score'] = '{:.1f}'
+            
+            styled_df = display_df.style.apply(enhanced_highlight_row, axis=1)
+            
+            if any(col in display_df.columns for col in ['1W Return (%)', '1M Return (%)', '3M Return (%)']):
+                return_cols = [col for col in ['1W Return (%)', '1M Return (%)', '3M Return (%)'] if col in display_df.columns]
+                styled_df = styled_df.applymap(color_returns, subset=return_cols)
+            
+            styled_df = styled_df.format(format_dict)
+            
+            st.dataframe(styled_df, use_container_width=True, height=600)
+            
+            # Enhanced Visualizations
+            if not display_df.empty:
+                st.markdown("### 📈 Visualizations")
+                
+                viz_col1, viz_col2 = st.columns(2)
+                
+                with viz_col1:
+                    # Top performers by ratio
+                    fig1 = px.bar(
+                        display_df.head(15), 
+                        x='Symbol', 
+                        y='buy_to_sell_ratio',
+                        title="Top 15 by Buy/Sell Ratio",
+                        color='buy_to_sell_ratio',
+                        color_continuous_scale='Greens',
+                        hover_data=['total_volume', 'Price', '1W Return (%)']
+                    )
+                    fig1.update_layout(xaxis_tickangle=-45, height=400)
+                    st.plotly_chart(fig1, use_container_width=True)
+                
+                with viz_col2:
+                    # Volume vs Ratio scatter
+                    fig2 = px.scatter(
+                        display_df,
+                        x='total_volume',
+                        y='buy_to_sell_ratio', 
+                        size='Price',
+                        color='1W Return (%)',
+                        hover_name='Symbol',
+                        title="Volume vs Ratio Analysis",
+                        color_continuous_scale='RdYlGn'
+                    )
+                    fig2.update_layout(height=400)
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Performance distribution
+                if 'Score' in display_df.columns:
+                    fig3 = px.histogram(
+                        display_df,
+                        x='Score',
+                        title="Composite Score Distribution",
+                        nbins=20,
+                        color_discrete_sequence=['#4CAF50']
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
 
 if __name__ == "__main__":
     run()
