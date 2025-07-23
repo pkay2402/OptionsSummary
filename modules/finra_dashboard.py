@@ -594,6 +594,35 @@ def process_natural_language_query(query: str, theme_mapping: dict) -> dict:
         result['error'] = f"Unrecognized query: {query}. Try phrases like 'Show top bullish stocks in Technology', 'Analyze AAPL for 10 days', 'Show accumulation patterns', or 'Summarize sentiment for Financials'."
     return result
 
+def get_ticker_info(symbol: str) -> dict:
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        quote_type = info.get('quoteType', 'UNKNOWN')
+        price = info.get('regularMarketPrice', info.get('currentPrice', 0))
+        hist = ticker.history(period='3mo')
+        returns = {}
+        if not hist.empty:
+            current = hist['Close'][-1]
+            for period, label in [(7, '1w'), (30, '1m'), (90, '3m')]:
+                past_date = datetime.now() - timedelta(days=period)
+                past_price = hist['Close'].asof(past_date)
+                if not pd.isna(past_price):
+                    ret = (current - past_price) / past_price * 100 if past_price != 0 else 0
+                    returns[label] = round(ret, 2)
+                else:
+                    returns[label] = 0.0
+        else:
+            returns = {'1w': 0.0, '1m': 0.0, '3m': 0.0}
+        return {'symbol': symbol, 'quote_type': quote_type, 'price': price, **returns}
+    except Exception as e:
+        logger.error(f"Error fetching info for {symbol}: {e}")
+        return {'symbol': symbol, 'quote_type': 'UNKNOWN', 'price': 0.0, '1w': 0.0, '1m': 0.0, '3m': 0.0}
+
+def color_returns(val):
+    color = 'green' if val > 0 else 'red' if val < 0 else 'black'
+    return f'color: {color}'
+
 def run():
     #st.set_page_config(page_title="FINRA Short Sale Analysis")
     st.markdown("""
@@ -1174,36 +1203,59 @@ def run():
                     df = pd.DataFrame(metrics_list)
                     filtered_df = df[(df['total_volume'] > 500000) & (df['buy_to_sell_ratio'] > 1.25)]
                     filtered_df = filtered_df.sort_values(by=['buy_to_sell_ratio', 'total_volume'], ascending=[False, False])
-                    st.session_state['analysis_results']['high_volume_high_ratio'] = {'df': filtered_df, 'date': latest_date}
+                    if not filtered_df.empty:
+                        symbols = filtered_df['Symbol'].tolist()
+                        progress_bar = st.progress(0)
+                        info_list = []
+                        for i, symbol in enumerate(symbols):
+                            info = get_ticker_info(symbol)
+                            info_list.append(info)
+                            progress_bar.progress((i + 1) / len(symbols))
+                        info_df = pd.DataFrame(info_list)
+                        merged_df = filtered_df.merge(info_df, left_on='Symbol', right_on='symbol').drop(columns=['symbol'])
+                        st.session_state['analysis_results']['high_volume_high_ratio'] = {'df': merged_df, 'date': latest_date}
+                    else:
+                        st.session_state['analysis_results']['high_volume_high_ratio'] = None
                 else:
                     st.session_state['analysis_results']['high_volume_high_ratio'] = None
         if 'high_volume_high_ratio' in st.session_state['analysis_results']:
             high_volume_high_ratio = st.session_state['analysis_results']['high_volume_high_ratio']
             if high_volume_high_ratio:
-                filtered_df = high_volume_high_ratio['df']
+                merged_df = high_volume_high_ratio['df']
                 latest_date = high_volume_high_ratio['date']
-                st.write(f"Showing {len(filtered_df)} stocks for {latest_date}")
-                display_df = filtered_df[['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio']].copy()
+                st.write(f"Showing {len(merged_df)} symbols for {latest_date}")
+                select_type = st.selectbox("Filter by Type", ["All", "Stocks", "ETFs"])
+                display_df = merged_df.copy()
+                if select_type != "All":
+                    type_map = {"Stocks": "EQUITY", "ETFs": "ETF"}
+                    display_df = display_df[display_df['quote_type'] == type_map[select_type]]
+                column_order = ['Symbol', 'buy_to_sell_ratio', 'total_volume', 'bought_volume', 'sold_volume', 'short_volume_ratio', 'price', '1w', '1m', '3m']
+                display_df = display_df[column_order]
                 for col in ['total_volume', 'bought_volume', 'sold_volume']:
                     display_df[col] = display_df[col].astype(int)
+                display_df = display_df.rename(columns={'price': 'Price', '1w': '1w Return (%)', '1m': '1m Return (%)', '3m': '3m Return (%)'})
                 def highlight_row(row):
                     return ['background-color: rgba(144, 238, 144, 0.3)'] * len(row)
-                st.dataframe(display_df.style.apply(highlight_row, axis=1).format({
+                st.dataframe(display_df.style.apply(highlight_row, axis=1).applymap(color_returns, subset=['1w Return (%)', '1m Return (%)', '3m Return (%)']).format({
                     'buy_to_sell_ratio': '{:.2f}',
                     'short_volume_ratio': '{:.4f}',
                     'total_volume': '{:,.0f}',
                     'bought_volume': '{:,.0f}',
-                    'sold_volume': '{:,.0f}'
+                    'sold_volume': '{:,.0f}',
+                    'Price': '{:.2f}',
+                    '1w Return (%)': '{:.2f}%',
+                    '1m Return (%)': '{:.2f}%',
+                    '3m Return (%)': '{:.2f}%'
                 }))
-                if not filtered_df.empty:
-                    fig = px.bar(filtered_df.head(20), x='Symbol', y='buy_to_sell_ratio',
-                                 title="Top 20 Stocks by Buy/Sell Ratio",
-                                 hover_data=['total_volume', 'bought_volume', 'sold_volume'],
+                if not display_df.empty:
+                    fig = px.bar(display_df.head(20), x='Symbol', y='buy_to_sell_ratio',
+                                 title="Top 20 Symbols by Buy/Sell Ratio",
+                                 hover_data=['total_volume', 'bought_volume', 'sold_volume', 'Price', '1w Return (%)', '1m Return (%)', '3m Return (%)'],
                                  color_discrete_sequence=['#4CAF50'])
                     fig.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig)
             else:
-                st.write("No data available.")
+                st.write("No data available or no symbols meet the criteria.")
 
 if __name__ == "__main__":
     run()
