@@ -602,7 +602,7 @@ def get_ticker_info(symbol: str) -> dict:
         if not hist.empty:
             current = hist['Close'].iloc[-1]
             for period, label in [(7, '1w'), (30, '1m'), (90, '3m')]:
-                past_date = datetime.now() - timedelta(days=period)
+                past_date = (datetime.now() - timedelta(days=period)).strftime('%Y-%m-%d')
                 past_price = hist['Close'].asof(past_date)
                 if not pd.isna(past_price):
                     ret = (current - past_price) / past_price * 100 if past_price != 0 else 0
@@ -1194,7 +1194,6 @@ def run():
                         total_volume = row.get('TotalVolume', 0)
                         metrics = calculate_metrics(row, total_volume)
                         metrics['Symbol'] = row['Symbol']
-                        # Removed redundant line: metrics['total_volume'] = total_volume
                         metrics_list.append(metrics)
                     df = pd.DataFrame(metrics_list)
                     filtered_df = df[(df['total_volume'] > 500000) & (df['buy_to_sell_ratio'] > 1.25)]
