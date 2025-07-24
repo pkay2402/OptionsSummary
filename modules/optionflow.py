@@ -466,8 +466,8 @@ def display_custom_flows(custom_symbols: List[str], min_premium: int, days_limit
                     
                     st.markdown(f"""
                     <div style="background: rgba(76, 175, 80, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #4CAF50;">
-                        <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
-                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                        <strong>{row['Symbol']}</strong>    
+                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span>   
                         <span style="color: #4CAF50; font-weight: bold;">${row['Call Premium']/1000000:.1f}M</span><br>
                         <span style="color: #888; font-size: 0.9em;">${strike:.0f} CALL • {expiry}</span><br>
                         <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
@@ -496,8 +496,8 @@ def display_custom_flows(custom_symbols: List[str], min_premium: int, days_limit
                     
                     st.markdown(f"""
                     <div style="background: rgba(244, 67, 54, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #f44336;">
-                        <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
-                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                        <strong>{row['Symbol']}</strong>    
+                        <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span>   
                         <span style="color: #f44336; font-weight: bold;">-${row['Put Premium']/1000000:.1f}M</span><br>
                         <span style="color: #888; font-size: 0.9em;">${strike:.0f} PUT • {expiry}</span><br>
                         <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
@@ -513,6 +513,42 @@ def display_custom_flows(custom_symbols: List[str], min_premium: int, days_limit
         display_df['Total Premium ($)'] = display_df['Total Premium ($)'].apply(lambda x: f"${x:,.0f}")
         display_df['Total Volume'] = display_df['Total Volume'].apply(lambda x: f"{x:,}")
         st.dataframe(display_df, use_container_width=True)
+
+def filter_high_volume_flows(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter for high volume options and group by symbol with summary."""
+    if df.empty:
+        return pd.DataFrame()
+
+    required_cols = ['Symbol', 'Call/Put', 'Volume', 'Last Price', 'Expiration']
+    if not all(col in df.columns for col in required_cols):
+        return pd.DataFrame()
+
+    df = df.copy()
+    df['Expiration'] = pd.to_datetime(df['Expiration'], errors='coerce')
+    df = df.dropna(subset=['Expiration'])
+    df = df[df['Expiration'] >= datetime.now()]
+
+    df = df[df['Volume'] > 1000]
+    df = df[df['Last Price'] > 1]
+
+    df['Premium'] = df['Volume'] * df['Last Price'] * 100
+
+    grouped = df.groupby('Symbol').agg(
+        total_premium=('Premium', 'sum'),
+        total_volume=('Volume', 'sum'),
+        option_count=('Premium', 'count')
+    )
+
+    call_prem = df[df['Call/Put'] == 'C'].groupby('Symbol')['Premium'].sum().rename('call_premium')
+    put_prem = df[df['Call/Put'] == 'P'].groupby('Symbol')['Premium'].sum().rename('put_premium')
+
+    grouped = grouped.join(call_prem, how='left').join(put_prem, how='left').fillna(0)
+
+    grouped['net_sentiment'] = (grouped['call_premium'] - grouped['put_premium']) / grouped['total_premium'].where(grouped['total_premium'] > 0, 0)
+
+    grouped = grouped.sort_values('total_premium', ascending=False)
+
+    return grouped
 
 # List of tech stocks (same as before)
 tech_stocks = [
@@ -548,8 +584,8 @@ def main():
 
     st.title("🚀 Options Flow: 15mins delayed")
 
-    # Create tabs - Added Custom Search tab
-    tab1, tab2, tab3 = st.tabs(["📊 Overview", "🧠 Smart Money", "🔍 Custom Search"])
+    # Create tabs - Added High Volume Summary tab
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🧠 Smart Money", "🔍 Custom Search", "📈 High Volume Summary"])
     
     with tab1:
         # Existing overview tab logic
@@ -689,8 +725,8 @@ def main():
                         
                         st.markdown(f"""
                         <div style="background: rgba(76, 175, 80, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #4CAF50;">
-                            <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
-                            <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                            <strong>{row['Symbol']}</strong>    
+                            <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span>   
                             <span style="color: #4CAF50; font-weight: bold;">${row['Call Premium']/1000000:.1f}M</span><br>
                             <span style="color: #888; font-size: 0.9em;">${strike:.0f} CALL • {expiry}</span><br>
                             <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
@@ -719,8 +755,8 @@ def main():
                         
                         st.markdown(f"""
                         <div style="background: rgba(244, 67, 54, 0.1); padding: 8px; margin: 2px; border-radius: 5px; border-left: 4px solid #f44336;">
-                            <strong>{row['Symbol']}</strong> &nbsp;&nbsp; 
-                            <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span> &nbsp;&nbsp;
+                            <strong>{row['Symbol']}</strong>    
+                            <span style="color: #666;">Flow#: {int(row['Flow Count'])}</span>   
                             <span style="color: #f44336; font-weight: bold;">-${row['Put Premium']/1000000:.1f}M</span><br>
                             <span style="color: #888; font-size: 0.9em;">${strike:.0f} PUT • {expiry}</span><br>
                             <span style="color: #999; font-size: 0.8em;">Stock: ${current_price:.2f} | OTM: +{otm_distance:.1f}%</span>
@@ -776,6 +812,81 @@ def main():
                 display_custom_flows(custom_symbols, custom_min_premium, custom_days_limit, custom_otm_only)
             else:
                 st.warning("Please enter at least one stock symbol.")
+
+    with tab4:
+        st.markdown("### 📊 Summary of High Volume Options Flows")
+        st.markdown("Showing options with Volume > 1000 and Last Price > 1, grouped by stock for all available symbols.")
+
+        with st.spinner("Fetching options flow data..."):
+            urls = [
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
+                "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
+            ]
+
+            data = fetch_data_from_urls(urls)
+            if data.empty:
+                st.warning("No options flow data fetched.")
+                return
+
+            high_vol_df = filter_high_volume_flows(data)
+
+        if high_vol_df.empty:
+            st.info("No options meet the high volume criteria.")
+        else:
+            # Intelligent summary
+            st.markdown("#### Key Insights")
+            total_premium = high_vol_df['total_premium'].sum()
+            total_options = high_vol_df['option_count'].sum()
+            bullish_stocks = len(high_vol_df[high_vol_df['net_sentiment'] > 0])
+            bearish_stocks = len(high_vol_df[high_vol_df['net_sentiment'] < 0])
+            neutral_stocks = len(high_vol_df[high_vol_df['net_sentiment'] == 0])
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Premium", f"${total_premium / 1000000:.1f}M")
+            with col2:
+                st.metric("Total Options", f"{total_options:,}")
+            with col3:
+                st.metric("Active Stocks", len(high_vol_df))
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Bullish Stocks", bullish_stocks)
+            with col2:
+                st.metric("Bearish Stocks", bearish_stocks)
+            with col3:
+                st.metric("Neutral Stocks", neutral_stocks)
+
+            st.markdown("#### Top Stocks by Total Premium")
+            display_df = high_vol_df.head(20).copy()
+            display_df['total_premium'] = display_df['total_premium'].apply(lambda x: f"${x:,.0f}")
+            display_df['call_premium'] = display_df['call_premium'].apply(lambda x: f"${x:,.0f}")
+            display_df['put_premium'] = display_df['put_premium'].apply(lambda x: f"${x:,.0f}")
+            display_df['total_volume'] = display_df['total_volume'].apply(lambda x: f"{x:,.0f}")
+            display_df['net_sentiment'] = display_df['net_sentiment'].round(2)
+            st.dataframe(display_df)
+
+            # Bar chart for top 10
+            fig = px.bar(
+                high_vol_df.head(10),
+                x='Symbol',
+                y='total_premium',
+                title="Top 10 Stocks by Total Premium",
+                labels={'total_premium': 'Total Premium ($)'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Full Data Table"):
+                st.dataframe(high_vol_df.style.format({
+                    'total_premium': '${:,.0f}',
+                    'total_volume': '{:,.0f}',
+                    'option_count': '{:,.0f}',
+                    'call_premium': '${:,.0f}',
+                    'put_premium': '${:,.0f}',
+                    'net_sentiment': '{:.2f}'
+                }))
 
     # Auto-refresh (only for overview tab)
     if st.session_state.auto_refresh:
