@@ -813,80 +813,351 @@ def main():
             else:
                 st.warning("Please enter at least one stock symbol.")
 
+        # Enhanced High Volume Summary Tab with Advanced Insights
+    
     with tab4:
-        st.markdown("### 📊 Summary of High Volume Options Flows")
-        st.markdown("Showing options with Volume > 1000 and Last Price > 1, grouped by stock for all available symbols.")
-
-        with st.spinner("Fetching options flow data..."):
+        st.markdown("### 📊 Advanced High Volume Flow Analytics")
+        st.markdown("*Deep market intelligence from institutional option activity*")
+    
+        with st.spinner("Fetching and analyzing options flow data..."):
             urls = [
                 "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=cone",
                 "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=opt",
                 "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=ctwo",
                 "https://www.cboe.com/us/options/market_statistics/symbol_data/csv/?mkt=exo"
             ]
-
+    
             data = fetch_data_from_urls(urls)
             if data.empty:
                 st.warning("No options flow data fetched.")
                 return
-
+    
             high_vol_df = filter_high_volume_flows(data)
-
+    
         if high_vol_df.empty:
             st.info("No options meet the high volume criteria.")
         else:
-            # Intelligent summary
-            st.markdown("#### Key Insights")
+            # 🔥 NEW: Enhanced Insights Section
+            st.markdown("---")
+            st.markdown("### 🧠 Market Intelligence Dashboard")
+            
+            # Calculate advanced metrics
             total_premium = high_vol_df['total_premium'].sum()
             total_options = high_vol_df['option_count'].sum()
-            bullish_stocks = len(high_vol_df[high_vol_df['net_sentiment'] > 0])
-            bearish_stocks = len(high_vol_df[high_vol_df['net_sentiment'] < 0])
-            neutral_stocks = len(high_vol_df[high_vol_df['net_sentiment'] == 0])
-
-            col1, col2, col3 = st.columns(3)
+            
+            # NEW: Sentiment Analysis
+            bullish_stocks = high_vol_df[high_vol_df['net_sentiment'] > 0.2]  # Strong bullish
+            bearish_stocks = high_vol_df[high_vol_df['net_sentiment'] < -0.2]  # Strong bearish
+            neutral_stocks = high_vol_df[abs(high_vol_df['net_sentiment']) <= 0.2]
+            
+            # NEW: Flow Concentration Analysis
+            top_10_premium = high_vol_df.head(10)['total_premium'].sum()
+            concentration_ratio = (top_10_premium / total_premium) * 100
+            
+            # NEW: Unusual Activity Detection
+            avg_premium = high_vol_df['total_premium'].mean()
+            unusual_activity = high_vol_df[high_vol_df['total_premium'] > avg_premium * 3]
+            
+            # 📊 Key Insights Grid
+            col1, col2, col3, col4 = st.columns(4)
+            
             with col1:
-                st.metric("Total Premium", f"${total_premium / 1000000:.1f}M")
+                st.metric("💰 Total Premium", f"${total_premium / 1000000:.1f}M")
+                st.metric("🎯 Market Sentiment", 
+                         f"{len(bullish_stocks)}-{len(neutral_stocks)}-{len(bearish_stocks)}", 
+                         help="Bull-Neutral-Bear count")
+            
             with col2:
-                st.metric("Total Options", f"{total_options:,}")
+                st.metric("📊 Active Symbols", len(high_vol_df))
+                flow_intensity = "🔥 High" if concentration_ratio > 60 else "🟡 Medium" if concentration_ratio > 40 else "🟢 Distributed"
+                st.metric("⚡ Flow Concentration", f"{concentration_ratio:.1f}%", 
+                         delta=flow_intensity, delta_color="inverse")
+            
             with col3:
-                st.metric("Active Stocks", len(high_vol_df))
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Bullish Stocks", bullish_stocks)
-            with col2:
-                st.metric("Bearish Stocks", bearish_stocks)
-            with col3:
-                st.metric("Neutral Stocks", neutral_stocks)
-
-            st.markdown("#### Top Stocks by Total Premium")
-            display_df = high_vol_df.head(20).copy()
-            display_df['total_premium'] = display_df['total_premium'].apply(lambda x: f"${x:,.0f}")
-            display_df['call_premium'] = display_df['call_premium'].apply(lambda x: f"${x:,.0f}")
-            display_df['put_premium'] = display_df['put_premium'].apply(lambda x: f"${x:,.0f}")
-            display_df['total_volume'] = display_df['total_volume'].apply(lambda x: f"{x:,.0f}")
-            display_df['net_sentiment'] = display_df['net_sentiment'].round(2)
-            st.dataframe(display_df)
-
-            # Bar chart for top 10
-            fig = px.bar(
-                high_vol_df.head(10),
-                x='Symbol',
-                y='total_premium',
-                title="Top 10 Stocks by Total Premium",
-                labels={'total_premium': 'Total Premium ($)'}
+                st.metric("🚨 Unusual Activity", len(unusual_activity))
+                if len(unusual_activity) > 0:
+                    biggest_flow = unusual_activity.iloc[0]
+                    st.metric("🐋 Biggest Whale", f"{biggest_flow['Symbol']}", 
+                             delta=f"${biggest_flow['total_premium']/1000000:.1f}M")
+                else:
+                    st.metric("🐋 Biggest Flow", "None")
+            
+            with col4:
+                # NEW: Risk-On vs Risk-Off indicator
+                risk_on_premium = bullish_stocks['total_premium'].sum()
+                risk_off_premium = bearish_stocks['total_premium'].sum()
+                
+                if risk_on_premium > risk_off_premium * 1.5:
+                    market_regime = "🚀 Risk On"
+                    regime_color = "normal"
+                elif risk_off_premium > risk_on_premium * 1.5:
+                    market_regime = "🛡️ Risk Off"
+                    regime_color = "inverse"
+                else:
+                    market_regime = "⚖️ Mixed"
+                    regime_color = "off"
+                
+                st.metric("🌍 Market Regime", market_regime, delta_color=regime_color)
+                net_flow = (risk_on_premium - risk_off_premium) / 1000000
+                st.metric("📈 Net Bull Flow", f"${net_flow:.1f}M")
+    
+            # 🎯 NEW: Actionable Alerts Section
+            st.markdown("---")
+            st.markdown("### 🚨 Trading Alerts & Opportunities")
+            
+            alert_col1, alert_col2 = st.columns(2)
+            
+            with alert_col1:
+                st.markdown("#### 🔥 High Conviction Plays")
+                
+                # Strong bullish with high volume
+                strong_bulls = bullish_stocks[bullish_stocks['net_sentiment'] > 0.5].head(5)
+                
+                for _, stock in strong_bulls.iterrows():
+                    call_dominance = (stock['call_premium'] / stock['total_premium']) * 100
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(90deg, rgba(76,175,80,0.1), rgba(129,199,132,0.05)); 
+                               padding: 10px; margin: 5px 0; border-radius: 8px; 
+                               border-left: 4px solid #4CAF50;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong style="font-size: 1.1em;">{stock['Symbol']}</strong>
+                                <span style="color: #4CAF50; margin-left: 10px;">📈 {call_dominance:.0f}% Calls</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <strong style="color: #2E7D32;">${stock['total_premium']/1000000:.1f}M</strong><br>
+                                <small style="color: #666;">{stock['option_count']} flows</small>
+                            </div>
+                        </div>
+                        <div style="margin-top: 5px; font-size: 0.9em; color: #555;">
+                            💡 <strong>Signal:</strong> Strong institutional buying detected
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            with alert_col2:
+                st.markdown("#### ⚠️ Risk-Off Signals")
+                
+                # Strong bearish with high volume
+                strong_bears = bearish_stocks[bearish_stocks['net_sentiment'] < -0.5].head(5)
+                
+                for _, stock in strong_bears.iterrows():
+                    put_dominance = (stock['put_premium'] / stock['total_premium']) * 100
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(90deg, rgba(244,67,54,0.1), rgba(229,115,115,0.05)); 
+                               padding: 10px; margin: 5px 0; border-radius: 8px; 
+                               border-left: 4px solid #f44336;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong style="font-size: 1.1em;">{stock['Symbol']}</strong>
+                                <span style="color: #f44336; margin-left: 10px;">📉 {put_dominance:.0f}% Puts</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <strong style="color: #C62828;">${stock['total_premium']/1000000:.1f}M</strong><br>
+                                <small style="color: #666;">{stock['option_count']} flows</small>
+                            </div>
+                        </div>
+                        <div style="margin-top: 5px; font-size: 0.9em; color: #555;">
+                            💡 <strong>Signal:</strong> Hedging or bearish positioning
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+            # 📈 NEW: Advanced Visualizations
+            st.markdown("---")
+            st.markdown("### 📊 Advanced Analytics")
+            
+            viz_col1, viz_col2 = st.columns(2)
+            
+            with viz_col1:
+                # Sentiment Distribution
+                sentiment_bins = pd.cut(high_vol_df['net_sentiment'], 
+                                      bins=[-1, -0.5, -0.2, 0.2, 0.5, 1], 
+                                      labels=['Strong Bear', 'Weak Bear', 'Neutral', 'Weak Bull', 'Strong Bull'])
+                sentiment_counts = sentiment_bins.value_counts()
+                
+                fig_sentiment = px.pie(
+                    values=sentiment_counts.values,
+                    names=sentiment_counts.index,
+                    title="Market Sentiment Distribution",
+                    color_discrete_map={
+                        'Strong Bear': '#B71C1C',
+                        'Weak Bear': '#F44336', 
+                        'Neutral': '#9E9E9E',
+                        'Weak Bull': '#8BC34A',
+                        'Strong Bull': '#2E7D32'
+                    }
+                )
+                fig_sentiment.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_sentiment, use_container_width=True)
+            
+            with viz_col2:
+                # Volume vs Premium Efficiency
+                high_vol_df['premium_per_option'] = high_vol_df['total_premium'] / high_vol_df['option_count']
+                
+                fig_efficiency = px.scatter(
+                    high_vol_df.head(20),
+                    x='total_volume',
+                    y='premium_per_option',
+                    size='total_premium',
+                    color='net_sentiment',
+                    hover_name='Symbol',
+                    title="Premium Efficiency Analysis",
+                    labels={
+                        'total_volume': 'Total Volume',
+                        'premium_per_option': 'Premium per Contract ($)',
+                        'net_sentiment': 'Sentiment'
+                    },
+                    color_continuous_scale='RdYlGn',
+                    color_continuous_midpoint=0
+                )
+                st.plotly_chart(fig_efficiency, use_container_width=True)
+    
+            # 🔍 NEW: Sector Analysis
+            st.markdown("---")
+            st.markdown("### 🏭 Sector Flow Analysis")
+            
+            # Map symbols to sectors (you can expand this mapping)
+            sector_mapping = {
+                # Tech
+                'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology', 'META': 'Technology',
+                'NVDA': 'Technology', 'TSLA': 'Technology', 'AMZN': 'Technology', 'NFLX': 'Technology',
+                
+                # Finance
+                'JPM': 'Financial', 'BAC': 'Financial', 'GS': 'Financial', 'MS': 'Financial',
+                
+                # Healthcare
+                'JNJ': 'Healthcare', 'PFE': 'Healthcare', 'MRK': 'Healthcare', 'UNH': 'Healthcare',
+                
+                # Energy
+                'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy',
+                
+                # ETFs
+                'SPY': 'Market ETF', 'QQQ': 'Tech ETF', 'TQQQ': 'Leveraged ETF'
+            }
+            
+            high_vol_df['Sector'] = high_vol_df['Symbol'].map(sector_mapping).fillna('Other')
+            
+            sector_analysis = high_vol_df.groupby('Sector').agg({
+                'total_premium': 'sum',
+                'call_premium': 'sum', 
+                'put_premium': 'sum',
+                'Symbol': 'count'
+            }).rename(columns={'Symbol': 'Stock Count'})
+            
+            sector_analysis['Net Sentiment'] = (
+                (sector_analysis['call_premium'] - sector_analysis['put_premium']) / 
+                sector_analysis['total_premium']
+            ).round(3)
+            
+            sector_analysis = sector_analysis.sort_values('total_premium', ascending=False)
+            
+            # Sector performance table
+            st.markdown("#### 🏆 Sector Rankings by Flow")
+            
+            sector_display = sector_analysis.copy()
+            sector_display['total_premium'] = sector_display['total_premium'].apply(lambda x: f"${x/1000000:.1f}M")
+            sector_display['call_premium'] = sector_display['call_premium'].apply(lambda x: f"${x/1000000:.1f}M")
+            sector_display['put_premium'] = sector_display['put_premium'].apply(lambda x: f"${x/1000000:.1f}M")
+            
+            st.dataframe(sector_display, use_container_width=True)
+    
+            # 📋 NEW: Export Enhanced Data
+            st.markdown("---")
+            st.markdown("### 📥 Export & Alerts")
+            
+            export_col1, export_col2, export_col3 = st.columns(3)
+            
+            with export_col1:
+                # Enhanced CSV export
+                if st.button("📊 Export Full Analysis", type="primary"):
+                    enhanced_df = high_vol_df.copy()
+                    enhanced_df['Market_Regime'] = market_regime
+                    enhanced_df['Alert_Level'] = enhanced_df.apply(lambda row: 
+                        'HIGH' if row['total_premium'] > avg_premium * 3 else
+                        'MEDIUM' if abs(row['net_sentiment']) > 0.3 else 'LOW', axis=1)
+                    
+                    csv = enhanced_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Enhanced CSV",
+                        data=csv,
+                        file_name=f"enhanced_options_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
+            
+            with export_col2:
+                # Watchlist export
+                if st.button("⭐ Export Watchlist"):
+                    watchlist_symbols = list(strong_bulls['Symbol']) + list(strong_bears['Symbol'])
+                    watchlist_data = f"# High Priority Options Flow Watchlist - {datetime.now().strftime('%Y-%m-%d')}\n"
+                    watchlist_data += f"# Generated from {len(high_vol_df)} analyzed flows\n"
+                    watchlist_data += f"# Market Regime: {market_regime}\n\n"
+                    watchlist_data += "# BULLISH SIGNALS:\n"
+                    for symbol in strong_bulls['Symbol']:
+                        watchlist_data += f"{symbol}\n"
+                    watchlist_data += "\n# BEARISH SIGNALS:\n"
+                    for symbol in strong_bears['Symbol']:
+                        watchlist_data += f"{symbol}\n"
+                    
+                    st.download_button(
+                        label="Download Watchlist",
+                        data=watchlist_data,
+                        file_name=f"options_watchlist_{datetime.now().strftime('%Y%m%d')}.txt",
+                        mime="text/plain"
+                    )
+            
+            with export_col3:
+                # Alert setup
+                alert_threshold = st.selectbox(
+                    "Set Alert Threshold", 
+                    ['$1M+', '$2M+', '$5M+', '$10M+'],
+                    help="Get notified when flows exceed threshold"
+                )
+                
+                if st.button("🔔 Setup Alert"):
+                    threshold_map = {'$1M+': 1000000, '$2M+': 2000000, '$5M+': 5000000, '$10M+': 10000000}
+                    threshold = threshold_map[alert_threshold]
+                    big_flows = high_vol_df[high_vol_df['total_premium'] >= threshold]
+                    
+                    if len(big_flows) > 0:
+                        st.success(f"🚨 ALERT: {len(big_flows)} flows exceed {alert_threshold}!")
+                        for _, flow in big_flows.head(3).iterrows():
+                            st.warning(f"🐋 {flow['Symbol']}: ${flow['total_premium']/1000000:.1f}M premium")
+                    else:
+                        st.info(f"No flows currently exceed {alert_threshold}")
+    
+            # 📊 Enhanced Data Table
+            st.markdown("---")
+            st.markdown("### 📋 Detailed Flow Analysis")
+            
+            # Add more calculated columns
+            enhanced_display = high_vol_df.copy()
+            enhanced_display['Flow_Efficiency'] = (enhanced_display['total_premium'] / enhanced_display['option_count']).round(0)
+            enhanced_display['Sentiment_Grade'] = enhanced_display['net_sentiment'].apply(lambda x: 
+                'A+' if x > 0.7 else 'A' if x > 0.4 else 'B+' if x > 0.2 else 
+                'B' if x > -0.2 else 'C+' if x > -0.4 else 'C' if x > -0.7 else 'D')
+            
+            # Format for display
+            display_cols = ['Symbol', 'total_premium', 'call_premium', 'put_premium', 'total_volume', 
+                           'option_count', 'net_sentiment', 'Flow_Efficiency', 'Sentiment_Grade']
+            
+            format_dict = {
+                'total_premium': '${:,.0f}',
+                'call_premium': '${:,.0f}',
+                'put_premium': '${:,.0f}',
+                'total_volume': '{:,.0f}',
+                'option_count': '{:,.0f}',
+                'net_sentiment': '{:.3f}',
+                'Flow_Efficiency': '${:,.0f}'
+            }
+            
+            st.dataframe(
+                enhanced_display[display_cols].head(30).style.format(format_dict),
+                use_container_width=True,
+                height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
-
-            with st.expander("Full Data Table"):
-                st.dataframe(high_vol_df.style.format({
-                    'total_premium': '${:,.0f}',
-                    'total_volume': '{:,.0f}',
-                    'option_count': '{:,.0f}',
-                    'call_premium': '${:,.0f}',
-                    'put_premium': '${:,.0f}',
-                    'net_sentiment': '{:.2f}'
-                }))
+    
+    
 
     # Auto-refresh (only for overview tab)
     if st.session_state.auto_refresh:
