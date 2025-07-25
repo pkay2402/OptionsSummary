@@ -405,7 +405,7 @@ def run():
                         total_put = df['put_volume'].sum()
                         total_vol = total_call + total_put
                         aggregate_ratio = total_call / total_put if total_put > 0 else 5.0
-                        aggregate_net = (total_call - total_put) / total_vol if total_vol > 0 else0
+                        aggregate_net = (total_call - total_put) / total_vol if total_vol > 0 else 0
                         
                         st.subheader("Summary Metrics")
                         col1, col2, col3, col4 = st.columns(4)
