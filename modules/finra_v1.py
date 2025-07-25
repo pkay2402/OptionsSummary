@@ -1468,8 +1468,7 @@ def update_stock_database(symbols: List[str]) -> None:
                 logger.error(f"Error fetching data for {symbol}: {e}")
                 cursor.execute('''
                     INSERT OR REPLACE INTO stocks (symbol, price, market_cap, last_updated)
-                    VALUES (?, ?, ?, ?)
-                ''', (symbol, 0, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    VALUES (?, ?, ?, ?)''', (symbol, 0, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     finally:
         conn.commit()
         conn.close()
