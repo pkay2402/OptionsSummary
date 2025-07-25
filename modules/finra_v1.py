@@ -172,6 +172,7 @@ def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
         if validate_csv_content_type(response):
             csv_data = StringIO(response.text)
             df = pd.read_csv(csv_data)
+            df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce').fillna(0)
             return apply_filters(df)
         else:
             logger.warning(f"Data from {url} is not in CSV format. Skipping...")
@@ -204,7 +205,7 @@ def calculate_and_store_sentiments(df: pd.DataFrame) -> None:
         cursor.execute('''
             INSERT OR REPLACE INTO sentiments (symbol, date, call_volume, put_volume, net_sentiment)
             VALUES (?, ?, ?, ?, ?)
-        ''', (symbol, today, call_vol, put_vol, net))
+        ''', (symbol, today, float(call_vol), float(put_vol), float(net)))
     conn.commit()
     conn.close()
 
@@ -217,6 +218,9 @@ def get_historical_sentiment(symbol: str, lookback_days: int = 20) -> pd.DataFra
         params=(symbol, start_date)
     )
     conn.close()
+    df['call_volume'] = pd.to_numeric(df['call_volume'], errors='coerce').fillna(0)
+    df['put_volume'] = pd.to_numeric(df['put_volume'], errors='coerce').fillna(0)
+    df['net_sentiment'] = pd.to_numeric(df['net_sentiment'], errors='coerce').fillna(0)
     return df
 
 def get_today_sentiments() -> pd.DataFrame:
@@ -228,6 +232,9 @@ def get_today_sentiments() -> pd.DataFrame:
         params=(today,)
     )
     conn.close()
+    df['call_volume'] = pd.to_numeric(df['call_volume'], errors='coerce').fillna(0)
+    df['put_volume'] = pd.to_numeric(df['put_volume'], errors='coerce').fillna(0)
+    df['net_sentiment'] = pd.to_numeric(df['net_sentiment'], errors='coerce').fillna(0)
     return df
 
 def get_signal(ratio: float) -> str:
@@ -298,17 +305,20 @@ def run():
                     df['pct_avg'] = (df['call_volume'] / df['total_volume'] * 100).round(0).astype(int)
                     df['bot_pct'] = df['pct_avg']
                     df['signal'] = df['ratio'].apply(get_signal)
+                    df['net_sentiment'] = df['net_sentiment'].round(2)
                     
                     total_call = df['call_volume'].sum()
                     total_put = df['put_volume'].sum()
                     total_vol = total_call + total_put
                     aggregate_ratio = total_call / total_put if total_put > 0 else 5.0
+                    aggregate_net = (total_call - total_put) / total_vol if total_vol > 0 else 0
                     
                     st.subheader("Summary Metrics")
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     col1.metric("Total Call Volume", f"{total_call:,.0f}")
                     col2.metric("Total Put Volume", f"{total_put:,.0f}")
                     col3.metric("Aggregate Ratio", f"{aggregate_ratio:.2f}")
+                    col4.metric("Aggregate Net Sentiment", f"{aggregate_net:.2f}")
                     
                     display_df = df.copy()
                     display_df['call_volume'] = display_df['call_volume'].apply(lambda x: f"{x:,.0f}")
@@ -318,7 +328,7 @@ def run():
                     display_df['bot_pct'] = display_df['bot_pct'].apply(lambda x: f"{x}%")
                     display_df['ratio'] = display_df['ratio'].round(2)
                     
-                    columns = ['date', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'signal']
+                    columns = ['date', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'net_sentiment', 'signal']
                     st.dataframe(display_df[columns].style.applymap(style_signal, subset=['signal']))
                 else:
                     st.write(f"No data available for {symbol}.")
@@ -349,6 +359,7 @@ def run():
                         d['pct_avg'] = (d['call_volume'] / d['total_volume'] * 100).round(0).astype(int)
                         d['bot_pct'] = d['pct_avg']
                         d['signal'] = d['ratio'].apply(get_signal)
+                        d['net_sentiment'] = d['net_sentiment'].round(2)
                         d['call_volume'] = d['call_volume'].apply(lambda x: f"{x:,.0f}")
                         d['put_volume'] = d['put_volume'].apply(lambda x: f"{x:,.0f}")
                         d['total_volume'] = d['total_volume'].apply(lambda x: f"{x:,.0f}")
@@ -358,14 +369,14 @@ def run():
                     
                     st.write("### High Buy Stocks (Ratio > 2)")
                     if not high_buy_df.empty:
-                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'signal']
+                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'net_sentiment', 'signal']
                         st.dataframe(high_buy_df[columns].style.applymap(style_signal, subset=['signal']))
                     else:
                         st.write("No high buy stocks found.")
                     
                     st.write("### High Sell Stocks (Ratio < 0.5)")
                     if not high_sell_df.empty:
-                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'signal']
+                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'net_sentiment', 'signal']
                         st.dataframe(high_sell_df[columns].style.applymap(style_signal, subset=['signal']))
                     else:
                         st.write("No high sell stocks found.")
@@ -388,16 +399,20 @@ def run():
                         df['pct_avg'] = (df['call_volume'] / df['total_volume'] * 100).round(0).astype(int)
                         df['bot_pct'] = df['pct_avg']
                         df['signal'] = df['ratio'].apply(get_signal)
+                        df['net_sentiment'] = df['net_sentiment'].round(2)
                         
                         total_call = df['call_volume'].sum()
                         total_put = df['put_volume'].sum()
+                        total_vol = total_call + total_put
                         aggregate_ratio = total_call / total_put if total_put > 0 else 5.0
+                        aggregate_net = (total_call - total_put) / total_vol if total_vol > 0 else0
                         
                         st.subheader("Summary Metrics")
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2, col3, col4 = st.columns(4)
                         col1.metric("Total Call Volume", f"{total_call:,.0f}")
                         col2.metric("Total Put Volume", f"{total_put:,.0f}")
                         col3.metric("Aggregate Ratio", f"{aggregate_ratio:.2f}")
+                        col4.metric("Aggregate Net Sentiment", f"{aggregate_net:.2f}")
                         
                         display_df = df.copy()
                         display_df['call_volume'] = display_df['call_volume'].apply(lambda x: f"{x:,.0f}")
@@ -407,7 +422,7 @@ def run():
                         display_df['bot_pct'] = display_df['bot_pct'].apply(lambda x: f"{x}%")
                         display_df['ratio'] = display_df['ratio'].round(2)
                         
-                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'signal']
+                        columns = ['symbol', 'call_volume', 'put_volume', 'pct_avg', 'ratio', 'bot_pct', 'total_volume', 'net_sentiment', 'signal']
                         st.dataframe(display_df[columns].style.applymap(style_signal, subset=['signal']))
                     else:
                         st.write(f"No data available for {selected_theme} symbols today.")
