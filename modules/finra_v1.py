@@ -522,26 +522,78 @@ def style_anomaly(val):
 def run():
     st.markdown("""
         <style>
+        /* Dark theme styling */
+        .stApp {
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+        
+        /* Button styling */
         .stButton>button {
             background-color: #4CAF50;
             color: white;
             border-radius: 5px;
             padding: 8px 16px;
+            border: none;
         }
+        
+        /* Tab styling */
+        .stTabs [data-baseweb="tab-list"] {
+            background-color: #2d2d2d;
+        }
+        
         .stTabs [data-baseweb="tab"] {
+            background-color: #2d2d2d;
+            color: #ffffff;
             font-size: 16px;
             padding: 10px;
+            border-radius: 5px 5px 0 0;
         }
-        .stSelectbox {
-            max-width: 300px;
+        
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: #3d3d3d;
         }
+        
+        /* Input styling */
+        .stSelectbox > div > div {
+            background-color: #2d2d2d;
+            color: #ffffff;
+        }
+        
+        .stTextInput > div > div > input {
+            background-color: #2d2d2d;
+            color: #ffffff;
+            border: 1px solid #4d4d4d;
+        }
+        
+        /* Dataframe styling */
         .stDataFrame {
-            font-size: 14px;
+            font-size: 13px;
+            background-color: #1e1e1e;
+        }
+        
+        /* Metric styling */
+        .metric-container {
+            background-color: #2d2d2d;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        
+        /* Header styling */
+        h1, h2, h3 {
+            color: #ffffff !important;
+        }
+        
+        /* Sidebar styling */
+        .css-1d391kg {
+            background-color: #2d2d2d;
         }
         </style>
         """, unsafe_allow_html=True)
     
-    st.title("📊 Enhanced FINRA Dark Pool Analysis")
+    st.set_page_config(layout="wide", page_title="Dark Pool Analysis")
+    st.title("📊 Dark Pool Analysis")
     
     # Create tabs
     tabs = st.tabs(["Single Stock", "Stock Summary", "Watchlist Summary"])
@@ -584,8 +636,26 @@ def run():
                         display_df[col] = display_df[col].astype(int).apply(lambda x: f"{x:,.0f}")
                     display_df['buy_to_sell_ratio'] = display_df['buy_to_sell_ratio'].round(2)
                     display_df['date'] = display_df['date'].dt.strftime('%Y%m%d')
-                    columns = ['date', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'total_volume', 'Bought Dev 5d', 'Sold Dev 5d', 'Signal']
-                    st.dataframe(display_df[columns].style.applymap(style_signal, subset=['Signal']).applymap(style_dev, subset=['Bought Dev 5d', 'Sold Dev 5d']))
+                    columns = ['date', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Bought Dev 5d', 'Sold Dev 5d']
+                    
+                    # Enhanced styling for dark theme
+                    styled_df = display_df[columns].style.applymap(
+                        style_signal_dark, subset=['Signal']
+                    ).applymap(
+                        style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
+                    ).applymap(
+                        style_bot_percentage, subset=['BOT %']
+                    ).set_table_styles([
+                        {'selector': 'th', 'props': [('background-color', '#2d2d2d'), 
+                                                    ('color', '#ffffff'), 
+                                                    ('font-weight', 'bold')]},
+                        {'selector': 'td', 'props': [('background-color', '#1e1e1e'), 
+                                                    ('color', '#ffffff'), 
+                                                    ('border', '1px solid #3d3d3d')]},
+                        {'selector': 'table', 'props': [('border-collapse', 'collapse')]}
+                    ])
+                    
+                    st.dataframe(styled_df, use_container_width=True)
                 else:
                     st.write(f"No data available for {symbol}.")
     
@@ -596,7 +666,7 @@ def run():
             with st.spinner("Analyzing stock volume data..."):
                 high_buy_df, high_sell_df, latest_date = generate_stock_summary()
                 if latest_date:
-                    st.write(f"📅 **Data analyzed for:** {latest_date}")
+                    st.markdown(f"**📅 Data analyzed for:** `{latest_date}`")
                 
                 # Enhanced summary metrics
                 if not high_buy_df.empty or not high_sell_df.empty:
@@ -610,7 +680,7 @@ def run():
                     col4.metric("Bullish Signals", len(all_data[all_data['buy_to_sell_ratio'] > 1.5]))
                     col5.metric("High Anomalies", len(all_data[all_data['anomaly_score'] > 1.0]))
                 
-                st.write("### 🟢 High Buy Stocks (Bought > 2x Sold)")
+                st.markdown("### 🟢 High Buy Stocks (Bought > 2x Sold)")
                 if not high_buy_df.empty:
                     # Add filters
                     col1, col2, col3 = st.columns(3)
@@ -628,55 +698,23 @@ def run():
                     if show_anomalies_only:
                         filtered_df = filtered_df[filtered_df['anomaly_score'] > 1.0]
                     
-                    display_df = filtered_df.copy()
-                    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
-                    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
-                    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
-                    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
-                    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
-                    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Trend 3D'] = display_df['trend_3d']
-                    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
-                    for col in ['bought_volume', 'sold_volume', 'total_volume']:
-                        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+                    display_df = format_display_dataframe(filtered_df)
+                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
                     
-                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly', 'Signal']
-                    st.dataframe(
-                        display_df[columns].style
-                        .applymap(style_signal, subset=['Signal'])
-                        .applymap(style_dev, subset=['Bought Dev 5d', 'Sold Dev 5d'])
-                        .applymap(style_price_change, subset=['Price Change'])
-                        .applymap(style_anomaly, subset=['Anomaly'])
-                    )
+                    styled_df = create_dark_styled_dataframe(display_df, columns)
+                    st.dataframe(styled_df, use_container_width=True)
                 else:
-                    st.write("No high buy stocks found.")
+                    st.info("No high buy stocks found.")
                     
-                st.write("### 🔴 High Sell Stocks (Sold > 2x Bought)")
+                st.markdown("### 🔴 High Sell Stocks (Sold > 2x Bought)")
                 if not high_sell_df.empty:
-                    display_df = high_sell_df.copy()
-                    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
-                    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
-                    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
-                    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
-                    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
-                    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Trend 3D'] = display_df['trend_3d']
-                    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
-                    for col in ['bought_volume', 'sold_volume', 'total_volume']:
-                        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+                    display_df = format_display_dataframe(high_sell_df)
+                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
                     
-                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly', 'Signal']
-                    st.dataframe(
-                        display_df[columns].style
-                        .applymap(style_signal, subset=['Signal'])
-                        .applymap(style_dev, subset=['Bought Dev 5d', 'Sold Dev 5d'])
-                        .applymap(style_price_change, subset=['Price Change'])
-                        .applymap(style_anomaly, subset=['Anomaly'])
-                    )
+                    styled_df = create_dark_styled_dataframe(display_df, columns)
+                    st.dataframe(styled_df, use_container_width=True)
                 else:
-                    st.write("No high sell stocks found.")
+                    st.info("No high sell stocks found.")
     
     # Watchlist Summary Tab
     with tabs[2]:
@@ -692,89 +730,198 @@ def run():
                     if hist:
                         latest_date = max(latest_date, hist[-1]['date'].strftime('%Y%m%d')) if latest_date else hist[-1]['date'].strftime('%Y%m%d')
                 if latest_date:
-                    st.write(f"📅 **Data for:** {latest_date}")
-                    metrics_list = []
-                    for symbol in symbols:
-                        hist = historical[symbol]
-                        if hist and hist[-1]['date'].strftime('%Y%m%d') == latest_date:
-                            metrics = hist[-1].copy()
-                            metrics['Symbol'] = symbol
-                            past = hist[:-1]
-                            dev_b_5 = np.nan
-                            dev_s_5 = np.nan
-                            if len(past) >= 5:
-                                avg_b_5 = np.mean([p['bought_volume'] for p in past[-5:]])
-                                avg_s_5 = np.mean([p['sold_volume'] for p in past[-5:]])
-                                if avg_b_5 > 0:
-                                    dev_b_5 = round(((metrics['bought_volume'] - avg_b_5) / avg_b_5 * 100), 0)
-                                if avg_s_5 > 0:
-                                    dev_s_5 = round(((metrics['sold_volume'] - avg_s_5) / avg_s_5 * 100), 0)
-                                
-                                # Calculate additional metrics
-                                historical_volumes = [p['total_volume'] for p in past[-5:]]
-                                historical_ratios = [p['buy_to_sell_ratio'] for p in past[-3:]]
-                                
-                                metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
-                                metrics['trend_3d'] = get_trend_direction(historical_ratios)
-                                metrics['anomaly_score'] = calculate_anomaly_score(
-                                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
-                                )
-                            else:
-                                metrics['volume_strength'] = 1.0
-                                metrics['trend_3d'] = "-"
-                                metrics['anomaly_score'] = 0.0
-                            
-                            # Add price data
-                            if symbol in price_data:
-                                metrics['current_price'] = price_data[symbol]['current_price']
-                                metrics['price_change_1d'] = price_data[symbol]['change_1d']
-                            else:
-                                metrics['current_price'] = 0.0
-                                metrics['price_change_1d'] = 0.0
-                            
-                            metrics['dev_b_5'] = dev_b_5
-                            metrics['dev_s_5'] = dev_s_5
-                            metrics_list.append(metrics)
+                    st.markdown(f"**📅 Data for:** `{latest_date}`")
+                    theme_df = create_theme_dataframe(symbols, historical, price_data, latest_date)
                     
-                    theme_df = pd.DataFrame(metrics_list)
-                    theme_df = theme_df.sort_values(by=['buy_to_sell_ratio'], ascending=False)
-                    total_buy = theme_df['bought_volume'].sum()
-                    total_sell = theme_df['sold_volume'].sum()
-                    total_volume_sum = theme_df['total_volume'].sum()
-                    aggregate_ratio = total_buy / total_sell if total_sell > 0 else float('inf')
-                    
-                    st.subheader("📊 Summary Metrics")
-                    col1, col2, col3, col4, col5 = st.columns(5)
-                    col1.metric("Total Bought", f"{total_buy:,.0f}")
-                    col2.metric("Total Sold", f"{total_sell:,.0f}")
-                    col3.metric("Aggregate Ratio", f"{aggregate_ratio:.2f}")
-                    col4.metric("Avg Price Change", f"{theme_df['price_change_1d'].mean():.1f}%")
-                    col5.metric("High Anomalies", len(theme_df[theme_df['anomaly_score'] > 1.0]))
-                    
-                    display_df = theme_df.copy()
-                    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
-                    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
-                    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
-                    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
-                    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
-                    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-                    display_df['Trend 3D'] = display_df['trend_3d']
-                    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
-                    for col in ['bought_volume', 'sold_volume', 'total_volume']:
-                        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
-                    display_df['buy_to_sell_ratio'] = display_df['buy_to_sell_ratio'].round(2)
-                    
-                    columns = ['Symbol', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly', 'Signal']
-                    st.dataframe(
-                        display_df[columns].style
-                        .applymap(style_signal, subset=['Signal'])
-                        .applymap(style_dev, subset=['Bought Dev 5d', 'Sold Dev 5d'])
-                        .applymap(style_price_change, subset=['Price Change'])
-                        .applymap(style_anomaly, subset=['Anomaly'])
-                    )
+                    if not theme_df.empty:
+                        total_buy = theme_df['bought_volume'].sum()
+                        total_sell = theme_df['sold_volume'].sum()
+                        aggregate_ratio = total_buy / total_sell if total_sell > 0 else float('inf')
+                        
+                        st.subheader("📊 Summary Metrics")
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        col1.metric("Total Bought", f"{total_buy:,.0f}")
+                        col2.metric("Total Sold", f"{total_sell:,.0f}")
+                        col3.metric("Aggregate Ratio", f"{aggregate_ratio:.2f}")
+                        col4.metric("Avg Price Change", f"{theme_df['price_change_1d'].mean():.1f}%")
+                        col5.metric("High Anomalies", len(theme_df[theme_df['anomaly_score'] > 1.0]))
+                        
+                        display_df = format_display_dataframe(theme_df)
+                        columns = ['Symbol', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
+                        
+                        styled_df = create_dark_styled_dataframe(display_df, columns)
+                        st.dataframe(styled_df, use_container_width=True)
                 else:
-                    st.write(f"No data available for {selected_theme}.")
+                    st.warning(f"No data available for {selected_theme}.")
+
+# Enhanced styling functions for dark theme
+def style_signal_dark(val):
+    if val == 'Buy':
+        return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
+    elif val == 'Add':
+        return 'background-color: #14a085; color: #ffffff; font-weight: bold'
+    elif val == 'Trim':
+        return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
+    return ''
+
+def style_dev_dark(val):
+    if val == '-':
+        return 'background-color: #2d2d2d; color: #888888'
+    try:
+        num = float(val.rstrip('%'))
+        if num > 50:
+            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
+        elif num > 20:
+            return 'background-color: #14a085; color: #ffffff'
+        elif num < -50:
+            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
+        elif num < -20:
+            return 'background-color: #ff8e8e; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_price_change_dark(val):
+    try:
+        num = float(val.rstrip('%'))
+        if num > 2:
+            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
+        elif num > 0:
+            return 'background-color: #14a085; color: #ffffff'
+        elif num < -2:
+            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
+        elif num < 0:
+            return 'background-color: #ff8e8e; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_anomaly_dark(val):
+    try:
+        num = float(val)
+        if num > 2.0:
+            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
+        elif num > 1.0:
+            return 'background-color: #ffb347; color: #000000; font-weight: bold'
+        elif num > 0.5:
+            return 'background-color: #ffd700; color: #000000'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_bot_percentage(val):
+    try:
+        num = float(val.rstrip('%'))
+        if num >= 60:
+            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
+        elif num >= 50:
+            return 'background-color: #14a085; color: #ffffff'
+        elif num >= 40:
+            return 'background-color: #ffd700; color: #000000'
+        elif num >= 30:
+            return 'background-color: #ffb347; color: #000000'
+        else:
+            return 'background-color: #ff8e8e; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def format_display_dataframe(df):
+    """Format dataframe for display with proper styling"""
+    display_df = df.copy()
+    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
+    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
+    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
+    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
+    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
+    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    display_df['Trend 3D'] = display_df['trend_3d']
+    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
+    for col in ['bought_volume', 'sold_volume', 'total_volume']:
+        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+    return display_df
+
+def create_dark_styled_dataframe(display_df, columns):
+    """Create styled dataframe with dark theme colors"""
+    return display_df[columns].style.applymap(
+        style_signal_dark, subset=['Signal']
+    ).applymap(
+        style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
+    ).applymap(
+        style_price_change_dark, subset=['Price Change']
+    ).applymap(
+        style_anomaly_dark, subset=['Anomaly']
+    ).applymap(
+        style_bot_percentage, subset=['BOT %']
+    ).set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#2d2d2d'), 
+            ('color', '#ffffff'), 
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('border', '1px solid #4d4d4d')
+        ]},
+        {'selector': 'td', 'props': [
+            ('background-color', '#1e1e1e'), 
+            ('color', '#ffffff'), 
+            ('border', '1px solid #3d3d3d'),
+            ('text-align', 'center')
+        ]},
+        {'selector': 'table', 'props': [
+            ('border-collapse', 'collapse'),
+            ('width', '100%')
+        ]}
+    ])
+
+def create_theme_dataframe(symbols, historical, price_data, latest_date):
+    """Create dataframe for theme analysis"""
+    metrics_list = []
+    for symbol in symbols:
+        hist = historical[symbol]
+        if hist and hist[-1]['date'].strftime('%Y%m%d') == latest_date:
+            metrics = hist[-1].copy()
+            metrics['Symbol'] = symbol
+            past = hist[:-1]
+            dev_b_5 = np.nan
+            dev_s_5 = np.nan
+            if len(past) >= 5:
+                avg_b_5 = np.mean([p['bought_volume'] for p in past[-5:]])
+                avg_s_5 = np.mean([p['sold_volume'] for p in past[-5:]])
+                if avg_b_5 > 0:
+                    dev_b_5 = round(((metrics['bought_volume'] - avg_b_5) / avg_b_5 * 100), 0)
+                if avg_s_5 > 0:
+                    dev_s_5 = round(((metrics['sold_volume'] - avg_s_5) / avg_s_5 * 100), 0)
+                
+                # Calculate additional metrics
+                historical_volumes = [p['total_volume'] for p in past[-5:]]
+                historical_ratios = [p['buy_to_sell_ratio'] for p in past[-3:]]
+                
+                metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
+                metrics['trend_3d'] = get_trend_direction(historical_ratios)
+                metrics['anomaly_score'] = calculate_anomaly_score(
+                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
+                )
+            else:
+                metrics['volume_strength'] = 1.0
+                metrics['trend_3d'] = "-"
+                metrics['anomaly_score'] = 0.0
+            
+            # Add price data
+            if symbol in price_data:
+                metrics['current_price'] = price_data[symbol]['current_price']
+                metrics['price_change_1d'] = price_data[symbol]['change_1d']
+            else:
+                metrics['current_price'] = 0.0
+                metrics['price_change_1d'] = 0.0
+            
+            metrics['dev_b_5'] = dev_b_5
+            metrics['dev_s_5'] = dev_s_5
+            metrics_list.append(metrics)
+    
+    theme_df = pd.DataFrame(metrics_list)
+    theme_df = theme_df.sort_values(by=['buy_to_sell_ratio'], ascending=False)
+    return theme_df
 
 if __name__ == "__main__":
     run()
