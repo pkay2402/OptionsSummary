@@ -473,12 +473,14 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
     return high_buy_df, high_sell_df, latest_date
 
 def get_signal(ratio):
-    if ratio > 1.5:
+    if ratio > 1.2:
         return 'Buy'
     elif ratio > 1.0:
         return 'Add'
-    else:
+    elif 0.5 < ratio <= 1.0:
         return 'Trim'
+    else:
+        return 'Sell'
 
 def style_signal(val):
     color = 'green' if val in ['Buy', 'Add'] else 'red'
