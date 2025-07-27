@@ -10,6 +10,8 @@ import yfinance as yf
 from typing import Optional, List
 import numpy as np
 
+st.set_page_config(layout="wide", page_title="Dark Pool Analysis")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -147,6 +149,8 @@ theme_mapping = {
         "BLUE", "SANA", "VKTX", "KRYS"
     ]
 }
+
+all_symbols = list(set([symbol for symbols in theme_mapping.values() for symbol in symbols]))
 
 # Database functions
 def setup_stock_database() -> None:
@@ -399,7 +403,6 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
         for symbol in symbols:
             if symbol not in symbol_themes:
                 symbol_themes[symbol] = theme
-    all_symbols = list(set([s for symbols in theme_mapping.values() for s in symbols]))
     
     # Get price data
     price_data = get_price_data(all_symbols)
@@ -472,6 +475,67 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
     
     return high_buy_df, high_sell_df, latest_date
 
+def generate_themes_summary(period_days: int = 1):
+    historical = get_historical_metrics(all_symbols)
+    
+    # Get all unique dates
+    all_dates = set()
+    for hist in historical.values():
+        for entry in hist:
+            all_dates.add(entry['date'])
+    sorted_dates = sorted(list(all_dates), reverse=True)
+    
+    if len(sorted_dates) < period_days:
+        period_dates = sorted_dates
+    else:
+        period_dates = sorted_dates[:period_days]
+    
+    # Now, for each theme, aggregate
+    theme_aggregates = {}
+    for theme, symbols in theme_mapping.items():
+        total_b = 0
+        total_s = 0
+        stock_aggregates = {sym: {'b': 0, 's': 0} for sym in symbols}
+        for sym in symbols:
+            hist = historical.get(sym, [])
+            for entry in hist:
+                if entry['date'] in period_dates:
+                    stock_aggregates[sym]['b'] += entry['bought_volume']
+                    stock_aggregates[sym]['s'] += entry['sold_volume']
+                    total_b += entry['bought_volume']
+                    total_s += entry['sold_volume']
+        
+        total_v = total_b + total_s
+        if total_v == 0:
+            continue
+        
+        if total_s > 0:
+            theme_ratio = total_b / total_s
+        else:
+            theme_ratio = float('inf')
+        
+        stock_ratios = {}
+        for sym, ag in stock_aggregates.items():
+            if ag['b'] + ag['s'] == 0:
+                continue
+            if ag['s'] > 0:
+                stock_ratios[sym] = ag['b'] / ag['s']
+            else:
+                stock_ratios[sym] = float('inf')
+        
+        if not stock_ratios:
+            continue
+        
+        theme_aggregates[theme] = {
+            'ratio': theme_ratio,
+            'stock_ratios': stock_ratios
+        }
+    
+    # Sort themes by ratio desc
+    sorted_themes = sorted(theme_aggregates.items(), key=lambda x: x[1]['ratio'], reverse=True)
+    
+    return sorted_themes, period_dates
+
 def get_signal(ratio):
     if ratio > 1.2:
         return 'Buy'
@@ -482,44 +546,195 @@ def get_signal(ratio):
     else:
         return 'Sell'
 
-def style_signal(val):
-    color = 'green' if val in ['Buy', 'Add'] else 'red'
-    return f'color: {color}; font-weight: bold'
+def style_signal_dark(val):
+    if val == 'Buy':
+        return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+    elif val == 'Add':
+        return 'background-color: #4ade80; color: #ffffff; font-weight: bold'
+    elif val == 'Trim':
+        return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+    elif val == 'Sell':
+        return 'background-color: #b91c1c; color: #ffffff; font-weight: bold'
+    return ''
 
-def style_dev(val):
+def style_dev_dark(val):
     if val == '-':
-        return ''
+        return 'background-color: #2d2d2d; color: #888888'
     try:
         num = float(val.rstrip('%'))
         if num > 50:
-            return 'color: green; font-weight: bold'
+            return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+        elif num > 20:
+            return 'background-color: #4ade80; color: #ffffff'
         elif num < -50:
-            return 'color: red; font-weight: bold'
+            return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+        elif num < -20:
+            return 'background-color: #fca5a5; color: #ffffff'
     except:
         pass
-    return ''
+    return 'background-color: #2d2d2d; color: #ffffff'
 
-def style_price_change(val):
+def style_price_change_dark(val):
     try:
         num = float(val.rstrip('%'))
         if num > 2:
-            return 'color: green; font-weight: bold'
+            return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+        elif num > 0:
+            return 'background-color: #4ade80; color: #ffffff'
         elif num < -2:
-            return 'color: red; font-weight: bold'
+            return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+        elif num < 0:
+            return 'background-color: #fca5a5; color: #ffffff'
     except:
         pass
-    return ''
+    return 'background-color: #2d2d2d; color: #ffffff'
 
-def style_anomaly(val):
+def style_anomaly_dark(val):
     try:
         num = float(val)
-        if num > 1.0:
-            return 'color: orange; font-weight: bold'
-        elif num > 2.0:
-            return 'color: red; font-weight: bold'
+        if num > 2.0:
+            return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+        elif num > 1.0:
+            return 'background-color: #f97316; color: #ffffff; font-weight: bold'
+        elif num > 0.5:
+            return 'background-color: #fde047; color: #000000'
     except:
         pass
-    return ''
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_bot_percentage(val):
+    try:
+        num = float(val.rstrip('%'))
+        if num >= 60:
+            return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+        elif num >= 50:
+            return 'background-color: #4ade80; color: #ffffff'
+        elif num >= 40:
+            return 'background-color: #fde047; color: #000000'
+        elif num >= 30:
+            return 'background-color: #f97316; color: #ffffff'
+        else:
+            return 'background-color: #fca5a5; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_ratio_dark(val):
+    if val == '∞':
+        return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+    try:
+        num = float(val)
+        if num > 1.5:
+            return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+        elif num > 1:
+            return 'background-color: #4ade80; color: #ffffff'
+        elif num < 0.5:
+            return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+        elif num < 1:
+            return 'background-color: #fca5a5; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def format_display_dataframe(df):
+    """Format dataframe for display with proper styling"""
+    display_df = df.copy()
+    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
+    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
+    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
+    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
+    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
+    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    display_df['Trend 3D'] = display_df['trend_3d']
+    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
+    for col in ['bought_volume', 'sold_volume', 'total_volume']:
+        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+    return display_df
+
+def create_dark_styled_dataframe(display_df, columns):
+    """Create styled dataframe with dark theme colors"""
+    return display_df[columns].style.applymap(
+        style_signal_dark, subset=['Signal']
+    ).applymap(
+        style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
+    ).applymap(
+        style_price_change_dark, subset=['Price Change']
+    ).applymap(
+        style_anomaly_dark, subset=['Anomaly']
+    ).applymap(
+        style_bot_percentage, subset=['BOT %']
+    ).set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#2d2d2d'), 
+            ('color', '#ffffff'), 
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('border', '1px solid #4d4d4d')
+        ]},
+        {'selector': 'td', 'props': [
+            ('background-color', '#1e1e1e'), 
+            ('color', '#ffffff'), 
+            ('border', '1px solid #3d3d3d'),
+            ('text-align', 'center')
+        ]},
+        {'selector': 'table', 'props': [
+            ('border-collapse', 'collapse'),
+            ('width', '100%')
+        ]},
+        {'selector': 'tr:hover td', 'props': [
+            ('background-color', '#3f3f3f')
+        ]}
+    ])
+
+def create_theme_dataframe(symbols, historical, price_data, latest_date):
+    """Create dataframe for theme analysis"""
+    metrics_list = []
+    for symbol in symbols:
+        hist = historical[symbol]
+        if hist and hist[-1]['date'].strftime('%Y%m%d') == latest_date:
+            metrics = hist[-1].copy()
+            metrics['Symbol'] = symbol
+            past = hist[:-1]
+            dev_b_5 = np.nan
+            dev_s_5 = np.nan
+            if len(past) >= 5:
+                avg_b_5 = np.mean([p['bought_volume'] for p in past[-5:]])
+                avg_s_5 = np.mean([p['sold_volume'] for p in past[-5:]])
+                if avg_b_5 > 0:
+                    dev_b_5 = round(((metrics['bought_volume'] - avg_b_5) / avg_b_5 * 100), 0)
+                if avg_s_5 > 0:
+                    dev_s_5 = round(((metrics['sold_volume'] - avg_s_5) / avg_s_5 * 100), 0)
+                
+                # Calculate additional metrics
+                historical_volumes = [p['total_volume'] for p in past[-5:]]
+                historical_ratios = [p['buy_to_sell_ratio'] for p in past[-3:]]
+                
+                metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
+                metrics['trend_3d'] = get_trend_direction(historical_ratios)
+                metrics['anomaly_score'] = calculate_anomaly_score(
+                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
+                )
+            else:
+                metrics['volume_strength'] = 1.0
+                metrics['trend_3d'] = "-"
+                metrics['anomaly_score'] = 0.0
+            
+            # Add price data
+            if symbol in price_data:
+                metrics['current_price'] = price_data[symbol]['current_price']
+                metrics['price_change_1d'] = price_data[symbol]['change_1d']
+            else:
+                metrics['current_price'] = 0.0
+                metrics['price_change_1d'] = 0.0
+            
+            metrics['dev_b_5'] = dev_b_5
+            metrics['dev_s_5'] = dev_s_5
+            metrics_list.append(metrics)
+    
+    theme_df = pd.DataFrame(metrics_list)
+    theme_df = theme_df.sort_values(by=['buy_to_sell_ratio'], ascending=False)
+    return theme_df
 
 def run():
     st.markdown("""
@@ -532,7 +747,7 @@ def run():
         
         /* Button styling */
         .stButton>button {
-            background-color: #4CAF50;
+            background-color: #22c55e;
             color: white;
             border-radius: 5px;
             padding: 8px 16px;
@@ -594,11 +809,11 @@ def run():
         </style>
         """, unsafe_allow_html=True)
     
-    st.set_page_config(layout="wide", page_title="Dark Pool Analysis")
-    st.title("📊 Dark Pool Analysis")
+    #st.set_page_config(layout="wide", page_title="Dark Pool Analysis")
+    #st.title("📊 Dark Pool Analysis")
     
     # Create tabs
-    tabs = st.tabs(["Single Stock", "Stock Summary", "Watchlist Summary"])
+    tabs = st.tabs(["Single Stock", "Stock Summary", "Themes Overview", "Watchlist Summary"])
     
     # Single Stock Tab
     with tabs[0]:
@@ -640,7 +855,6 @@ def run():
                     display_df['date'] = display_df['date'].dt.strftime('%Y%m%d')
                     columns = ['date', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Bought Dev 5d', 'Sold Dev 5d']
                     
-                    # Enhanced styling for dark theme
                     styled_df = display_df[columns].style.applymap(
                         style_signal_dark, subset=['Signal']
                     ).applymap(
@@ -718,8 +932,164 @@ def run():
                 else:
                     st.info("No high sell stocks found.")
     
-    # Watchlist Summary Tab
+    # Themes Overview Tab
     with tabs[2]:
+        st.subheader("Themes Overview")
+        if st.button("Generate Themes Summary"):
+            with st.spinner("Analyzing themes..."):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("### 📅 Daily Best/Worst Themes")
+                    daily_themes, daily_dates = generate_themes_summary(1)
+                    if daily_dates:
+                        st.write(f"Date: {daily_dates[0].strftime('%Y-%m-%d')}")
+                        
+                        st.markdown("#### 🟢 Best Themes")
+                        best_themes_data = []
+                        for theme, data in daily_themes[:5]:
+                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
+                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
+                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
+                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
+                            best_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
+                        df_best = pd.DataFrame(best_themes_data)
+                        styled_best = df_best.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
+                            {'selector': 'th', 'props': [
+                                ('background-color', '#2d2d2d'), 
+                                ('color', '#ffffff'), 
+                                ('font-weight', 'bold'),
+                                ('text-align', 'center'),
+                                ('border', '1px solid #4d4d4d')
+                            ]},
+                            {'selector': 'td', 'props': [
+                                ('background-color', '#1e1e1e'), 
+                                ('color', '#ffffff'), 
+                                ('border', '1px solid #3d3d3d'),
+                                ('text-align', 'center')
+                            ]},
+                            {'selector': 'table', 'props': [
+                                ('border-collapse', 'collapse'),
+                                ('width', '100%')
+                            ]},
+                            {'selector': 'tr:hover td', 'props': [
+                                ('background-color', '#3f3f3f')
+                            ]}
+                        ])
+                        st.dataframe(styled_best, use_container_width=True)
+                        
+                        st.markdown("#### 🔴 Worst Themes")
+                        worst_themes_data = []
+                        for theme, data in daily_themes[-5:]:
+                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
+                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
+                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
+                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
+                            worst_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
+                        df_worst = pd.DataFrame(worst_themes_data)
+                        styled_worst = df_worst.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
+                            {'selector': 'th', 'props': [
+                                ('background-color', '#2d2d2d'), 
+                                ('color', '#ffffff'), 
+                                ('font-weight', 'bold'),
+                                ('text-align', 'center'),
+                                ('border', '1px solid #4d4d4d')
+                            ]},
+                            {'selector': 'td', 'props': [
+                                ('background-color', '#1e1e1e'), 
+                                ('color', '#ffffff'), 
+                                ('border', '1px solid #3d3d3d'),
+                                ('text-align', 'center')
+                            ]},
+                            {'selector': 'table', 'props': [
+                                ('border-collapse', 'collapse'),
+                                ('width', '100%')
+                            ]},
+                            {'selector': 'tr:hover td', 'props': [
+                                ('background-color', '#3f3f3f')
+                            ]}
+                        ])
+                        st.dataframe(styled_worst, use_container_width=True)
+                    else:
+                        st.info("No daily data available.")
+                
+                with col2:
+                    st.markdown("### 📅 Weekly Best/Worst Themes")
+                    weekly_themes, weekly_dates = generate_themes_summary(5)
+                    if weekly_dates:
+                        dates_str = ', '.join([d.strftime('%Y-%m-%d') for d in weekly_dates])
+                        st.write(f"Dates: {dates_str}")
+                        
+                        st.markdown("#### 🟢 Best Themes")
+                        best_themes_data = []
+                        for theme, data in weekly_themes[:5]:
+                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
+                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
+                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
+                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
+                            best_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
+                        df_best = pd.DataFrame(best_themes_data)
+                        styled_best = df_best.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
+                            {'selector': 'th', 'props': [
+                                ('background-color', '#2d2d2d'), 
+                                ('color', '#ffffff'), 
+                                ('font-weight', 'bold'),
+                                ('text-align', 'center'),
+                                ('border', '1px solid #4d4d4d')
+                            ]},
+                            {'selector': 'td', 'props': [
+                                ('background-color', '#1e1e1e'), 
+                                ('color', '#ffffff'), 
+                                ('border', '1px solid #3d3d3d'),
+                                ('text-align', 'center')
+                            ]},
+                            {'selector': 'table', 'props': [
+                                ('border-collapse', 'collapse'),
+                                ('width', '100%')
+                            ]},
+                            {'selector': 'tr:hover td', 'props': [
+                                ('background-color', '#3f3f3f')
+                            ]}
+                        ])
+                        st.dataframe(styled_best, use_container_width=True)
+                        
+                        st.markdown("#### 🔴 Worst Themes")
+                        worst_themes_data = []
+                        for theme, data in weekly_themes[-5:]:
+                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
+                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
+                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
+                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
+                            worst_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
+                        df_worst = pd.DataFrame(worst_themes_data)
+                        styled_worst = df_worst.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
+                            {'selector': 'th', 'props': [
+                                ('background-color', '#2d2d2d'), 
+                                ('color', '#ffffff'), 
+                                ('font-weight', 'bold'),
+                                ('text-align', 'center'),
+                                ('border', '1px solid #4d4d4d')
+                            ]},
+                            {'selector': 'td', 'props': [
+                                ('background-color', '#1e1e1e'), 
+                                ('color', '#ffffff'), 
+                                ('border', '1px solid #3d3d3d'),
+                                ('text-align', 'center')
+                            ]},
+                            {'selector': 'table', 'props': [
+                                ('border-collapse', 'collapse'),
+                                ('width', '100%')
+                            ]},
+                            {'selector': 'tr:hover td', 'props': [
+                                ('background-color', '#3f3f3f')
+                            ]}
+                        ])
+                        st.dataframe(styled_worst, use_container_width=True)
+                    else:
+                        st.info("No weekly data available.")
+    
+    # Watchlist Summary Tab
+    with tabs[3]:
         st.subheader("Watchlist Summary")
         selected_theme = st.selectbox("Select Watchlist (Theme)", list(theme_mapping.keys()), index=0)
         if st.button("Generate Watchlist Summary"):
@@ -755,175 +1125,6 @@ def run():
                         st.dataframe(styled_df, use_container_width=True)
                 else:
                     st.warning(f"No data available for {selected_theme}.")
-
-# Enhanced styling functions for dark theme
-def style_signal_dark(val):
-    if val == 'Buy':
-        return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
-    elif val == 'Add':
-        return 'background-color: #14a085; color: #ffffff; font-weight: bold'
-    elif val == 'Trim':
-        return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
-    return ''
-
-def style_dev_dark(val):
-    if val == '-':
-        return 'background-color: #2d2d2d; color: #888888'
-    try:
-        num = float(val.rstrip('%'))
-        if num > 50:
-            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
-        elif num > 20:
-            return 'background-color: #14a085; color: #ffffff'
-        elif num < -50:
-            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
-        elif num < -20:
-            return 'background-color: #ff8e8e; color: #ffffff'
-    except:
-        pass
-    return 'background-color: #2d2d2d; color: #ffffff'
-
-def style_price_change_dark(val):
-    try:
-        num = float(val.rstrip('%'))
-        if num > 2:
-            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
-        elif num > 0:
-            return 'background-color: #14a085; color: #ffffff'
-        elif num < -2:
-            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
-        elif num < 0:
-            return 'background-color: #ff8e8e; color: #ffffff'
-    except:
-        pass
-    return 'background-color: #2d2d2d; color: #ffffff'
-
-def style_anomaly_dark(val):
-    try:
-        num = float(val)
-        if num > 2.0:
-            return 'background-color: #ff6b6b; color: #ffffff; font-weight: bold'
-        elif num > 1.0:
-            return 'background-color: #ffb347; color: #000000; font-weight: bold'
-        elif num > 0.5:
-            return 'background-color: #ffd700; color: #000000'
-    except:
-        pass
-    return 'background-color: #2d2d2d; color: #ffffff'
-
-def style_bot_percentage(val):
-    try:
-        num = float(val.rstrip('%'))
-        if num >= 60:
-            return 'background-color: #0d7377; color: #ffffff; font-weight: bold'
-        elif num >= 50:
-            return 'background-color: #14a085; color: #ffffff'
-        elif num >= 40:
-            return 'background-color: #ffd700; color: #000000'
-        elif num >= 30:
-            return 'background-color: #ffb347; color: #000000'
-        else:
-            return 'background-color: #ff8e8e; color: #ffffff'
-    except:
-        pass
-    return 'background-color: #2d2d2d; color: #ffffff'
-
-def format_display_dataframe(df):
-    """Format dataframe for display with proper styling"""
-    display_df = df.copy()
-    display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
-    display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
-    display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
-    display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
-    display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
-    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-    display_df['Trend 3D'] = display_df['trend_3d']
-    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
-    for col in ['bought_volume', 'sold_volume', 'total_volume']:
-        display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
-    return display_df
-
-def create_dark_styled_dataframe(display_df, columns):
-    """Create styled dataframe with dark theme colors"""
-    return display_df[columns].style.applymap(
-        style_signal_dark, subset=['Signal']
-    ).applymap(
-        style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
-    ).applymap(
-        style_price_change_dark, subset=['Price Change']
-    ).applymap(
-        style_anomaly_dark, subset=['Anomaly']
-    ).applymap(
-        style_bot_percentage, subset=['BOT %']
-    ).set_table_styles([
-        {'selector': 'th', 'props': [
-            ('background-color', '#2d2d2d'), 
-            ('color', '#ffffff'), 
-            ('font-weight', 'bold'),
-            ('text-align', 'center'),
-            ('border', '1px solid #4d4d4d')
-        ]},
-        {'selector': 'td', 'props': [
-            ('background-color', '#1e1e1e'), 
-            ('color', '#ffffff'), 
-            ('border', '1px solid #3d3d3d'),
-            ('text-align', 'center')
-        ]},
-        {'selector': 'table', 'props': [
-            ('border-collapse', 'collapse'),
-            ('width', '100%')
-        ]}
-    ])
-
-def create_theme_dataframe(symbols, historical, price_data, latest_date):
-    """Create dataframe for theme analysis"""
-    metrics_list = []
-    for symbol in symbols:
-        hist = historical[symbol]
-        if hist and hist[-1]['date'].strftime('%Y%m%d') == latest_date:
-            metrics = hist[-1].copy()
-            metrics['Symbol'] = symbol
-            past = hist[:-1]
-            dev_b_5 = np.nan
-            dev_s_5 = np.nan
-            if len(past) >= 5:
-                avg_b_5 = np.mean([p['bought_volume'] for p in past[-5:]])
-                avg_s_5 = np.mean([p['sold_volume'] for p in past[-5:]])
-                if avg_b_5 > 0:
-                    dev_b_5 = round(((metrics['bought_volume'] - avg_b_5) / avg_b_5 * 100), 0)
-                if avg_s_5 > 0:
-                    dev_s_5 = round(((metrics['sold_volume'] - avg_s_5) / avg_s_5 * 100), 0)
-                
-                # Calculate additional metrics
-                historical_volumes = [p['total_volume'] for p in past[-5:]]
-                historical_ratios = [p['buy_to_sell_ratio'] for p in past[-3:]]
-                
-                metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
-                metrics['trend_3d'] = get_trend_direction(historical_ratios)
-                metrics['anomaly_score'] = calculate_anomaly_score(
-                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
-                )
-            else:
-                metrics['volume_strength'] = 1.0
-                metrics['trend_3d'] = "-"
-                metrics['anomaly_score'] = 0.0
-            
-            # Add price data
-            if symbol in price_data:
-                metrics['current_price'] = price_data[symbol]['current_price']
-                metrics['price_change_1d'] = price_data[symbol]['change_1d']
-            else:
-                metrics['current_price'] = 0.0
-                metrics['price_change_1d'] = 0.0
-            
-            metrics['dev_b_5'] = dev_b_5
-            metrics['dev_s_5'] = dev_s_5
-            metrics_list.append(metrics)
-    
-    theme_df = pd.DataFrame(metrics_list)
-    theme_df = theme_df.sort_values(by=['buy_to_sell_ratio'], ascending=False)
-    return theme_df
 
 if __name__ == "__main__":
     run()
