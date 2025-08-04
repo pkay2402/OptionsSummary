@@ -663,12 +663,10 @@ def analyze_symbol_flows(df, symbols, min_premium=100000):
         calls_df = symbol_df[symbol_df['Contract Type'] == 'CALL']
         puts_df = symbol_df[symbol_df['Contract Type'] == 'PUT']
         
-        # Calculate bullish vs bearish sentiment
+        # Calculate bullish vs bearish premium (unchanged)
         bullish_premium = 0
         bearish_premium = 0
         
-        # CALL A/AA = Bullish, CALL B/BB = Bearish
-        # PUT A/AA = Bearish, PUT B/BB = Bullish
         for _, row in symbol_df.iterrows():
             if row['Contract Type'] == 'CALL':
                 if row['Side Code'] in ['A', 'AA']:
@@ -688,7 +686,7 @@ def analyze_symbol_flows(df, symbols, min_premium=100000):
         else:
             bullish_pct = bearish_pct = 0
         
-        # Overall sentiment
+        # Overall sentiment (unchanged)
         if bullish_pct > 60:
             overall_sentiment = "🟢 BULLISH"
             sentiment_strength = "Strong" if bullish_pct > 75 else "Moderate"
@@ -699,7 +697,7 @@ def analyze_symbol_flows(df, symbols, min_premium=100000):
             overall_sentiment = "🟡 NEUTRAL/MIXED"
             sentiment_strength = "Balanced"
         
-        # Display current status
+        # Display current status (unchanged)
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -714,108 +712,143 @@ def analyze_symbol_flows(df, symbols, min_premium=100000):
         with col4:
             st.metric("Bearish Premium", f"${bearish_premium/1000000:.1f}M", delta=f"{bearish_pct:.1f}%")
         
-        # Calculate key levels for next week projection
-        next_week_expiry = symbol_df[
-            (symbol_df['Expiration Date'] >= next_friday) &
-            (symbol_df['Expiration Date'] <= next_friday + timedelta(days=7))
-        ]
+        # Weekly positioning breakdown
+        st.markdown("### 📅 Weekly Options Positioning")
         
-        if not next_week_expiry.empty:
-            # Get most active strikes
-            call_strikes = calls_df['Strike Price'].value_counts().head(10)
-            put_strikes = puts_df['Strike Price'].value_counts().head(10)
-            
-            # Calculate weighted average target based on premium flow
-            weighted_call_target = 0
-            weighted_put_target = 0
-            call_premium_total = 0
-            put_premium_total = 0
-            
-            # Weight call strikes by premium (bullish flows only)
-            bullish_calls = calls_df[calls_df['Side Code'].isin(['A', 'AA'])]
-            for _, row in bullish_calls.iterrows():
-                if row['Strike Price'] > current_price:  # OTM calls
-                    weighted_call_target += row['Strike Price'] * row['Premium Price']
-                    call_premium_total += row['Premium Price']
-            
-            # Weight put strikes by premium (bullish flows only - put selling)
-            bullish_puts = puts_df[puts_df['Side Code'].isin(['B', 'BB'])]
-            for _, row in bullish_puts.iterrows():
-                if row['Strike Price'] < current_price:  # OTM puts
-                    weighted_put_target += row['Strike Price'] * row['Premium Price']
-                    put_premium_total += row['Premium Price']
-            
-            # Calculate projected targets
-            upside_target = weighted_call_target / call_premium_total if call_premium_total > 0 else current_price
-            downside_support = weighted_put_target / put_premium_total if put_premium_total > 0 else current_price
-            
-            # Find resistance and support levels
-            otm_call_strikes = sorted([strike for strike in call_strikes.index if strike > current_price])
-            otm_put_strikes = sorted([strike for strike in put_strikes.index if strike < current_price], reverse=True)
-            
-            resistance_1 = otm_call_strikes[0] if otm_call_strikes else current_price * 1.02
-            resistance_2 = otm_call_strikes[1] if len(otm_call_strikes) > 1 else current_price * 1.05
-            
-            support_1 = otm_put_strikes[0] if otm_put_strikes else current_price * 0.98
-            support_2 = otm_put_strikes[1] if len(otm_put_strikes) > 1 else current_price * 0.95
-            
-            # Display projection
-            st.markdown("### 🎯 Next Week Projection")
-            
-            if bullish_pct > bearish_pct:
-                move_direction = "higher"
-                primary_target = upside_target
-                move_pct = ((primary_target - current_price) / current_price) * 100
-            else:
-                move_direction = "lower"
-                primary_target = downside_support
-                move_pct = ((primary_target - current_price) / current_price) * 100
-            
-            st.markdown(f"""
-            **{symbol} Analysis (Current: ${current_price:.2f})**
-            
-            Based on options flow analysis:
-            - **Overall Bias**: {overall_sentiment} ({sentiment_strength})
-            - **Expected Direction**: Likely to move {move_direction}
-            - **Primary Target**: ${primary_target:.2f} ({move_pct:+.1f}%)
-            - **Next Friday Expiry**: {next_friday.strftime('%Y-%m-%d')}
-            
-            **Key Levels for Next Week:**
-            - 🔴 **Resistance 1**: ${resistance_1:.2f} ({((resistance_1 - current_price) / current_price * 100):+.1f}%)
-            - 🔴 **Resistance 2**: ${resistance_2:.2f} ({((resistance_2 - current_price) / current_price * 100):+.1f}%)
-            - 🟢 **Support 1**: ${support_1:.2f} ({((support_1 - current_price) / current_price * 100):+.1f}%)
-            - 🟢 **Support 2**: ${support_2:.2f} ({((support_2 - current_price) / current_price * 100):+.1f}%)
-            """)
-            
-            # Show reasoning
-            with st.expander("📈 Analysis Details"):
-                st.markdown(f"""
-                **Flow Breakdown:**
-                - Total Premium Analyzed: ${total_premium/1000000:.1f}M
-                - Bullish Flows: ${bullish_premium/1000000:.1f}M ({bullish_pct:.1f}%)
-                - Bearish Flows: ${bearish_premium/1000000:.1f}M ({bearish_pct:.1f}%)
-                
-                **Most Active Strikes (Calls):**
-                """)
-                for strike, count in call_strikes.head(5).items():
-                    direction = "🔴" if strike > current_price else "🟢"
-                    st.markdown(f"- {direction} ${strike:.2f}: {count} contracts")
-                
-                st.markdown("**Most Active Strikes (Puts):**")
-                for strike, count in put_strikes.head(5).items():
-                    direction = "🟢" if strike < current_price else "🔴"
-                    st.markdown(f"- {direction} ${strike:.2f}: {count} contracts")
+        # Group flows by expiration week
+        symbol_df['Week_End'] = symbol_df['Expiration Date'].dt.to_period('W').dt.end_time.dt.date
+        weekly_groups = symbol_df.groupby('Week_End')
         
-        # Show detailed flows
+        # Display weekly breakdown
+        for week_end, week_data in weekly_groups:
+            week_total_premium = week_data['Premium Price'].sum()
+            week_str = week_end.strftime('%Y-%m-%d')
+            
+            with st.expander(f"📊 Week of {week_str} - ${week_total_premium/1000000:.1f}M Total Premium", expanded=True):
+                
+                # Separate by contract type and side
+                call_buys = week_data[(week_data['Contract Type'] == 'CALL') & (week_data['Side Code'].isin(['A', 'AA']))]
+                call_sells = week_data[(week_data['Contract Type'] == 'CALL') & (week_data['Side Code'].isin(['B', 'BB']))]
+                put_buys = week_data[(week_data['Contract Type'] == 'PUT') & (week_data['Side Code'].isin(['A', 'AA']))]
+                put_sells = week_data[(week_data['Contract Type'] == 'PUT') & (week_data['Side Code'].isin(['B', 'BB']))]
+                
+                # Create 4 columns for the breakdown
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.markdown("**🟢 CALL BUYS (Bullish)**")
+                    if not call_buys.empty:
+                        call_buy_premium = call_buys['Premium Price'].sum()
+                        call_buy_contracts = call_buys['Size'].sum()
+                        st.metric("Premium", f"${call_buy_premium/1000000:.1f}M")
+                        st.metric("Contracts", f"{call_buy_contracts:,}")
+                        
+                        # Show top strikes
+                        top_call_strikes = call_buys.groupby('Strike Price')['Premium Price'].sum().sort_values(ascending=False).head(3)
+                        for strike, premium in top_call_strikes.items():
+                            move_pct = ((strike - current_price) / current_price) * 100
+                            st.markdown(f"• ${strike:.0f} ({move_pct:+.1f}%): ${premium/1000:.0f}K")
+                    else:
+                        st.markdown("*No call buying*")
+                
+                with col2:
+                    st.markdown("**🔴 CALL SELLS (Bearish)**")
+                    if not call_sells.empty:
+                        call_sell_premium = call_sells['Premium Price'].sum()
+                        call_sell_contracts = call_sells['Size'].sum()
+                        st.metric("Premium", f"${call_sell_premium/1000000:.1f}M")
+                        st.metric("Contracts", f"{call_sell_contracts:,}")
+                        
+                        # Show top strikes
+                        top_call_sell_strikes = call_sells.groupby('Strike Price')['Premium Price'].sum().sort_values(ascending=False).head(3)
+                        for strike, premium in top_call_sell_strikes.items():
+                            move_pct = ((strike - current_price) / current_price) * 100
+                            st.markdown(f"• ${strike:.0f} ({move_pct:+.1f}%): ${premium/1000:.0f}K")
+                    else:
+                        st.markdown("*No call selling*")
+                
+                with col3:
+                    st.markdown("**🔴 PUT BUYS (Bearish)**")
+                    if not put_buys.empty:
+                        put_buy_premium = put_buys['Premium Price'].sum()
+                        put_buy_contracts = put_buys['Size'].sum()
+                        st.metric("Premium", f"${put_buy_premium/1000000:.1f}M")
+                        st.metric("Contracts", f"{put_buy_contracts:,}")
+                        
+                        # Show top strikes
+                        top_put_strikes = put_buys.groupby('Strike Price')['Premium Price'].sum().sort_values(ascending=False).head(3)
+                        for strike, premium in top_put_strikes.items():
+                            move_pct = ((strike - current_price) / current_price) * 100
+                            st.markdown(f"• ${strike:.0f} ({move_pct:+.1f}%): ${premium/1000:.0f}K")
+                    else:
+                        st.markdown("*No put buying*")
+                
+                with col4:
+                    st.markdown("**🟢 PUT SELLS (Bullish)**")
+                    if not put_sells.empty:
+                        put_sell_premium = put_sells['Premium Price'].sum()
+                        put_sell_contracts = put_sells['Size'].sum()
+                        st.metric("Premium", f"${put_sell_premium/1000000:.1f}M")
+                        st.metric("Contracts", f"{put_sell_contracts:,}")
+                        
+                        # Show top strikes
+                        top_put_sell_strikes = put_sells.groupby('Strike Price')['Premium Price'].sum().sort_values(ascending=False).head(3)
+                        for strike, premium in top_put_sell_strikes.items():
+                            move_pct = ((strike - current_price) / current_price) * 100
+                            st.markdown(f"• ${strike:.0f} ({move_pct:+.1f}%): ${premium/1000:.0f}K")
+                    else:
+                        st.markdown("*No put selling*")
+                
+                # Week summary
+                bullish_flow = (call_buys['Premium Price'].sum() if not call_buys.empty else 0) + \
+                              (put_sells['Premium Price'].sum() if not put_sells.empty else 0)
+                bearish_flow = (call_sells['Premium Price'].sum() if not call_sells.empty else 0) + \
+                              (put_buys['Premium Price'].sum() if not put_buys.empty else 0)
+                
+                if bullish_flow + bearish_flow > 0:
+                    bullish_pct_week = (bullish_flow / (bullish_flow + bearish_flow)) * 100
+                    bearish_pct_week = (bearish_flow / (bullish_flow + bearish_flow)) * 100
+                    
+                    if bullish_pct_week > 60:
+                        week_bias = f"🟢 **BULLISH** ({bullish_pct_week:.0f}%)"
+                    elif bearish_pct_week > 60:
+                        week_bias = f"🔴 **BEARISH** ({bearish_pct_week:.0f}%)"
+                    else:
+                        week_bias = f"🟡 **MIXED** (Bull: {bullish_pct_week:.0f}%, Bear: {bearish_pct_week:.0f}%)"
+                    
+                    st.markdown(f"**Week Bias**: {week_bias}")
+                
+                st.divider()
+        
+        # Overall positioning summary
+        with st.expander("📈 Overall Positioning Summary"):
+            # Total flows by type
+            total_call_buys = symbol_df[(symbol_df['Contract Type'] == 'CALL') & (symbol_df['Side Code'].isin(['A', 'AA']))]['Premium Price'].sum()
+            total_call_sells = symbol_df[(symbol_df['Contract Type'] == 'CALL') & (symbol_df['Side Code'].isin(['B', 'BB']))]['Premium Price'].sum()
+            total_put_buys = symbol_df[(symbol_df['Contract Type'] == 'PUT') & (symbol_df['Side Code'].isin(['A', 'AA']))]['Premium Price'].sum()
+            total_put_sells = symbol_df[(symbol_df['Contract Type'] == 'PUT') & (symbol_df['Side Code'].isin(['B', 'BB']))]['Premium Price'].sum()
+            
+            st.markdown("**Flow Type Breakdown:**")
+            st.markdown(f"- 🟢 **Call Buying**: ${total_call_buys/1000000:.1f}M ({total_call_buys/total_premium*100:.0f}%)")
+            st.markdown(f"- 🔴 **Call Selling**: ${total_call_sells/1000000:.1f}M ({total_call_sells/total_premium*100:.0f}%)")
+            st.markdown(f"- 🔴 **Put Buying**: ${total_put_buys/1000000:.1f}M ({total_put_buys/total_premium*100:.0f}%)")
+            st.markdown(f"- 🟢 **Put Selling**: ${total_put_sells/1000000:.1f}M ({total_put_sells/total_premium*100:.0f}%)")
+            
+            # Net positioning
+            net_bullish = total_call_buys + total_put_sells
+            net_bearish = total_call_sells + total_put_buys
+            st.markdown(f"\n**Net Positioning:**")
+            st.markdown(f"- 🟢 **Net Bullish Flows**: ${net_bullish/1000000:.1f}M")
+            st.markdown(f"- 🔴 **Net Bearish Flows**: ${net_bearish/1000000:.1f}M")
+        
+        # Show detailed flows (unchanged)
         with st.expander(f"📊 Detailed Flows for {symbol}"):
-            # Sort by premium descending
             display_df = symbol_df.sort_values('Premium Price', ascending=False)
             
-            for _, row in display_df.head(20).iterrows():  # Show top 20 flows
+            for _, row in display_df.head(20).iterrows():
                 move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
                               row['Reference Price'] * 100)
                 
-                # Determine sentiment for this specific flow
                 if row['Contract Type'] == 'CALL':
                     if row['Side Code'] in ['A', 'AA']:
                         flow_sentiment = "🟢 Bullish"
