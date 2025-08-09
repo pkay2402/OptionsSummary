@@ -39,14 +39,44 @@ EARLY_CLOSE_DAYS_2025 = {
     '2025-12-24': '13:00'
 }
 
-# Exclude index symbols and problematic symbols - focus only on individual stocks
+# Exclude index symbols and problematic symbols
 INDEX_SYMBOLS = ['SPX', 'SPXW', 'IWM', 'DIA', 'VIX', 'VIXW', 'XSP', 'RTUW']
 EXCLUDED_SYMBOLS = INDEX_SYMBOLS + [
     'BRKB', 'RUT', '4SPY', 'RUTW', 'DJX', 'BFB'
 ] + [s for s in [] if s.startswith('$')]
 
-# Magnificent 7 - separate these out for dedicated analysis
-MAG7_SYMBOLS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'SPY', 'QQQ']
+# High-profile stocks for special treatment
+HIGH_PROFILE_STOCKS = ['TSLA', 'AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'SPY', 'QQQ', 'NFLX', 'AMD']
+
+# 🎯 NEW ENHANCEMENT: Sector mapping for sector flow analysis
+SECTOR_MAP = {
+    # Technology
+    'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology', 'GOOG': 'Technology',
+    'META': 'Technology', 'NVDA': 'Technology', 'AMD': 'Technology', 'NFLX': 'Technology',
+    'CRM': 'Technology', 'ORCL': 'Technology', 'ADBE': 'Technology', 'INTC': 'Technology',
+    
+    # Automotive
+    'TSLA': 'Automotive', 'F': 'Automotive', 'GM': 'Automotive', 'RIVN': 'Automotive',
+    'LCID': 'Automotive', 'NIO': 'Automotive', 'XPEV': 'Automotive',
+    
+    # Finance
+    'JPM': 'Finance', 'BAC': 'Finance', 'GS': 'Finance', 'MS': 'Finance',
+    'WFC': 'Finance', 'C': 'Finance', 'BRK.B': 'Finance',
+    
+    # Healthcare
+    'JNJ': 'Healthcare', 'PFE': 'Healthcare', 'UNH': 'Healthcare', 'ABBV': 'Healthcare',
+    'MRK': 'Healthcare', 'LLY': 'Healthcare', 'TMO': 'Healthcare',
+    
+    # Energy
+    'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy', 'EOG': 'Energy',
+    
+    # Consumer
+    'AMZN': 'Consumer', 'WMT': 'Consumer', 'HD': 'Consumer', 'TGT': 'Consumer',
+    'COST': 'Consumer', 'NKE': 'Consumer', 'SBUX': 'Consumer',
+    
+    # ETFs
+    'SPY': 'ETF', 'QQQ': 'ETF', 'IWM': 'ETF', 'DIA': 'ETF', 'XLF': 'ETF'
+}
 
 def is_market_open():
     """Check if the US market is currently open."""
@@ -71,7 +101,7 @@ def is_market_open():
         logger.error(f"Error checking market hours: {e}")
         return False
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=600)
 def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
     """Fetch and process data from a single URL."""
     try:
@@ -87,11 +117,9 @@ def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
             logger.error(f"Missing columns: {missing}")
             return None
 
-        # Clean and filter data
         df = df.dropna(subset=['Symbol', 'Expiration', 'Strike Price', 'Call/Put'])
         df = df[df['Volume'] >= 50].copy()
 
-        # Parse expiration dates
         df['Expiration'] = pd.to_datetime(df['Expiration'], errors='coerce')
         df = df.dropna(subset=['Expiration'])
         df = df[df['Expiration'].dt.date >= datetime.now().date()]
@@ -101,7 +129,7 @@ def fetch_data_from_url(url: str) -> Optional[pd.DataFrame]:
         logger.error(f"Error fetching {url}: {e}")
         return None
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=600)
 def fetch_all_options_data() -> pd.DataFrame:
     """Fetch and combine data from multiple CBOE URLs."""
     urls = [
@@ -121,7 +149,7 @@ def fetch_all_options_data() -> pd.DataFrame:
                 
     return pd.concat(data_frames, ignore_index=True) if data_frames else pd.DataFrame()
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def get_stock_price(symbol: str) -> Optional[float]:
     """Get current stock price with optimizations."""
     try:
@@ -130,7 +158,6 @@ def get_stock_price(symbol: str) -> Optional[float]:
             
         ticker = yf.Ticker(symbol)
         
-        # Try fast method first
         try:
             info = ticker.fast_info
             price = info.get('last_price')
@@ -139,7 +166,6 @@ def get_stock_price(symbol: str) -> Optional[float]:
         except:
             pass
         
-        # Fallback to regular info
         try:
             info = ticker.info
             price = (info.get('currentPrice') or 
@@ -155,6 +181,175 @@ def get_stock_price(symbol: str) -> Optional[float]:
     except Exception:
         return None
 
+# 🎯 NEW ENHANCEMENT: Flow alerts detection
+def detect_flow_alerts(flows_data: List[Dict]) -> List[Dict]:
+    """Detect unusual flow patterns that warrant alerts."""
+    alerts = []
+    
+    for flow in flows_data:
+        symbol = flow['Symbol']
+        details = flow['Details']
+        
+        # Massive flow alert (>$5M)
+        if details['total_premium'] > 5000000:
+            alerts.append({
+                'type': 'MASSIVE_FLOW',
+                'symbol': symbol,
+                'message': f"🚨 MASSIVE FLOW: ${details['total_premium']/1000000:.1f}M in {symbol}",
+                'priority': 'HIGH',
+                'value': details['total_premium']
+            })
+        
+        # Unusual call/put imbalance
+        if details['call_premium'] > 0 and details['put_premium'] > 0:
+            ratio = details['call_premium'] / details['put_premium']
+            if ratio > 10:
+                alerts.append({
+                    'type': 'EXTREME_BULLISH',
+                    'symbol': symbol,
+                    'message': f"📈 EXTREME BULLISH: {symbol} - {ratio:.1f}:1 call/put ratio",
+                    'priority': 'MEDIUM',
+                    'value': ratio
+                })
+            elif ratio < 0.1:
+                alerts.append({
+                    'type': 'EXTREME_BEARISH', 
+                    'symbol': symbol,
+                    'message': f"📉 EXTREME BEARISH: {symbol} - Heavy put buying",
+                    'priority': 'MEDIUM',
+                    'value': ratio
+                })
+        
+        # High conviction flows (bias > 85%)
+        if details['bias_strength'] > 85 and details['total_premium'] > 1000000:
+            sentiment = details['sentiment']
+            alerts.append({
+                'type': 'HIGH_CONVICTION',
+                'symbol': symbol,
+                'message': f"💪 HIGH CONVICTION: {symbol} - {sentiment} ({details['bias_strength']:.0f}%)",
+                'priority': 'MEDIUM',
+                'value': details['bias_strength']
+            })
+    
+    # Sort by priority and value
+    priority_order = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+    alerts.sort(key=lambda x: (priority_order.get(x['priority'], 0), x['value']), reverse=True)
+    
+    return alerts
+
+# 🎯 NEW ENHANCEMENT: Sector flow analysis
+def analyze_sector_flows(flows_data: List[Dict]) -> Dict:
+    """Analyze flows by sector to identify sector rotation."""
+    sector_flows = {}
+    
+    for flow in flows_data:
+        symbol = flow['Symbol']
+        sector = SECTOR_MAP.get(symbol, 'Other')
+        
+        if sector not in sector_flows:
+            sector_flows[sector] = {
+                'total_premium': 0,
+                'symbols': [],
+                'call_premium': 0,
+                'put_premium': 0,
+                'avg_score': 0
+            }
+        
+        details = flow['Details']
+        sector_flows[sector]['total_premium'] += details['total_premium']
+        sector_flows[sector]['call_premium'] += details['call_premium']
+        sector_flows[sector]['put_premium'] += details['put_premium']
+        sector_flows[sector]['symbols'].append(symbol)
+        sector_flows[sector]['avg_score'] += flow['Flow_Score']
+    
+    # Calculate averages and sentiment
+    for sector in sector_flows:
+        count = len(sector_flows[sector]['symbols'])
+        sector_flows[sector]['avg_score'] /= count
+        
+        call_prem = sector_flows[sector]['call_premium']
+        put_prem = sector_flows[sector]['put_premium']
+        
+        if call_prem > put_prem * 1.5:
+            sector_flows[sector]['sentiment'] = 'BULLISH'
+        elif put_prem > call_prem * 1.5:
+            sector_flows[sector]['sentiment'] = 'BEARISH'
+        else:
+            sector_flows[sector]['sentiment'] = 'MIXED'
+    
+    return sector_flows
+
+# 🎯 NEW ENHANCEMENT: Block trade detection
+def detect_block_trades(symbol_flows: pd.DataFrame, symbol: str) -> List[Dict]:
+    """Detect potential block trades and unusual activity."""
+    blocks = []
+    
+    if symbol_flows.empty:
+        return blocks
+    
+    # Group by strike, expiry, and type to find concentrated activity
+    grouped = symbol_flows.groupby(['Strike Price', 'Expiration', 'Call/Put']).agg({
+        'Volume': 'sum',
+        'Premium': 'sum'
+    }).reset_index()
+    
+    # Look for unusually large single strike activity
+    for _, row in grouped.iterrows():
+        if row['Volume'] > 1000 and row['Premium'] > 1000000:  # 1000+ contracts, $1M+ premium
+            avg_price = row['Premium'] / (row['Volume'] * 100)
+            blocks.append({
+                'symbol': symbol,
+                'strike': row['Strike Price'],
+                'expiry': row['Expiration'],
+                'type': 'CALL' if row['Call/Put'] == 'C' else 'PUT',
+                'volume': row['Volume'],
+                'premium': row['Premium'],
+                'avg_price': avg_price
+            })
+    
+    return sorted(blocks, key=lambda x: x['premium'], reverse=True)[:3]
+
+# 🎯 NEW ENHANCEMENT: Price catalyst detection
+def check_price_catalysts(symbol: str, current_price: float) -> List[str]:
+    """Check if stock is near key technical levels."""
+    catalysts = []
+    
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="3mo")
+        
+        if len(hist) > 60:
+            # Check if near 52-week high/low
+            high_52w = hist['High'].max()
+            low_52w = hist['Low'].min()
+            
+            if current_price > high_52w * 0.98:
+                catalysts.append("📈 Near 52W High")
+            elif current_price < low_52w * 1.02:
+                catalysts.append("📉 Near 52W Low")
+            
+            # Check for breakout patterns
+            sma_20 = hist['Close'].tail(20).mean()
+            sma_50 = hist['Close'].tail(50).mean()
+            
+            if current_price > sma_20 * 1.05:
+                catalysts.append("🚀 Above 20-day SMA")
+            
+            if sma_20 > sma_50 and current_price > sma_50:
+                catalysts.append("⬆️ Golden Cross Setup")
+            
+            # Volume analysis
+            avg_volume = hist['Volume'].tail(20).mean()
+            recent_volume = hist['Volume'].tail(5).mean()
+            
+            if recent_volume > avg_volume * 2:
+                catalysts.append("📊 High Volume")
+                
+    except Exception as e:
+        logger.warning(f"Error checking catalysts for {symbol}: {e}")
+    
+    return catalysts
+
 def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Dict:
     """Ultra-simplified flow scoring - just rank by total premium spent."""
     if symbol_flows.empty or current_price is None:
@@ -162,19 +357,16 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
     
     total_premium = symbol_flows['Premium'].sum()
     
-    # For high-profile stocks, lower the threshold significantly
     symbol = symbol_flows['Symbol'].iloc[0] if 'Symbol' in symbol_flows.columns else 'UNKNOWN'
-    high_profile = symbol in ['TSLA', 'AAPL', 'NVDA', 'AMZN', 'GOOGL', 'MSFT', 'META', 'SPY', 'QQQ']
+    high_profile = symbol in HIGH_PROFILE_STOCKS
     
-    if high_profile and total_premium < 100000:  # $100K threshold for big names
+    if high_profile and total_premium < 100000:
         return {'score': 0, 'details': {'reason': 'Below premium threshold'}}
-    elif not high_profile and total_premium < 500000:  # $500K for others  
+    elif not high_profile and total_premium < 500000:
         return {'score': 0, 'details': {'reason': 'Below premium threshold'}}
     
-    # Score is simply premium in millions (scaled)
-    score = total_premium / 1000000 * 10  # Each $1M = 10 points
+    score = total_premium / 1000000 * 10
     
-    # Separate calls and puts
     calls = symbol_flows[symbol_flows['Call/Put'] == 'C']
     puts = symbol_flows[symbol_flows['Call/Put'] == 'P']
     
@@ -182,7 +374,6 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
     put_premium = puts['Premium'].sum()
     total_volume = symbol_flows['Volume'].sum()
     
-    # Determine sentiment
     if call_premium > put_premium * 1.3:
         sentiment = "BULLISH"
         bias_strength = call_premium / (call_premium + put_premium) * 100
@@ -193,13 +384,15 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
         sentiment = "MIXED"
         bias_strength = 60
     
-    # Find top strikes
     strike_analysis = symbol_flows.groupby(['Strike Price', 'Call/Put', 'Expiration']).agg({
         'Premium': 'sum',
         'Volume': 'sum'
     }).reset_index()
     
     top_strikes = strike_analysis.nlargest(5, 'Premium')
+    
+    # 🎯 NEW: Add block trades detection
+    block_trades = detect_block_trades(symbol_flows, symbol)
     
     details = {
         'total_premium': total_premium,
@@ -209,6 +402,7 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
         'sentiment': sentiment,
         'bias_strength': bias_strength,
         'top_strikes': top_strikes,
+        'block_trades': block_trades  # NEW
     }
     
     return {'score': score, 'details': details}
@@ -218,26 +412,19 @@ def analyze_options_flows(df: pd.DataFrame) -> Dict[str, List[Dict]]:
     if df.empty:
         return {'all_flows': []}
     
-    # Exclude problematic symbols early
     df = df[~df['Symbol'].isin(EXCLUDED_SYMBOLS)].copy()
-    
-    # Additional filters
     df = df[df['Symbol'].str.len() <= 5]
     df = df[~df['Symbol'].str.contains(r'[\$\d]', regex=True)]
     
-    # Calculate days to expiry and premium
     df['Days_to_Expiry'] = (df['Expiration'] - datetime.now()).dt.days
     df = df[(df['Days_to_Expiry'] <= 90) & (df['Days_to_Expiry'] >= 0)]
     df['Premium'] = df['Volume'] * df['Last Price'] * 100
     
-    # Pre-filter by premium
     df = df[df['Premium'] >= 200000]
     
-    # Get top symbols by premium (increased to 500 for better coverage)
     all_premiums = df.groupby('Symbol')['Premium'].sum().sort_values(ascending=False)
     top_symbols = all_premiums.head(500).index.tolist()
     
-    # Get stock prices in batch
     price_cache = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
         future_to_symbol = {executor.submit(get_stock_price, symbol): symbol for symbol in top_symbols}
@@ -250,7 +437,6 @@ def analyze_options_flows(df: pd.DataFrame) -> Dict[str, List[Dict]]:
             except Exception:
                 continue
     
-    # Process all symbols
     symbol_scores = []
     for symbol in top_symbols:
         if symbol not in price_cache:
@@ -262,15 +448,9 @@ def analyze_options_flows(df: pd.DataFrame) -> Dict[str, List[Dict]]:
         if symbol_flows.empty:
             continue
             
-        # For high-profile stocks, include all flows (ITM + OTM)
-        # For others, stick to OTM only
-        high_profile_stocks = ['TSLA', 'AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'SPY', 'QQQ', 'NFLX', 'AMD']
-        
-        if symbol in high_profile_stocks:
-            # Include all significant flows for high-profile stocks
+        if symbol in HIGH_PROFILE_STOCKS:
             analyzed_flows = symbol_flows.copy()
         else:
-            # Filter for OTM only for other stocks
             otm_calls = symbol_flows[
                 (symbol_flows['Call/Put'] == 'C') & 
                 (symbol_flows['Strike Price'] > current_price)
@@ -279,7 +459,6 @@ def analyze_options_flows(df: pd.DataFrame) -> Dict[str, List[Dict]]:
                 (symbol_flows['Call/Put'] == 'P') & 
                 (symbol_flows['Strike Price'] < current_price)
             ]
-            
             analyzed_flows = pd.concat([otm_calls, otm_puts], ignore_index=True)
         
         if analyzed_flows.empty:
@@ -287,17 +466,19 @@ def analyze_options_flows(df: pd.DataFrame) -> Dict[str, List[Dict]]:
             
         flow_analysis = calculate_flow_score(analyzed_flows, current_price)
         
-        # Special handling for high-profile stocks (TSLA, AAPL, etc.) - lower threshold
-        high_profile_stocks = ['TSLA', 'AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'SPY', 'QQQ']
-        threshold = 15 if symbol in high_profile_stocks else 25
+        threshold = 15 if symbol in HIGH_PROFILE_STOCKS else 25
         
         if flow_analysis['score'] > threshold:
+            # 🎯 NEW: Add price catalysts
+            catalysts = check_price_catalysts(symbol, current_price)
+            
             symbol_scores.append({
                 'Symbol': symbol,
                 'Current_Price': current_price,
                 'Flow_Score': flow_analysis['score'],
                 'Details': flow_analysis['details'],
-                'Flows': analyzed_flows
+                'Flows': analyzed_flows,
+                'Catalysts': catalysts  # NEW
             })
     
     symbol_scores.sort(key=lambda x: x['Flow_Score'], reverse=True)
@@ -310,7 +491,6 @@ def get_market_insights(flows_data: List[Dict]) -> Dict:
     
     insights = {}
     
-    # 1. Largest single flow today
     largest_flow = max(flows_data, key=lambda x: x['Details']['total_premium'])
     insights['largest_flow'] = {
         'symbol': largest_flow['Symbol'],
@@ -318,7 +498,6 @@ def get_market_insights(flows_data: List[Dict]) -> Dict:
         'sentiment': largest_flow['Details']['sentiment']
     }
     
-    # 2. Most bullish flows (highest call dominance)
     bullish_flows = [f for f in flows_data if f['Details']['sentiment'] == 'BULLISH']
     if bullish_flows:
         most_bullish = max(bullish_flows, key=lambda x: x['Details']['bias_strength'])
@@ -327,7 +506,6 @@ def get_market_insights(flows_data: List[Dict]) -> Dict:
             'conviction': most_bullish['Details']['bias_strength']
         }
     
-    # 3. Most bearish flows
     bearish_flows = [f for f in flows_data if f['Details']['sentiment'] == 'BEARISH']
     if bearish_flows:
         most_bearish = max(bearish_flows, key=lambda x: x['Details']['bias_strength'])
@@ -336,11 +514,9 @@ def get_market_insights(flows_data: List[Dict]) -> Dict:
             'conviction': most_bearish['Details']['bias_strength']
         }
     
-    # 4. Total market premium flow
     total_premium = sum(f['Details']['total_premium'] for f in flows_data)
     insights['total_premium'] = total_premium
     
-    # 5. Call vs Put ratio across all flows
     total_call_premium = sum(f['Details']['call_premium'] for f in flows_data)
     total_put_premium = sum(f['Details']['put_premium'] for f in flows_data)
     
@@ -352,20 +528,37 @@ def get_market_insights(flows_data: List[Dict]) -> Dict:
     insights['call_put_ratio'] = call_put_ratio
     insights['market_sentiment'] = 'BULLISH' if call_put_ratio > 1.5 else 'BEARISH' if call_put_ratio < 0.67 else 'MIXED'
     
-    # 6. Unusual activity (flows with score > 50)
     unusual_activity = [f for f in flows_data if f['Flow_Score'] > 50]
     insights['unusual_count'] = len(unusual_activity)
     
     return insights
 
-def display_market_insights(insights: Dict):
-    """Display real-time market insights at the top of the page."""
+# 🎯 NEW ENHANCEMENT: Enhanced insights display with alerts and sectors
+def display_market_insights(insights: Dict, flows_data: List[Dict]):
+    """Display enhanced market insights with alerts and sector analysis."""
     if not insights:
         return
         
     st.markdown("## 📊 Live Market Flow Insights")
     
-    # Top row - Key metrics
+    # 🚨 NEW: Flow Alerts Section
+    alerts = detect_flow_alerts(flows_data)
+    if alerts:
+        st.markdown("### 🚨 Flow Alerts")
+        alert_cols = st.columns(min(3, len(alerts)))
+        
+        for i, alert in enumerate(alerts[:3]):
+            with alert_cols[i]:
+                if alert['priority'] == 'HIGH':
+                    st.error(alert['message'])
+                elif alert['priority'] == 'MEDIUM':
+                    st.warning(alert['message'])
+                else:
+                    st.info(alert['message'])
+    
+    st.divider()
+    
+    # Key metrics row
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -381,7 +574,7 @@ def display_market_insights(insights: Dict):
             st.metric(
                 "💰 Total Flow",
                 f"${insights['total_premium']/1000000:.1f}M",
-                f"{len([i for i in insights if 'flows' in str(i)])} symbols"
+                f"{len(flows_data)} symbols"
             )
     
     with col3:
@@ -408,12 +601,30 @@ def display_market_insights(insights: Dict):
                 "High conviction flows"
             )
     
-    # Second row - Directional insights
+    # 🏭 NEW: Sector Analysis
+    sector_data = analyze_sector_flows(flows_data)
+    if len(sector_data) > 1:
+        st.markdown("### 🏭 Sector Flow Analysis")
+        
+        # Sort sectors by total premium
+        sorted_sectors = sorted(sector_data.items(), key=lambda x: x[1]['total_premium'], reverse=True)
+        
+        sector_cols = st.columns(min(4, len(sorted_sectors)))
+        for i, (sector, data) in enumerate(sorted_sectors[:4]):
+            with sector_cols[i]:
+                sentiment_emoji = "🟢" if data['sentiment'] == 'BULLISH' else "🔴" if data['sentiment'] == 'BEARISH' else "🟡"
+                st.metric(
+                    f"{sentiment_emoji} {sector}",
+                    f"${data['total_premium']/1000000:.1f}M",
+                    f"{len(data['symbols'])} symbols"
+                )
+    
+    # Directional insights
     col1, col2 = st.columns(2)
     
     with col1:
         if 'most_bullish' in insights:
-            st.info(f"📈 **Most Bullish**: {insights['most_bullish']['symbol']} ({insights['most_bullish']['conviction']:.0f}% conviction)")
+            st.success(f"📈 **Most Bullish**: {insights['most_bullish']['symbol']} ({insights['most_bullish']['conviction']:.0f}% conviction)")
     
     with col2:
         if 'most_bearish' in insights:
@@ -435,28 +646,37 @@ def calculate_daily_change(symbol: str, current_price: float) -> float:
         return 0.0
 
 def display_flow_table_header():
-    """Display the table header matching TradePulse format."""
+    """Display the table header with proper alignment."""
     st.markdown("""
-    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
-    <div style="display: flex; font-weight: bold; color: #666;">
-        <div style="flex: 3;">Name</div>
-        <div style="flex: 1; text-align: right;">Chg.</div>
-        <div style="flex: 1; text-align: right;">Score</div>
-        <div style="flex: 1; text-align: right;">Momentum</div>
-        <div style="flex: 1; text-align: right;">Daily</div>
-        <div style="flex: 1; text-align: right;">Large Deal</div>
-    </div>
+    <div style="
+        display: grid; 
+        grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; 
+        gap: 10px; 
+        padding: 15px; 
+        background-color: #f8f9fa; 
+        border-radius: 8px; 
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #495057;
+        border-bottom: 2px solid #dee2e6;
+    ">
+        <div>Name</div>
+        <div style="text-align: center;">Chg.</div>
+        <div style="text-align: center;">Score</div>
+        <div style="text-align: center;">Momentum</div>
+        <div style="text-align: center;">Daily</div>
+        <div style="text-align: center;">Large Deal</div>
     </div>
     """, unsafe_allow_html=True)
 
 def display_flow_row(stock_data: Dict, rank: int, daily_changes: Dict):
-    """Display a single flow row in TradePulse table format."""
+    """Display enhanced flow row with catalysts and block trades."""
     symbol = stock_data.get('Symbol', 'UNKNOWN')
     price = stock_data.get('Current_Price', 0.0)
     score = stock_data.get('Flow_Score', 0.0)
     details = stock_data.get('Details', {})
+    catalysts = stock_data.get('Catalysts', [])  # NEW
     
-    # Debug check
     if not symbol or symbol == 'UNKNOWN':
         st.error(f"Missing symbol data for row {rank}")
         return
@@ -465,50 +685,92 @@ def display_flow_row(stock_data: Dict, rank: int, daily_changes: Dict):
     total_premium = details.get('total_premium', 0)
     bias_strength = details.get('bias_strength', 0)
     top_strikes = details.get('top_strikes', pd.DataFrame())
+    block_trades = details.get('block_trades', [])  # NEW
     
-    # Get daily change
     daily_change = daily_changes.get(symbol, 0.0)
     
-    # Calculate momentum based on sentiment and conviction
     if sentiment == "BULLISH" and bias_strength > 70:
-        momentum = f"+{bias_strength:.0f}"
+        momentum_text = f"📈 +{bias_strength:.0f}"
+        momentum_color = "#28a745"
     elif sentiment == "BEARISH" and bias_strength > 70:
-        momentum = f"-{bias_strength:.0f}"
+        momentum_text = f"📉 -{bias_strength:.0f}"
+        momentum_color = "#dc3545"
     else:
-        momentum = f"{bias_strength:.0f}"
+        momentum_text = f"⚡ {bias_strength:.0f}"
+        momentum_color = "#ffc107"
     
-    # Format large deal (total premium in thousands)
-    large_deal = f"{int(total_premium/1000):,}"
+    change_color = "#28a745" if daily_change >= 0 else "#dc3545"
+    change_icon = "🟢" if daily_change >= 0 else "🔴"
+    large_deal = f"{int(total_premium/1000):,}K"
     
-    # Use Streamlit columns instead of HTML for better reliability
-    col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
+    # Add catalyst indicators to symbol display
+    catalyst_indicators = ""
+    if catalysts:
+        catalyst_indicators = f" {''.join(catalysts[:2])}"
     
-    with col1:
-        st.markdown(f"### {symbol}")
-        st.caption(f"${price:.2f}")
+    st.markdown(f"""
+    <div style="
+        display: grid; 
+        grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; 
+        gap: 10px; 
+        padding: 15px; 
+        background-color: white; 
+        border: 1px solid #dee2e6;
+        border-radius: 8px; 
+        margin-bottom: 2px;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    ">
+        <div>
+            <strong style="font-size: 1.1em; color: #212529;">{symbol}</strong>{catalyst_indicators}<br>
+            <small style="color: #6c757d;">${price:.2f}</small>
+        </div>
+        <div style="text-align: center;">
+            <span style="color: {change_color}; font-weight: bold;">
+                {change_icon} {daily_change:+.2f}%
+            </span>
+        </div>
+        <div style="text-align: center; font-weight: bold; color: #495057;">
+            {score:.1f}
+        </div>
+        <div style="text-align: center;">
+            <span style="color: {momentum_color}; font-weight: bold;">
+                {momentum_text}
+            </span>
+        </div>
+        <div style="text-align: center;">
+            <span style="color: {change_color}; font-weight: bold;">
+                {daily_change:+.1f}%
+            </span>
+        </div>
+        <div style="text-align: center; font-weight: bold; color: #495057;">
+            {large_deal}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    with col2:
-        color = "🟢" if daily_change >= 0 else "🔴"
-        st.markdown(f"**{color} {daily_change:+.2f}%**")
-    
-    with col3:
-        st.markdown(f"**{score:.1f}**")
-    
-    with col4:
-        emoji = '📈' if 'BULLISH' in sentiment else '📉' if 'BEARISH' in sentiment else '⚡'
-        st.markdown(f"**{emoji} {momentum}**")
-    
-    with col5:
-        color = "🟢" if daily_change >= 0 else "🔴"
-        st.markdown(f"**{color} {daily_change:+.1f}%**")
-    
-    with col6:
-        st.markdown(f"**{large_deal}**")
-    
-    # Expandable section for detailed strike information
+    # 🎯 ENHANCED: Strike details with catalysts and block trades
     with st.expander("🎯 View Strike Details", expanded=False):
+        
+        # 🎯 NEW: Price Catalysts
+        if catalysts:
+            st.markdown("#### 🎯 Price Catalysts")
+            catalyst_text = " | ".join(catalysts)
+            st.info(f"**{symbol}** - {catalyst_text}")
+            st.markdown("---")
+        
+        # 🎯 NEW: Block Trades
+        if block_trades:
+            st.markdown("#### 🏢 Block Trades Detected")
+            for block in block_trades[:2]:
+                st.markdown(f"""
+                **{block['type']} ${block['strike']:.0f}** - {block['volume']:,} contracts
+                - Premium: ${block['premium']/1000:.0f}K | Avg Price: ${block['avg_price']:.2f}
+                """)
+            st.markdown("---")
+        
         if not top_strikes.empty:
-            st.markdown("**🎯 Top Strike Activity**")
+            st.markdown("#### 🎯 Top Strike Activity")
             
             for i, (_, strike_row) in enumerate(top_strikes.head(3).iterrows()):
                 strike_price = strike_row['Strike Price']
@@ -516,94 +778,91 @@ def display_flow_row(stock_data: Dict, rank: int, daily_changes: Dict):
                 expiry = strike_row['Expiration'].strftime('%m/%d/%y')
                 premium = strike_row['Premium']
                 volume = strike_row['Volume']
-                
                 move_pct = ((strike_price - price) / price) * 100
                 
-                # Create a clean strike row
                 strike_col1, strike_col2, strike_col3 = st.columns([2, 2, 1])
                 
                 with strike_col1:
-                    direction = "�" if call_put == "CALL" else "📉"
-                    st.markdown(f"**{direction} ${strike_price:.0f} {call_put}**")
+                    emoji = '📈' if call_put == 'CALL' else '📉'
+                    st.markdown(f"**{emoji} ${strike_price:.0f} {call_put}**")
                     st.caption(f"Expires: {expiry}")
                 
                 with strike_col2:
-                    st.metric("Premium", f"${premium/1000:.0f}K", f"{volume:,} contracts")
+                    st.markdown(f"**${premium/1000:.0f}K**")
+                    st.caption(f"{volume:,} contracts")
                 
                 with strike_col3:
-                    move_color = "normal" if abs(move_pct) < 10 else "inverse" if move_pct < 0 else "normal"
-                    st.metric("Move Needed", f"{move_pct:+.1f}%", delta_color=move_color)
+                    color = "🔴" if move_pct < 0 else "🟢" if move_pct > 0 else "⚫"
+                    st.markdown(f"**{color} {move_pct:+.1f}%**")
+                    st.caption("Move needed")
                 
-                if i < len(top_strikes.head(3)) - 1:
-                    st.divider()
+                if i < min(2, len(top_strikes) - 1):
+                    st.markdown("---")
             
-            # Simplified metrics
             st.markdown("---")
-            st.markdown("**📊 Flow Summary**")
+            st.markdown("#### 📊 Flow Summary")
             
-            met1, met2, met3 = st.columns(3)
-            with met1:
-                st.metric("Total Premium", f"${total_premium/1000000:.1f}M")
-            with met2:
-                sentiment_color = "🟢" if sentiment == "BULLISH" else "🔴" if sentiment == "BEARISH" else "🟡"
-                st.metric("Sentiment", f"{sentiment_color} {sentiment}")
-            with met3:
-                st.metric("Conviction", f"{bias_strength:.0f}%")
-                
-            # Simple score breakdown
-            st.markdown("**Score Components:**")
-            score_info = f"Premium: {details.get('premium_score', 0):.0f} | Conviction: {details.get('conviction_score', 0):.0f} | Volume: {details.get('volume_score', 0):.0f}"
-            st.caption(score_info)
+            summary_col1, summary_col2, summary_col3 = st.columns(3)
+            
+            with summary_col1:
+                st.markdown(f"**${total_premium/1000000:.1f}M**")
+                st.caption("Total Premium")
+            
+            with summary_col2:
+                sentiment_emoji = "🟢" if sentiment == "BULLISH" else "🔴" if sentiment == "BEARISH" else "🟡"
+                st.markdown(f"**{sentiment_emoji} {sentiment}**")
+                st.caption("Sentiment")
+            
+            with summary_col3:
+                st.markdown(f"**{bias_strength:.0f}%**")
+                st.caption("Conviction")
 
 def main():
     st.set_page_config(
-        page_title="Top Options Flow",
-        page_icon="📊",
+        page_title="Enhanced Options Flow",
+        page_icon="🚀",
         layout="wide",
         initial_sidebar_state="collapsed"
     )
     
-    # Custom CSS to match TradePulse styling
+    # Enhanced CSS
     st.markdown("""
     <style>
     .main > div {
         padding: 1rem;
     }
-    .stContainer > div {
-        border: 1px solid #e0e0e0;
-        border-radius: 5px;
-        padding: 0.5rem;
-        margin: 0.2rem 0;
-        background-color: #ffffff;
+    
+    @media (max-width: 768px) {
+        .main > div {
+            padding: 0.5rem;
+        }
+        .stColumns > div {
+            min-width: 100% !important;
+        }
     }
-    .stExpander > div > div {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 5px;
+    
+    .stExpander {
+        border: 1px solid #e6e6e6 !important;
+        border-radius: 4px !important;
+        margin: 4px 0 !important;
+        background-color: #ffffff !important;
     }
-    .stExpander [data-testid="stExpanderToggleIcon"] {
-        visibility: hidden;
+    
+    .stExpander:hover {
+        background-color: #f8f9fa !important;
+        border-color: #5470c6 !important;
     }
-    .element-container {
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    /* Table row styling */
-    div[data-testid="stExpander"] {
-        border: 1px solid #e6e6e6;
-        border-radius: 4px;
-        margin: 2px 0;
-        background-color: #ffffff;
-    }
-    div[data-testid="stExpander"]:hover {
-        background-color: #f8f9fa;
-        border-color: #5470c6;
+    
+    * {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
     </style>
     """, unsafe_allow_html=True)
     
-    # Header
-    st.title("🎯 Top Flows")
+    # Header with enhanced branding
+    st.title("🚀 Enhanced Options Flow Scanner")
+    st.markdown("*Real-time flow analysis with alerts, sector insights, and catalyst detection*")
     
     # Market status
     market_open = is_market_open()
@@ -620,18 +879,18 @@ def main():
             st.cache_data.clear()
             st.rerun()
     
-    # Auto-refresh every 10 minutes
+    # Auto-refresh logic
     if 'last_refresh' not in st.session_state:
         st.session_state.last_refresh = time.time()
     
     current_time = time.time()
-    if current_time - st.session_state.last_refresh > 600:  # 10 minutes
+    if current_time - st.session_state.last_refresh > 600:
         st.session_state.last_refresh = current_time
         st.cache_data.clear()
         st.rerun()
     
     # Load and analyze data
-    with st.spinner("Loading options flow data..."):
+    with st.spinner("🔍 Analyzing market flows..."):
         try:
             df = fetch_all_options_data()
             
@@ -646,12 +905,11 @@ def main():
                 st.warning("No significant flows detected")
                 return
             
-            # Generate market insights
             insights = get_market_insights(all_flows)
             
-            # Calculate daily changes for all symbols
+            # Calculate daily changes
             daily_changes = {}
-            with st.spinner("Calculating daily changes..."):
+            with st.spinner("📊 Calculating market metrics..."):
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     future_to_symbol = {
                         executor.submit(calculate_daily_change, stock['Symbol'], stock['Current_Price']): stock['Symbol'] 
@@ -667,28 +925,47 @@ def main():
             
         except Exception as e:
             st.error(f"Error loading data: {e}")
+            logger.error(f"Data loading error: {e}")
             return
     
-    # Display market insights
-    display_market_insights(insights)
-    
-    # Display results
-    st.markdown("---")
+    # 🎯 ENHANCED: Display insights with alerts and sectors
+    display_market_insights(insights, all_flows)
     
     # Main flows table
     st.header("🎯 Top Options Flows")
-    st.markdown("*Ranked by flow score - showing the most significant options activity*")
+    st.markdown("*Enhanced with price catalysts, block trade detection, and sector analysis*")
     
     display_flow_table_header()
     
-    # Show top 20 flows regardless of category
+    # Show top 20 flows
     for i, stock_data in enumerate(all_flows[:20], 1):
         display_flow_row(stock_data, i, daily_changes)
     
+    # 🎯 NEW: Additional insights sidebar
+    with st.sidebar:
+        st.markdown("## 📈 Quick Stats")
+        
+        if all_flows:
+            total_symbols = len(all_flows)
+            avg_score = sum(f['Flow_Score'] for f in all_flows) / total_symbols
+            high_conviction = len([f for f in all_flows if f['Details']['bias_strength'] > 80])
+            
+            st.metric("Total Symbols", total_symbols)
+            st.metric("Avg Flow Score", f"{avg_score:.1f}")
+            st.metric("High Conviction", f"{high_conviction}")
+            
+            # Top sectors
+            sectors = analyze_sector_flows(all_flows)
+            if sectors:
+                st.markdown("### 🏭 Top Sectors")
+                sorted_sectors = sorted(sectors.items(), key=lambda x: x[1]['total_premium'], reverse=True)
+                for sector, data in sorted_sectors[:5]:
+                    st.markdown(f"**{sector}**: ${data['total_premium']/1000000:.1f}M")
+    
     # Footer
     st.markdown("---")
-    st.caption(f"Data refreshed: {et_now.strftime('%Y-%m-%d %H:%M:%S ET')} | Auto-refresh every 10 minutes")
-    st.caption("Data source: CBOE Options Market Statistics")
+    st.caption(f"🕒 Last updated: {et_now.strftime('%Y-%m-%d %H:%M:%S ET')} | Auto-refresh: 10 min")
+    st.caption("📊 Data: CBOE | Enhanced with alerts, sectors, and catalysts")
 
 if __name__ == "__main__":
     main()
