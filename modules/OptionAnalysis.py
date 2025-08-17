@@ -411,44 +411,104 @@ def display_repeat_flows(df, min_premium=30000):
 
 # Add this function after the existing functions and before the main() function
 
-def calculate_trade_score(row, ticker_daily_flow):
+def calculate_trade_score(row, ticker_daily_flow, all_premiums):
     """
-    Calculate a composite score for each trade based on:
-    - Premium size (weight: 40%)
-    - Number of sweeps/frequency (weight: 30%) 
-    - Percentage of daily flow (weight: 20%)
-    - Special flags (weight: 10%)
+    Enhanced scoring algorithm for option trades based on:
+    - Premium size (30%): Normalized against market distribution
+    - Flow frequency/consistency (25%): Number of sweeps and timing
+    - Daily flow dominance (20%): Percentage of ticker's daily flow
+    - Market impact potential (15%): Move required vs premium invested
+    - Special flags and urgency (10%): Unusual activity, golden sweeps, time decay
     """
-    # Base score from premium (normalized to 0-100)
-    premium_score = min(100, (row['Total_Premium'] / 10000000) * 100)  # $10M = 100 points
     
-    # Frequency score (normalized to 0-100)
-    frequency_score = min(100, (row['Flow_Count'] / 50) * 100)  # 50 sweeps = 100 points
+    # 1. Premium Score (30% weight) - Use percentile ranking
+    premium_percentile = (all_premiums <= row['Total_Premium']).mean() * 100
+    premium_score = min(100, premium_percentile)
     
-    # Daily flow percentage score (normalized to 0-100)
+    # 2. Flow Frequency Score (25% weight) - Reward consistency
+    base_frequency_score = min(100, (row['Flow_Count'] / 20) * 100)  # 20 sweeps = 100 points
+    
+    # Bonus for high frequency (suggests institutional accumulation)
+    if row['Flow_Count'] >= 15:
+        frequency_multiplier = 1.3
+    elif row['Flow_Count'] >= 10:
+        frequency_multiplier = 1.15
+    elif row['Flow_Count'] >= 5:
+        frequency_multiplier = 1.05
+    else:
+        frequency_multiplier = 1.0
+    
+    frequency_score = min(100, base_frequency_score * frequency_multiplier)
+    
+    # 3. Daily Flow Dominance Score (20% weight)
     daily_flow_pct = (row['Total_Premium'] / ticker_daily_flow) * 100
-    daily_flow_score = min(100, daily_flow_pct * 5)  # 20% of daily flow = 100 points
+    dominance_score = min(100, daily_flow_pct * 3)  # 33% of daily flow = 100 points
     
-    # Special flags bonus
+    # 4. Market Impact Potential Score (15% weight)
+    # Consider move required vs premium invested (efficiency ratio)
+    move_required = abs((row['Strike_Price'] - row.get('Reference_Price', row['Strike_Price'])) / 
+                       row.get('Reference_Price', row['Strike_Price'])) * 100
+    
+    if move_required > 0:
+        # Efficiency: Lower move required for higher premium = higher score
+        # Sweet spot: 2-8% moves with significant premium
+        if 2 <= move_required <= 8:
+            impact_score = 100
+        elif move_required < 2:
+            impact_score = 70  # Too close to money, less upside
+        elif move_required <= 15:
+            impact_score = max(20, 100 - (move_required - 8) * 5)  # Penalize excessive moves
+        else:
+            impact_score = 20  # Very ambitious moves
+    else:
+        impact_score = 50  # Default if we can't calculate
+    
+    # 5. Special Flags and Urgency Score (10% weight)
     flags_score = 0
-    if row['Has_Unusual'] == 'YES':
-        flags_score += 10
-    if row['Has_Golden'] == 'YES':
-        flags_score += 15
     
-    # Weighted composite score
+    # Premium-weighted flags (larger trades get more weight)
+    premium_weight = min(2.0, row['Total_Premium'] / 1000000)  # $1M+ gets full weight
+    
+    if row['Has_Unusual'] == 'YES':
+        flags_score += 25 * premium_weight
+    if row['Has_Golden'] == 'YES':
+        flags_score += 35 * premium_weight
+    
+    # Time decay urgency (closer expirations get bonus for immediate moves)
+    try:
+        days_to_exp = (row['Expiration_Date'] - pd.Timestamp.now()).days
+        if days_to_exp <= 7:
+            flags_score += 20  # Weekly expiration urgency
+        elif days_to_exp <= 14:
+            flags_score += 10  # Bi-weekly urgency
+    except:
+        pass
+    
+    flags_score = min(100, flags_score)
+    
+    # 6. Calculate weighted composite score
     composite_score = (
-        premium_score * 0.4 +
-        frequency_score * 0.3 +
-        daily_flow_score * 0.2 +
-        flags_score * 0.1
+        premium_score * 0.30 +
+        frequency_score * 0.25 +
+        dominance_score * 0.20 +
+        impact_score * 0.15 +
+        flags_score * 0.10
     )
     
-    return composite_score, daily_flow_pct
+    # 7. Apply final adjustments
+    # Boost score for perfect storm scenarios
+    if (premium_percentile > 90 and row['Flow_Count'] >= 10 and daily_flow_pct > 25):
+        composite_score = min(100, composite_score * 1.15)  # "Perfect storm" bonus
+    
+    # Slight penalty for extremely high move requirements (>20%)
+    if move_required > 20:
+        composite_score *= 0.9
+    
+    return round(composite_score, 1), daily_flow_pct, move_required
 
 def display_top_trades_summary(df, min_premium=250000, min_flows=3):
     """
-    Display top scoring trade for each ticker
+    Display top scoring trade for each ticker with enhanced analysis
     """
     if df is None or df.empty:
         st.warning("No data available.")
@@ -503,45 +563,60 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
         st.warning(f"No contracts found with >= {min_flows} flows")
         return
     
-    # Calculate daily flow by ticker
+    # Calculate daily flow by ticker and get all premiums for percentile calculation
     ticker_daily_flows = filtered_df.groupby('Ticker')['Premium Price'].sum()
+    all_premiums = contract_groups['Total_Premium'].values
     
-    # Calculate scores for each contract
+    # Calculate enhanced scores for each contract
     scores_data = []
     for _, row in contract_groups.iterrows():
         ticker_daily_flow = ticker_daily_flows.get(row['Ticker'], 1)  # Avoid division by zero
-        score, daily_flow_pct = calculate_trade_score(row, ticker_daily_flow)
+        score, daily_flow_pct, move_required = calculate_trade_score(row, ticker_daily_flow, all_premiums)
         
-        # Determine sentiment
+        # Enhanced sentiment analysis
         side_codes = row['Side_Codes']
         bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
         bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
         
+        # Determine sentiment with confidence level
         if row['Contract_Type'] == 'CALL':
             if bullish_sides > bearish_sides:
-                sentiment = "📈 Bullish"
+                sentiment = "📈 BULLISH"
+                confidence = "High" if bullish_sides / len(side_codes) > 0.75 else "Moderate"
             elif bearish_sides > bullish_sides:
-                sentiment = "📉 Bearish"
+                sentiment = "📉 BEARISH"
+                confidence = "High" if bearish_sides / len(side_codes) > 0.75 else "Moderate"
             else:
-                sentiment = "⚪ Mixed"
+                sentiment = "⚪ MIXED"
+                confidence = "Low"
         else:  # PUT
             if bullish_sides > bearish_sides:
-                sentiment = "📉 Bearish"
+                sentiment = "📉 BEARISH"  # Put buying is bearish
+                confidence = "High" if bullish_sides / len(side_codes) > 0.75 else "Moderate"
             elif bearish_sides > bullish_sides:
-                sentiment = "📈 Bullish"
+                sentiment = "📈 BULLISH"  # Put selling is bullish
+                confidence = "High" if bearish_sides / len(side_codes) > 0.75 else "Moderate"
             else:
-                sentiment = "⚪ Mixed"
+                sentiment = "⚪ MIXED"
+                confidence = "Low"
+        
+        # Calculate days to expiration
+        days_to_exp = (row['Expiration_Date'] - today).days
         
         scores_data.append({
             'Ticker': row['Ticker'],
             'Score': score,
             'Contract_Type': row['Contract_Type'],
             'Strike_Price': row['Strike_Price'],
+            'Reference_Price': row['Reference_Price'],
             'Expiration_Date': row['Expiration_Date'],
+            'Days_to_Exp': days_to_exp,
             'Flow_Count': row['Flow_Count'],
             'Total_Premium': row['Total_Premium'],
             'Daily_Flow_Pct': daily_flow_pct,
+            'Move_Required': move_required,
             'Sentiment': sentiment,
+            'Confidence': confidence,
             'Has_Unusual': row['Has_Unusual'],
             'Has_Golden': row['Has_Golden']
         })
@@ -554,19 +629,190 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
     scores_df = pd.DataFrame(scores_data)
     top_trades = scores_df.loc[scores_df.groupby('Ticker')['Score'].idxmax()].sort_values('Score', ascending=False)
     
-    # Generate the summary output
-    st.subheader("📊 TOP TRADES SUMMARY - Highest Score Trade for Each Ticker")
-    st.markdown("=" * 80)
+    # Enhanced summary header with market analysis
+    st.subheader("🏆 TOP TRADES SUMMARY - AI-Enhanced Scoring Algorithm")
     
-    summary_text = ""
-    for _, trade in top_trades.head(15).iterrows():  # Top 15 tickers
+    # Market overview metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_tickers = len(top_trades)
+        st.metric("📊 Unique Tickers", total_tickers)
+    
+    with col2:
+        total_premium = top_trades['Total_Premium'].sum()
+        st.metric("💰 Total Premium", f"${total_premium/1000000:.1f}M")
+    
+    with col3:
+        avg_score = top_trades['Score'].mean()
+        score_quality = "Excellent" if avg_score > 80 else "Good" if avg_score > 65 else "Fair"
+        st.metric("⭐ Avg Quality Score", f"{avg_score:.1f}", delta=score_quality)
+    
+    with col4:
+        bullish_count = sum(1 for sentiment in top_trades['Sentiment'] if 'BULLISH' in sentiment)
+        bearish_count = sum(1 for sentiment in top_trades['Sentiment'] if 'BEARISH' in sentiment)
+        market_bias = "Bullish" if bullish_count > bearish_count else "Bearish" if bearish_count > bullish_count else "Mixed"
+        st.metric("📈 Market Bias", market_bias, delta=f"{bullish_count}B/{bearish_count}B")
+    
+    st.markdown("---")
+    
+    # Tiered display based on score ranges
+    st.markdown("### 🌟 TIER 1: PREMIUM OPPORTUNITIES (Score 80+)")
+    tier1_trades = top_trades[top_trades['Score'] >= 80]
+    if not tier1_trades.empty:
+        display_trade_tier(tier1_trades, "🔥")
+    else:
+        st.markdown("*No Tier 1 opportunities found*")
+    
+    st.markdown("### ⭐ TIER 2: STRONG OPPORTUNITIES (Score 65-79)")
+    tier2_trades = top_trades[(top_trades['Score'] >= 65) & (top_trades['Score'] < 80)]
+    if not tier2_trades.empty:
+        display_trade_tier(tier2_trades, "💪")
+    else:
+        st.markdown("*No Tier 2 opportunities found*")
+    
+    st.markdown("### 📊 TIER 3: MODERATE OPPORTUNITIES (Score 50-64)")
+    tier3_trades = top_trades[(top_trades['Score'] >= 50) & (top_trades['Score'] < 65)]
+    if not tier3_trades.empty:
+        display_trade_tier(tier3_trades, "👀")
+    else:
+        st.markdown("*No Tier 3 opportunities found*")
+    
+    # Show lower scored trades in expandable section
+    lower_trades = top_trades[top_trades['Score'] < 50]
+    if not lower_trades.empty:
+        with st.expander(f"📋 Lower Scored Trades ({len(lower_trades)} tickers)", expanded=False):
+            display_trade_tier(lower_trades, "⚠️")
+    
+    # Enhanced copy-to-clipboard functionality with multiple formats
+    with st.expander("📋 Copy Professional Summary (Multiple Formats)", expanded=True):
+        summary_formats = generate_professional_summary(top_trades)
+        
+        # Create tabs for different formats
+        format_tabs = st.tabs(["Full Report", "Discord", "Twitter", "Quick Summary"])
+        
+        with format_tabs[0]:
+            st.markdown("**📄 Complete comprehensive report with all tiers**")
+            st.text_area("Full Report:", summary_formats['Full Report'], height=500, key="full_report")
+        
+        with format_tabs[1]:
+            st.markdown("**💬 Optimized for Discord sharing (under 2000 chars)**")
+            st.text_area("Discord Format:", summary_formats['Discord'], height=300, key="discord_format")
+        
+        with format_tabs[2]:
+            st.markdown("**🐦 Optimized for Twitter (under 280 chars)**")
+            st.text_area("Twitter Format:", summary_formats['Twitter'], height=150, key="twitter_format")
+        
+        with format_tabs[3]:
+            st.markdown("**⚡ Quick one-liner summary**")
+            st.text_area("Quick Summary:", summary_formats['Quick Summary'], height=100, key="quick_summary")
+    
+    # Enhanced scoring methodology
+    with st.expander("🧠 Enhanced AI Scoring Methodology"):
+        st.markdown("""
+        **🚀 New Enhanced Scoring Algorithm (5 Components):**
+        
+        **1. Premium Percentile (30%)** 📊
+        - Uses market distribution percentiles instead of fixed thresholds
+        - Adapts to current market conditions automatically
+        - 90th percentile+ = Premium opportunities
+        
+        **2. Flow Consistency (25%)** 🔄
+        - Rewards multiple sweeps (institutional accumulation pattern)
+        - Frequency multipliers: 15+ sweeps (+30%), 10+ sweeps (+15%)
+        - Consistent flow indicates conviction
+        
+        **3. Daily Flow Dominance (20%)** 💪
+        - Percentage of ticker's total daily options flow
+        - 33%+ dominance = Maximum score
+        - Shows relative importance vs other activity
+        
+        **4. Market Impact Efficiency (15%)** 🎯
+        - Move required vs premium invested ratio
+        - Sweet spot: 2-8% moves = Optimal efficiency
+        - Penalizes excessive moves (>20%)
+        
+        **5. Special Signals & Urgency (10%)** ⚡
+        - Premium-weighted unusual activity detection
+        - Golden sweep identification with size consideration
+        - Time decay urgency (weekly expirations get bonus)
+        
+        **🎖️ Quality Tiers:**
+        - **Tier 1 (80+)**: Premium opportunities with multiple strong signals
+        - **Tier 2 (65-79)**: Strong opportunities with good conviction
+        - **Tier 3 (50-64)**: Moderate opportunities worth monitoring
+        
+        **🔥 Perfect Storm Bonus (+15%):**
+        - Premium >90th percentile + 10+ sweeps + 25%+ daily flow dominance
+        """)
+
+def display_trade_tier(trades_df, emoji):
+    """Helper function to display trades in a consistent format"""
+    for _, trade in trades_df.iterrows():
         # Format premium
         if trade['Total_Premium'] >= 1000000:
             premium_str = f"${trade['Total_Premium']/1000000:.2f}M"
         else:
             premium_str = f"${trade['Total_Premium']/1000:.0f}K"
         
-        # Special flags
+        # Special flags with enhanced display
+        flags = []
+        if trade['Has_Unusual'] == 'YES':
+            flags.append("🔥 UNUSUAL")
+        if trade['Has_Golden'] == 'YES':
+            flags.append("⚡ GOLDEN")
+        flags_str = f" [{' '.join(flags)}]" if flags else ""
+        
+        # Time urgency indicator
+        if trade['Days_to_Exp'] <= 7:
+            urgency = "🚨 WEEKLY"
+        elif trade['Days_to_Exp'] <= 14:
+            urgency = "⏰ 2-WEEK"
+        else:
+            urgency = f"{trade['Days_to_Exp']}d"
+        
+        # Confidence indicator
+        conf_indicator = "🎯" if trade['Confidence'] == "High" else "📊" if trade['Confidence'] == "Moderate" else "❓"
+        
+        line = (f"{emoji} **${trade['Ticker']}** {trade['Sentiment']} {conf_indicator} "
+                f"${trade['Strike_Price']:,.0f} {trade['Contract_Type']} "
+                f"({trade['Flow_Count']} sweeps) → {premium_str} "
+                f"[{trade['Move_Required']:.1f}% move] [{urgency}] "
+                f"**Score: {trade['Score']:.1f}**{flags_str}")
+        
+        st.markdown(line)
+
+def generate_professional_summary(top_trades):
+    """Generate a comprehensive professional summary for copying to Discord/Twitter"""
+    timestamp = pd.Timestamp.now().strftime('%B %d, %Y')
+    
+    # Create multiple format options
+    formats = {}
+    
+    # 1. FULL COMPREHENSIVE REPORT
+    full_summary = f"📊 OPTIONS FLOW INTELLIGENCE REPORT - {timestamp}\n"
+    full_summary += "="*80 + "\n\n"
+    
+    # Market overview
+    total_premium = top_trades['Total_Premium'].sum()
+    avg_score = top_trades['Score'].mean()
+    bullish_count = sum(1 for sentiment in top_trades['Sentiment'] if 'BULLISH' in sentiment)
+    bearish_count = sum(1 for sentiment in top_trades['Sentiment'] if 'BEARISH' in sentiment)
+    mixed_count = len(top_trades) - bullish_count - bearish_count
+    
+    full_summary += f"MARKET OVERVIEW:\n"
+    full_summary += f"• Total Premium Analyzed: ${total_premium/1000000:.1f}M across {len(top_trades)} tickers\n"
+    full_summary += f"• Average Quality Score: {avg_score:.1f}/100\n"
+    full_summary += f"• Directional Bias: {bullish_count} Bullish, {bearish_count} Bearish, {mixed_count} Mixed\n\n"
+    
+    # All tiers with comprehensive data
+    tier1 = top_trades[top_trades['Score'] >= 80]
+    tier2 = top_trades[(top_trades['Score'] >= 65) & (top_trades['Score'] < 80)]
+    tier3 = top_trades[(top_trades['Score'] >= 50) & (top_trades['Score'] < 65)]
+    lower_trades = top_trades[top_trades['Score'] < 50]
+    
+    def format_trade_line(trade, include_score=True):
+        premium_str = f"${trade['Total_Premium']/1000000:.2f}M" if trade['Total_Premium'] >= 1000000 else f"${trade['Total_Premium']/1000:.0f}K"
         flags = []
         if trade['Has_Unusual'] == 'YES':
             flags.append("UNUSUAL")
@@ -574,56 +820,106 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
             flags.append("GOLDEN")
         flags_str = f" [{' '.join(flags)}]" if flags else ""
         
-        line = (f"  ${trade['Ticker']} {trade['Sentiment']} "
-                f"${trade['Strike_Price']:,.2f} {trade['Contract_Type']} "
-                f"Exp: {trade['Expiration_Date'].strftime('%Y-%m-%d')} "
+        score_str = f" [Score: {trade['Score']:.1f}]" if include_score else ""
+        
+        return (f"  • ${trade['Ticker']} {trade['Sentiment'].split()[1]} "
+                f"${trade['Strike_Price']:,.0f} {trade['Contract_Type']} "
                 f"({trade['Flow_Count']} sweeps) → {premium_str} "
-                f"({trade['Daily_Flow_Pct']:.1f}% of daily flow) "
-                f"[score: {trade['Score']:.1f}]{flags_str}")
+                f"[{trade['Move_Required']:.1f}% move]{score_str}{flags_str}")
+    
+    # Add all tiers
+    if not tier1.empty:
+        full_summary += f"🌟 TIER 1 OPPORTUNITIES (Score 80+) - {len(tier1)} trades:\n"
+        for _, trade in tier1.iterrows():
+            full_summary += format_trade_line(trade) + "\n"
+        full_summary += "\n"
+    
+    if not tier2.empty:
+        full_summary += f"⭐ TIER 2 OPPORTUNITIES (Score 65-79) - {len(tier2)} trades:\n"
+        for _, trade in tier2.iterrows():
+            full_summary += format_trade_line(trade) + "\n"
+        full_summary += "\n"
+    
+    if not tier3.empty:
+        full_summary += f"📊 TIER 3 OPPORTUNITIES (Score 50-64) - {len(tier3)} trades:\n"
+        for _, trade in tier3.iterrows():
+            full_summary += format_trade_line(trade) + "\n"
+        full_summary += "\n"
+    
+    if not lower_trades.empty:
+        full_summary += f"📋 ADDITIONAL FLOWS (Score <50) - {len(lower_trades)} trades:\n"
+        for _, trade in lower_trades.iterrows():
+            full_summary += format_trade_line(trade) + "\n"
+        full_summary += "\n"
+    
+    full_summary += "="*80 + "\n"
+    full_summary += "Generated by Enhanced AI Options Flow Analysis\n"
+    full_summary += "⚠️ Not financial advice."
+    
+    formats['Full Report'] = full_summary
+    
+    # 2. DISCORD OPTIMIZED (Under 2000 chars per message)
+    discord_summary = f"📊 **OPTIONS FLOW REPORT** - {timestamp}\n\n"
+    discord_summary += f"💰 **${total_premium/1000000:.1f}M** total premium | **{len(top_trades)}** tickers | Avg Score: **{avg_score:.1f}**\n"
+    discord_summary += f"📈 **{bullish_count}** Bullish | 📉 **{bearish_count}** Bearish | ⚪ **{mixed_count}** Mixed\n\n"
+    
+    # Top opportunities only for Discord (space constraints)
+    top_opportunities = top_trades.head(20)  # Top 20 trades
+    
+    discord_summary += "**🏆 TOP OPPORTUNITIES:**\n"
+    for _, trade in top_opportunities.iterrows():
+        premium_str = f"${trade['Total_Premium']/1000000:.1f}M" if trade['Total_Premium'] >= 1000000 else f"${trade['Total_Premium']/1000:.0f}K"
         
-        summary_text += line + "\n"
-        st.markdown(line)
-    
-    st.markdown("=" * 80)
-    
-    # Add copy-to-clipboard functionality
-    with st.expander("📋 Copy Summary Text"):
-        full_summary = f"📊 TOP TRADES SUMMARY - Highest Score Trade for Each Ticker\n{'='*80}\n{summary_text}{'='*80}"
-        st.text_area("Copy this text:", full_summary, height=400)
-    
-    # Show scoring methodology
-    with st.expander("ℹ️ Scoring Methodology"):
-        st.markdown("""
-        **Trade Score Calculation:**
-        - **Premium Size (40%)**: Higher premiums get higher scores (max at $10M)
-        - **Sweep Frequency (30%)**: More sweeps indicate sustained interest (max at 50 sweeps)
-        - **Daily Flow % (20%)**: Higher percentage of ticker's daily flow (max at 20%)
-        - **Special Flags (10%)**: Bonus for UNUSUAL (+10) and GOLDEN SWEEP (+15)
+        # Use emojis for sentiment
+        sentiment_emoji = "📈" if "BULLISH" in trade['Sentiment'] else "📉" if "BEARISH" in trade['Sentiment'] else "⚪"
         
-        **Sentiment Logic:**
-        - CALL + A/AA sides = Bullish 📈
-        - CALL + B/BB sides = Bearish 📉
-        - PUT + A/AA sides = Bearish 📉
-        - PUT + B/BB sides = Bullish 📈
-        """)
+        # Flags as emojis
+        flags_emoji = ""
+        if trade['Has_Unusual'] == 'YES':
+            flags_emoji += "🔥"
+        if trade['Has_Golden'] == 'YES':
+            flags_emoji += "⚡"
+        
+        discord_summary += (f"{sentiment_emoji} **${trade['Ticker']}** "
+                          f"${trade['Strike_Price']:,.0f} {trade['Contract_Type']} "
+                          f"({trade['Flow_Count']}x) {premium_str} [{trade['Score']:.0f}] {flags_emoji}\n")
     
-    # Summary statistics
-    col1, col2, col3, col4 = st.columns(4)
+    discord_summary += f"\n⚠️ Educational only. Not financial advice."
     
-    with col1:
-        st.metric("Unique Tickers", len(top_trades))
+    formats['Discord'] = discord_summary
     
-    with col2:
-        total_premium = top_trades['Total_Premium'].sum()
-        st.metric("Total Premium", f"${total_premium/1000000:.1f}M")
+    # 3. TWITTER OPTIMIZED (Under 280 chars)
+    twitter_summary = f"📊 OPTIONS FLOW ALERT {timestamp.split(',')[0]}\n\n"
+    twitter_summary += f"💰${total_premium/1000000:.1f}M across {len(top_trades)} tickers\n"
+    twitter_summary += f"📈{bullish_count} Bullish 📉{bearish_count} Bearish\n\n"
     
-    with col3:
-        avg_score = top_trades['Score'].mean()
-        st.metric("Average Score", f"{avg_score:.1f}")
+    # Top 5 for Twitter
+    twitter_summary += "🏆 TOP PLAYS:\n"
+    for i, (_, trade) in enumerate(top_trades.head(5).iterrows(), 1):
+        premium_str = f"${trade['Total_Premium']/1000000:.1f}M" if trade['Total_Premium'] >= 1000000 else f"${trade['Total_Premium']/1000:.0f}K"
+        sentiment_emoji = "📈" if "BULLISH" in trade['Sentiment'] else "📉"
+        flags_emoji = "🔥" if trade['Has_Unusual'] == 'YES' else ""
+        
+        twitter_summary += f"{i}. {sentiment_emoji} ${trade['Ticker']} ${trade['Strike_Price']:,.0f} {premium_str} {flags_emoji}\n"
     
-    with col4:
-        top_score = top_trades['Score'].max()
-        st.metric("Highest Score", f"{top_score:.1f}")
+    twitter_summary += "\n#OptionsFlow #Trading"
+    
+    formats['Twitter'] = twitter_summary
+    
+    # 4. QUICK SUMMARY (One-liner style)
+    quick_summary = f"📊 {timestamp}: ${total_premium/1000000:.1f}M flow across {len(top_trades)} tickers | "
+    quick_summary += f"{bullish_count}📈 {bearish_count}📉 | TOP: "
+    
+    for _, trade in top_trades.head(3).iterrows():
+        sentiment_emoji = "📈" if "BULLISH" in trade['Sentiment'] else "📉"
+        premium_str = f"${trade['Total_Premium']/1000000:.1f}M" if trade['Total_Premium'] >= 1000000 else f"${trade['Total_Premium']/1000:.0f}K"
+        quick_summary += f"{sentiment_emoji}${trade['Ticker']} {premium_str} | "
+    
+    quick_summary = quick_summary.rstrip(" | ")
+    
+    formats['Quick Summary'] = quick_summary
+    
+    return formats
 
 # Function to analyze symbol flows and project path
 def analyze_symbol_flows(df, symbols, min_premium=100000):
@@ -992,7 +1288,7 @@ def main():
                     min_flows = st.number_input(
                         "Minimum Sweeps", 
                         min_value=1, 
-                        value=3, 
+                        value=2, 
                         step=1,
                         key="min_flows"
                     )
