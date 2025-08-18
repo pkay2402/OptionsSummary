@@ -403,6 +403,25 @@ def display_repeat_flows(df, min_premium=30000):
         max_flows = repeat_flows['Flow_Count'].max()
         st.metric("Most Active", f"{most_active} ({max_flows} flows)")
     
+    # Enhanced sharing summary
+    with st.expander("📋 Easy Sharing Summary", expanded=True):
+        sharing_summary = generate_repeat_flows_summary(repeat_flows)
+        
+        # Create tabs for different sharing formats
+        summary_tabs = st.tabs(["Professional Summary", "Discord/Slack", "Quick List"])
+        
+        with summary_tabs[0]:
+            st.markdown("**📊 Professional Report Format**")
+            st.text_area("Professional Summary:", sharing_summary['Professional'], height=400, key="prof_repeat_summary")
+        
+        with summary_tabs[1]:
+            st.markdown("**💬 Social Media Format (Discord/Slack optimized)**")
+            st.text_area("Social Format:", sharing_summary['Social'], height=300, key="social_repeat_summary")
+        
+        with summary_tabs[2]:
+            st.markdown("**⚡ Quick List Format**")
+            st.text_area("Quick List:", sharing_summary['Quick'], height=200, key="quick_repeat_summary")
+    
     # Show raw data
     with st.expander("Raw Repeat Flows Data"):
         display_df = repeat_flows.copy()
@@ -1171,6 +1190,171 @@ def analyze_symbol_flows(df, symbols, min_premium=100000):
         
         st.divider()
 
+def generate_repeat_flows_summary(repeat_flows):
+    """Generate sharing-friendly summaries of repeat flows analysis"""
+    if repeat_flows.empty:
+        return {
+            'Professional': "No repeat flows found with the specified criteria.",
+            'Social': "No repeat flows found.",
+            'Quick': "No repeat flows."
+        }
+    
+    timestamp = pd.Timestamp.now().strftime('%B %d, %Y')
+    
+    # Calculate key metrics
+    total_contracts = len(repeat_flows)
+    total_premium = repeat_flows['Total_Premium'].sum()
+    avg_flows_per_contract = repeat_flows['Flow_Count'].mean()
+    top_ticker = repeat_flows.loc[repeat_flows['Total_Premium'].idxmax(), 'Ticker']
+    top_premium = repeat_flows['Total_Premium'].max()
+    
+    # Count sentiment distribution
+    bullish_count = 0
+    bearish_count = 0
+    mixed_count = 0
+    
+    for _, row in repeat_flows.iterrows():
+        side_codes = row['Side_Codes']
+        bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
+        bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
+        
+        if row['Contract_Type'] == 'CALL':
+            if bullish_sides > bearish_sides:
+                bullish_count += 1
+            elif bearish_sides > bullish_sides:
+                bearish_count += 1
+            else:
+                mixed_count += 1
+        else:  # PUT
+            if bullish_sides > bearish_sides:
+                bearish_count += 1  # Put buying is bearish
+            elif bearish_sides > bullish_sides:
+                bullish_count += 1  # Put selling is bullish
+            else:
+                mixed_count += 1
+    
+    # Sort by total premium for display
+    top_repeat_flows = repeat_flows.sort_values('Total_Premium', ascending=False)
+    
+    # 1. PROFESSIONAL SUMMARY
+    professional_summary = f"📊 REPEAT FLOWS ANALYSIS REPORT - {timestamp}\n"
+    professional_summary += "="*70 + "\n\n"
+    
+    professional_summary += "EXECUTIVE SUMMARY:\n"
+    professional_summary += f"• Total Repeat Contracts: {total_contracts}\n"
+    professional_summary += f"• Total Premium Volume: ${total_premium/1000000:.2f}M\n"
+    professional_summary += f"• Average Sweeps per Contract: {avg_flows_per_contract:.1f}\n"
+    professional_summary += f"• Sentiment Distribution: {bullish_count} Bullish, {bearish_count} Bearish, {mixed_count} Mixed\n"
+    professional_summary += f"• Top Activity: ${top_ticker} (${top_premium/1000000:.2f}M)\n\n"
+    
+    professional_summary += "KEY INSTITUTIONAL ACCUMULATION PATTERNS:\n"
+    professional_summary += "-" * 50 + "\n"
+    
+    # Group by ticker for professional display
+    for ticker in top_repeat_flows['Ticker'].unique()[:10]:  # Top 10 tickers
+        ticker_flows = top_repeat_flows[top_repeat_flows['Ticker'] == ticker]
+        ticker_total = ticker_flows['Total_Premium'].sum()
+        
+        professional_summary += f"\n{ticker} - ${ticker_total/1000000:.2f}M total premium ({len(ticker_flows)} contracts)\n"
+        
+        for _, row in ticker_flows.head(3).iterrows():  # Top 3 contracts per ticker
+            move_pct = abs((row['Strike_Price'] - row['Reference_Price']) / row['Reference_Price'] * 100)
+            
+            # Determine sentiment
+            side_codes = row['Side_Codes']
+            bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
+            bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
+            
+            if row['Contract_Type'] == 'CALL':
+                sentiment = "BULLISH" if bullish_sides > bearish_sides else "BEARISH" if bearish_sides > bullish_sides else "MIXED"
+            else:
+                sentiment = "BEARISH" if bullish_sides > bearish_sides else "BULLISH" if bearish_sides > bullish_sides else "MIXED"
+            
+            flags = []
+            if row['Has_Unusual'] == 'YES':
+                flags.append("UNUSUAL")
+            if row['Has_Golden'] == 'YES':
+                flags.append("GOLDEN")
+            flags_str = f" [{' '.join(flags)}]" if flags else ""
+            
+            professional_summary += (f"  • {row['Contract_Type']} ${row['Strike_Price']:,.0f} "
+                                   f"exp {row['Expiration_Date'].strftime('%Y-%m-%d')} - "
+                                   f"{row['Flow_Count']} sweeps, ${row['Total_Premium']/1000000:.2f}M, "
+                                   f"{move_pct:.1f}% move, {sentiment}{flags_str}\n")
+    
+    professional_summary += "\n" + "="*70 + "\n"
+    professional_summary += "Analysis shows repeated institutional interest in specific strike prices,\n"
+    professional_summary += "suggesting potential accumulation or hedging activity.\n"
+    professional_summary += "⚠️ For educational purposes only. Not financial advice."
+    
+    # 2. SOCIAL MEDIA SUMMARY (Discord/Slack optimized)
+    social_summary = f"🔄 **REPEAT FLOWS ALERT** - {timestamp.split(',')[0]}\n\n"
+    social_summary += f"📊 **{total_contracts}** contracts with multiple sweeps\n"
+    social_summary += f"💰 **${total_premium/1000000:.1f}M** total premium\n"
+    social_summary += f"📈 **{bullish_count}** Bullish | 📉 **{bearish_count}** Bearish | ⚪ **{mixed_count}** Mixed\n\n"
+    
+    social_summary += "**🏆 TOP ACCUMULATION PATTERNS:**\n"
+    
+    for i, (_, row) in enumerate(top_repeat_flows.head(15).iterrows(), 1):
+        # Determine sentiment emoji
+        side_codes = row['Side_Codes']
+        bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
+        bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
+        
+        if row['Contract_Type'] == 'CALL':
+            sentiment_emoji = "📈" if bullish_sides > bearish_sides else "📉" if bearish_sides > bullish_sides else "⚪"
+        else:
+            sentiment_emoji = "📉" if bullish_sides > bearish_sides else "📈" if bearish_sides > bullish_sides else "⚪"
+        
+        # Premium display
+        premium_str = f"${row['Total_Premium']/1000000:.1f}M" if row['Total_Premium'] >= 1000000 else f"${row['Total_Premium']/1000:.0f}K"
+        
+        # Flags as emojis
+        flags_emoji = ""
+        if row['Has_Unusual'] == 'YES':
+            flags_emoji += "🔥"
+        if row['Has_Golden'] == 'YES':
+            flags_emoji += "⚡"
+        
+        move_pct = abs((row['Strike_Price'] - row['Reference_Price']) / row['Reference_Price'] * 100)
+        
+        social_summary += (f"{i}. {sentiment_emoji} **${row['Ticker']}** "
+                         f"${row['Strike_Price']:,.0f} {row['Contract_Type']} "
+                         f"({row['Flow_Count']}x sweeps) → {premium_str} "
+                         f"[{move_pct:.0f}%] {flags_emoji}\n")
+    
+    social_summary += f"\n💡 Avg {avg_flows_per_contract:.1f} sweeps per contract suggests institutional accumulation\n"
+    social_summary += "⚠️ Educational only. #OptionsFlow #InstitutionalFlow"
+    
+    # 3. QUICK LIST
+    quick_summary = f"🔄 REPEAT FLOWS {timestamp.split(',')[0]}: {total_contracts} contracts, ${total_premium/1000000:.1f}M | "
+    
+    # Top 5 quick mentions
+    top_5 = top_repeat_flows.head(5)
+    quick_mentions = []
+    
+    for _, row in top_5.iterrows():
+        side_codes = row['Side_Codes']
+        bullish_sides = sum(1 for side in side_codes if side in ['A', 'AA'])
+        bearish_sides = sum(1 for side in side_codes if side in ['B', 'BB'])
+        
+        if row['Contract_Type'] == 'CALL':
+            sentiment_emoji = "📈" if bullish_sides > bearish_sides else "📉"
+        else:
+            sentiment_emoji = "📉" if bullish_sides > bearish_sides else "📈"
+        
+        premium_str = f"${row['Total_Premium']/1000000:.1f}M" if row['Total_Premium'] >= 1000000 else f"${row['Total_Premium']/1000:.0f}K"
+        
+        quick_mentions.append(f"{sentiment_emoji}${row['Ticker']}({row['Flow_Count']}x){premium_str}")
+    
+    quick_summary += " | ".join(quick_mentions)
+    
+    return {
+        'Professional': professional_summary,
+        'Social': social_summary,
+        'Quick': quick_summary
+    }
+
 # Main Streamlit app
 def main():
     st.set_page_config(page_title="Options Flow Analyzer", page_icon="📊", layout="wide")
@@ -1251,7 +1435,7 @@ def main():
                     repeat_min_premium = st.number_input(
                         "Minimum Premium ($)", 
                         min_value=0, 
-                        value=15000, 
+                        value=300000, 
                         step=5000,
                         key="repeat_premium"
                     )
