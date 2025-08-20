@@ -40,13 +40,16 @@ EARLY_CLOSE_DAYS_2025 = {
 }
 
 # Exclude index symbols and problematic symbols
-INDEX_SYMBOLS = ['SPX', 'SPXW', 'IWM', 'DIA', 'VIX', 'VIXW', 'XSP', 'RTUW']
+INDEX_SYMBOLS = ['SPX', 'SPXW', 'IWM', 'DIA', 'VIX', 'VIXW', 'XSP', 'RUTW']
 EXCLUDED_SYMBOLS = INDEX_SYMBOLS + [
     'BRKB', 'RUT', '4SPY', 'RUTW', 'DJX', 'BFB'
 ] + [s for s in [] if s.startswith('$')]
 
 # High-profile stocks for special treatment
 HIGH_PROFILE_STOCKS = ['TSLA', 'AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'SPY', 'QQQ', 'NFLX', 'AMD']
+
+# ETFs for main dashboard
+MAIN_ETFS = ['SPY', 'QQQ', 'IWM', 'DIA']
 
 # 🎯 NEW ENHANCEMENT: Sector mapping for sector flow analysis
 SECTOR_MAP = {
@@ -246,10 +249,44 @@ def detect_flow_alerts(flows_data: List[Dict]) -> List[Dict]:
         
         # Massive flow alert (>$5M)
         if details['total_premium'] > 5000000:
+            sentiment = details.get('sentiment', 'MIXED')
+            bias_strength = details.get('bias_strength', 0)
+            direction_quality = details.get('direction_quality', 'LOW')
+            call_premium = details.get('call_premium', 0)
+            put_premium = details.get('put_premium', 0)
+            
+            # Quality indicators for CBOE interpretation limitations
+            quality_emoji = "🎯" if direction_quality == "HIGH" else "⚠️" if direction_quality == "MEDIUM" else "❓"
+            
+            # Determine direction with more detail
+            if sentiment == "BULLISH":
+                direction_text = f" ({quality_emoji}📈 {bias_strength:.0f}% BULLISH)"
+            elif sentiment == "BEARISH":
+                direction_text = f" ({quality_emoji}📉 {bias_strength:.0f}% BEARISH)"
+            else:
+                # For mixed sentiment, still show directional bias if significant
+                if call_premium > 0 and put_premium > 0:
+                    ratio = call_premium / put_premium
+                    call_percentage = call_premium / (call_premium + put_premium) * 100
+                    put_percentage = put_premium / (call_premium + put_premium) * 100
+                    
+                    if call_percentage >= 60:  # 60%+ calls = lean bullish
+                        direction_text = f" (❓📈 {call_percentage:.0f}% LEAN BULLISH)"
+                    elif put_percentage >= 60:  # 60%+ puts = lean bearish
+                        direction_text = f" (❓📉 {put_percentage:.0f}% LEAN BEARISH)"
+                    elif ratio > 1.1:
+                        direction_text = f" (⚡ {ratio:.1f}:1 C/P)"
+                    elif ratio < 0.9:
+                        direction_text = f" (⚡ 1:{1/ratio:.1f} P/C)"
+                    else:
+                        direction_text = f" (⚡ MIXED)"
+                else:
+                    direction_text = " (⚡ MIXED)"
+            
             alerts.append({
                 'type': 'MASSIVE_FLOW',
                 'symbol': symbol,
-                'message': f"🚨 MASSIVE FLOW: ${details['total_premium']/1000000:.1f}M in {symbol}",
+                'message': f"🚨 MASSIVE FLOW: ${details['total_premium']/1000000:.1f}M in {symbol}{direction_text}",
                 'priority': 'HIGH',
                 'value': details['total_premium']
             })
@@ -266,10 +303,11 @@ def detect_flow_alerts(flows_data: List[Dict]) -> List[Dict]:
                     'value': ratio
                 })
             elif ratio < 0.1:
+                put_call_ratio = 1 / ratio
                 alerts.append({
                     'type': 'EXTREME_BEARISH', 
                     'symbol': symbol,
-                    'message': f"📉 EXTREME BEARISH: {symbol} - Heavy put buying",
+                    'message': f"📉 EXTREME BEARISH: {symbol} - {put_call_ratio:.1f}:1 put/call ratio",
                     'priority': 'MEDIUM',
                     'value': ratio
                 })
@@ -277,10 +315,11 @@ def detect_flow_alerts(flows_data: List[Dict]) -> List[Dict]:
         # High conviction flows (bias > 85%)
         if details['bias_strength'] > 85 and details['total_premium'] > 1000000:
             sentiment = details['sentiment']
+            premium_text = f"${details['total_premium']/1000000:.1f}M"
             alerts.append({
                 'type': 'HIGH_CONVICTION',
                 'symbol': symbol,
-                'message': f"💪 HIGH CONVICTION: {symbol} - {sentiment} ({details['bias_strength']:.0f}%)",
+                'message': f"💪 HIGH CONVICTION: {symbol} - {sentiment} ({details['bias_strength']:.0f}%) - {premium_text}",
                 'priority': 'MEDIUM',
                 'value': details['bias_strength']
             })
@@ -405,7 +444,7 @@ def check_price_catalysts(symbol: str, current_price: float) -> List[str]:
     return catalysts
 
 def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Dict:
-    """Ultra-simplified flow scoring - just rank by total premium spent."""
+    """Enhanced flow scoring with buy/sell direction inference using multiple heuristics."""
     if symbol_flows.empty or current_price is None:
         return {'score': 0, 'details': {}}
     
@@ -428,15 +467,89 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
     put_premium = puts['Premium'].sum()
     total_volume = symbol_flows['Volume'].sum()
     
-    if call_premium > put_premium * 1.3:
+    # 🎯 ENHANCED: Multi-factor direction inference due to CBOE data limitations
+    direction_signals = []
+    confidence_factors = []
+    
+    # Factor 1: Premium weighting (basic)
+    premium_ratio = call_premium / put_premium if put_premium > 0 else float('inf')
+    if premium_ratio > 1.5:
+        direction_signals.append("BULLISH")
+        confidence_factors.append(("Premium Ratio", min(premium_ratio, 5) / 5 * 30))
+    elif premium_ratio < 0.67:
+        direction_signals.append("BEARISH") 
+        confidence_factors.append(("Premium Ratio", min(1/premium_ratio, 5) / 5 * 30))
+    
+    # Factor 2: Strike price analysis (OTM vs ITM activity)
+    otm_calls = calls[calls['Strike Price'] > current_price * 1.02]  # >2% OTM
+    itm_calls = calls[calls['Strike Price'] <= current_price * 0.98]  # >2% ITM
+    otm_puts = puts[puts['Strike Price'] < current_price * 0.98]  # >2% OTM  
+    itm_puts = puts[puts['Strike Price'] >= current_price * 1.02]  # >2% ITM
+    
+    otm_call_premium = otm_calls['Premium'].sum()
+    itm_call_premium = itm_calls['Premium'].sum()
+    otm_put_premium = otm_puts['Premium'].sum()
+    itm_put_premium = itm_puts['Premium'].sum()
+    
+    # OTM calls usually bought (bullish), ITM puts usually bought (bearish)
+    speculative_bullish = otm_call_premium
+    speculative_bearish = otm_put_premium + itm_put_premium
+    
+    if speculative_bullish > speculative_bearish * 1.3:
+        direction_signals.append("BULLISH")
+        confidence_factors.append(("OTM Activity", 25))
+    elif speculative_bearish > speculative_bullish * 1.3:
+        direction_signals.append("BEARISH")
+        confidence_factors.append(("OTM Activity", 25))
+    
+    # Factor 3: Unusual volume patterns (big trades likely institutional)
+    unusual_threshold = symbol_flows['Volume'].quantile(0.8)
+    unusual_flows = symbol_flows[symbol_flows['Volume'] > unusual_threshold]
+    
+    if not unusual_flows.empty:
+        unusual_calls = unusual_flows[unusual_flows['Call/Put'] == 'C']['Premium'].sum()
+        unusual_puts = unusual_flows[unusual_flows['Call/Put'] == 'P']['Premium'].sum()
+        
+        if unusual_calls > unusual_puts * 1.2:
+            direction_signals.append("BULLISH")
+            confidence_factors.append(("Large Trades", 20))
+        elif unusual_puts > unusual_calls * 1.2:
+            direction_signals.append("BEARISH")
+            confidence_factors.append(("Large Trades", 20))
+    
+    # Factor 4: Time to expiration patterns
+    near_term = symbol_flows[symbol_flows['Days_to_Expiry'] <= 30]
+    if not near_term.empty:
+        nt_call_premium = near_term[near_term['Call/Put'] == 'C']['Premium'].sum()
+        nt_put_premium = near_term[near_term['Call/Put'] == 'P']['Premium'].sum()
+        
+        # Near-term OTM calls often speculative buying
+        nt_otm_calls = near_term[
+            (near_term['Call/Put'] == 'C') & 
+            (near_term['Strike Price'] > current_price * 1.05)
+        ]['Premium'].sum()
+        
+        if nt_otm_calls > nt_put_premium * 0.8:
+            direction_signals.append("BULLISH")
+            confidence_factors.append(("Near-term OTM", 15))
+    
+    # Aggregate signals and determine confidence
+    bullish_count = direction_signals.count("BULLISH")
+    bearish_count = direction_signals.count("BEARISH")
+    total_confidence = sum([factor[1] for factor in confidence_factors])
+    
+    if bullish_count > bearish_count:
         sentiment = "BULLISH"
-        bias_strength = call_premium / (call_premium + put_premium) * 100
-    elif put_premium > call_premium * 1.3:
-        sentiment = "BEARISH" 
-        bias_strength = put_premium / (call_premium + put_premium) * 100
+        bias_strength = min(95, 55 + total_confidence)
+        direction_quality = "HIGH" if total_confidence > 50 else "MEDIUM" if total_confidence > 25 else "LOW"
+    elif bearish_count > bullish_count:
+        sentiment = "BEARISH"
+        bias_strength = min(95, 55 + total_confidence)
+        direction_quality = "HIGH" if total_confidence > 50 else "MEDIUM" if total_confidence > 25 else "LOW"
     else:
         sentiment = "MIXED"
         bias_strength = 60
+        direction_quality = "LOW"
     
     strike_analysis = symbol_flows.groupby(['Strike Price', 'Call/Put', 'Expiration']).agg({
         'Premium': 'sum',
@@ -455,8 +568,14 @@ def calculate_flow_score(symbol_flows: pd.DataFrame, current_price: float) -> Di
         'put_premium': put_premium,
         'sentiment': sentiment,
         'bias_strength': bias_strength,
+        'direction_quality': direction_quality,  # NEW: Confidence level
+        'confidence_factors': confidence_factors,  # NEW: What drove the decision
+        'interpretation_note': "⚠️ CBOE data lacks buy/sell direction - analysis based on heuristics",  # NEW
+        'otm_call_premium': otm_call_premium,  # NEW: More granular data
+        'otm_put_premium': otm_put_premium,  # NEW
+        'speculative_bias': "BULLISH" if speculative_bullish > speculative_bearish else "BEARISH",  # NEW
         'top_strikes': top_strikes,
-        'block_trades': block_trades  # NEW
+        'block_trades': block_trades
     }
     
     return {'score': score, 'details': details}
@@ -593,7 +712,7 @@ def display_market_insights(insights: Dict, flows_data: List[Dict]):
     if not insights:
         return
         
-    st.markdown("## 📊 Live Market Flow Insights")
+    #st.markdown("## 📊 Live Market Flow Insights")
     
     # 🚨 NEW: Flow Alerts Section
     alerts = detect_flow_alerts(flows_data)
@@ -609,6 +728,9 @@ def display_market_insights(insights: Dict, flows_data: List[Dict]):
                     st.warning(alert['message'])
                 else:
                     st.info(alert['message'])
+        
+        # Add interpretation disclaimer
+        st.info("💡 **Confidence Indicators**: 🎯 = High confidence | ⚠️ = Medium confidence | ❓ = Low confidence (CBOE data lacks buy/sell direction)")
     
     st.divider()
     
@@ -1382,6 +1504,37 @@ def display_sentiment_analysis(symbol: str, technical_data: Dict, flows_data: Di
     
     st.markdown(f"### 🎯 Overall Sentiment: {overall_sentiment}")
 
+def filter_flows_by_category(all_flows: List[Dict], category: str) -> List[Dict]:
+    """Filter flows by category (main_etfs, high_profile, others)."""
+    if category == "main_etfs":
+        return [f for f in all_flows if f['Symbol'] in MAIN_ETFS]
+    elif category == "high_profile":
+        return [f for f in all_flows if f['Symbol'] in HIGH_PROFILE_STOCKS and f['Symbol'] not in MAIN_ETFS]
+    elif category == "others":
+        return [f for f in all_flows if f['Symbol'] not in HIGH_PROFILE_STOCKS]
+    else:
+        return all_flows
+
+def display_flows_tab(flows_data: List[Dict], daily_changes: Dict, tab_title: str, show_insights: bool = True):
+    """Display flows for a specific tab with optional insights."""
+    if not flows_data:
+        st.info(f"No significant flows detected for {tab_title}")
+        return
+    
+    if show_insights:
+        insights = get_market_insights(flows_data)
+        display_market_insights(insights, flows_data)
+    
+    # Main flows table
+    st.header(f"🎯 {tab_title} Options Flows")
+    
+    display_flow_table_header()
+    
+    # Show flows (limit based on category)
+    max_flows = 10 if tab_title.startswith("📊") else 20
+    for i, stock_data in enumerate(flows_data[:max_flows], 1):
+        display_flow_row(stock_data, i, daily_changes)
+
 def main():
     st.set_page_config(
         page_title="Enhanced Options Flow",
@@ -1429,115 +1582,125 @@ def main():
     st.title("🚀 Enhanced Options Flow Scanner")
     st.markdown("*Real-time flow analysis with alerts, sector insights, and catalyst detection*")
     
-    # Create tabs for the main interface
-    tab1, tab2 = st.tabs(["🚀 Live Options Flow", "🔍 Individual Analysis"])
+    # Market status row
+    market_open = is_market_open()
+    market_status = "🟢 MARKET OPEN" if market_open else "🔴 MARKET CLOSED"
+    et_now = datetime.now(US_EASTERN)
     
-    with tab1:
-        # Market status
-        market_open = is_market_open()
-        market_status = "🟢 MARKET OPEN" if market_open else "🔴 MARKET CLOSED"
-        et_now = datetime.now(US_EASTERN)
-        
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            st.metric("Status", market_status)
-        with col2:
-            st.metric("Time (ET)", et_now.strftime('%H:%M:%S'))
-        with col3:
-            if st.button("🔄 Refresh Data", type="primary"):
-                st.cache_data.clear()
-                st.rerun()
-        
-        # Auto-refresh logic
-        if 'last_refresh' not in st.session_state:
-            st.session_state.last_refresh = time.time()
-        
-        current_time = time.time()
-        if current_time - st.session_state.last_refresh > 600:
-            st.session_state.last_refresh = current_time
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        st.metric("Status", market_status)
+    with col2:
+        st.metric("Time (ET)", et_now.strftime('%H:%M:%S'))
+    with col3:
+        if st.button("🔄 Refresh Data", type="primary"):
             st.cache_data.clear()
             st.rerun()
-        
-        # Load and analyze data
-        with st.spinner("🔍 Analyzing market flows..."):
-            try:
-                df = fetch_all_options_data()
-                
-                if df.empty:
-                    st.error("No options data available")
-                    return
-                    
-                results = analyze_options_flows(df)
-                all_flows = results['all_flows']
-                
-                if not all_flows:
-                    st.warning("No significant flows detected")
-                    return
-                
-                insights = get_market_insights(all_flows)
-                
-                # Calculate daily changes
-                daily_changes = {}
-                with st.spinner("📊 Calculating market metrics..."):
-                    with ThreadPoolExecutor(max_workers=10) as executor:
-                        future_to_symbol = {
-                            executor.submit(calculate_daily_change, stock['Symbol'], stock['Current_Price']): stock['Symbol'] 
-                            for stock in all_flows
-                        }
-                        for future in future_to_symbol:
-                            symbol = future_to_symbol[future]
-                            try:
-                                change = future.result(timeout=3)
-                                daily_changes[symbol] = change
-                            except:
-                                daily_changes[symbol] = 0.0
-                
-            except Exception as e:
-                st.error(f"Error loading data: {e}")
-                logger.error(f"Data loading error: {e}")
-                return
-        
-        # Display insights with alerts and sectors
-        display_market_insights(insights, all_flows)
-        
-        # Main flows table
-        st.header("🎯 Top Options Flows")
-        st.markdown("*Enhanced with price catalysts, block trade detection, and sector analysis*")
-        
-        display_flow_table_header()
-        
-        # Show top 20 flows
-        for i, stock_data in enumerate(all_flows[:20], 1):
-            display_flow_row(stock_data, i, daily_changes)
-        
-        # Additional insights sidebar
-        with st.sidebar:
-            st.markdown("## 📈 Quick Stats")
+    
+    # Auto-refresh logic
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    current_time = time.time()
+    if current_time - st.session_state.last_refresh > 600:
+        st.session_state.last_refresh = current_time
+        st.cache_data.clear()
+        st.rerun()
+    
+    # Load and analyze data once
+    with st.spinner("🔍 Analyzing market flows..."):
+        try:
+            df = fetch_all_options_data()
             
-            if all_flows:
-                total_symbols = len(all_flows)
-                avg_score = sum(f['Flow_Score'] for f in all_flows) / total_symbols
-                high_conviction = len([f for f in all_flows if f['Details']['bias_strength'] > 80])
+            if df.empty:
+                st.error("No options data available")
+                return
                 
-                st.metric("Total Symbols", total_symbols)
-                st.metric("Avg Flow Score", f"{avg_score:.1f}")
-                st.metric("High Conviction", f"{high_conviction}")
-                
-                # Top sectors
-                sectors = analyze_sector_flows(all_flows)
-                if sectors:
-                    st.markdown("### 🏭 Top Sectors")
-                    sorted_sectors = sorted(sectors.items(), key=lambda x: x[1]['total_premium'], reverse=True)
-                    for sector, data in sorted_sectors[:5]:
-                        st.markdown(f"**{sector}**: ${data['total_premium']/1000000:.1f}M")
-        
-        # Footer
-        st.markdown("---")
-        st.caption(f"🕒 Last updated: {et_now.strftime('%Y-%m-%d %H:%M:%S ET')} | Auto-refresh: 10 min")
-        st.caption("📊 Data: CBOE | Enhanced with alerts, sectors, and catalysts")
+            results = analyze_options_flows(df)
+            all_flows = results['all_flows']
+            
+            if not all_flows:
+                st.warning("No significant flows detected")
+                return
+            
+            # Calculate daily changes
+            daily_changes = {}
+            with st.spinner("📊 Calculating market metrics..."):
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    future_to_symbol = {
+                        executor.submit(calculate_daily_change, stock['Symbol'], stock['Current_Price']): stock['Symbol'] 
+                        for stock in all_flows
+                    }
+                    for future in future_to_symbol:
+                        symbol = future_to_symbol[future]
+                        try:
+                            change = future.result(timeout=3)
+                            daily_changes[symbol] = change
+                        except:
+                            daily_changes[symbol] = 0.0
+            
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
+            logger.error(f"Data loading error: {e}")
+            return
+    
+    # Create the new three-tab structure
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Main ETFs (SPY,QQQ,IWM,DIA)", 
+        "⭐ High Profile Stocks", 
+        "🔍 All Other Stocks",
+        "🔎 Individual Analysis"
+    ])
+    
+    with tab1:
+        main_etf_flows = filter_flows_by_category(all_flows, "main_etfs")
+        display_flows_tab(main_etf_flows, daily_changes, "📊 Main ETFs", show_insights=True)
     
     with tab2:
+        high_profile_flows = filter_flows_by_category(all_flows, "high_profile")
+        display_flows_tab(high_profile_flows, daily_changes, "⭐ High Profile Stocks", show_insights=True)
+    
+    with tab3:
+        other_flows = filter_flows_by_category(all_flows, "others")
+        display_flows_tab(other_flows, daily_changes, "🔍 Other Stocks", show_insights=True)
+    
+    with tab4:
         display_individual_symbol_analysis()
+    
+    # Footer with enhanced data limitations disclaimer
+    st.markdown("---")
+    
+    # Data limitations disclaimer
+    with st.expander("⚠️ Important: Data Interpretation Limitations", expanded=False):
+        st.markdown("""
+        **CBOE Data Limitations & Our Analysis Methods:**
+        
+        📊 **What CBOE Provides:**
+        - Volume and premium data for options contracts
+        - Strike prices, expirations, and open interest
+        - Call vs Put identification
+        
+        ❌ **What's Missing (Critical!):**
+        - **Buy vs Sell direction** - We don't know if options were bought or sold
+        - **Market maker vs retail** - Can't distinguish order flow type
+        - **Opening vs closing positions** - Unknown if creating or closing trades
+        
+        🎯 **Our Interpretation Methods:**
+        - **OTM Call Activity**: Likely speculative buying (bullish)
+        - **Large Premium Flows**: May indicate institutional activity
+        - **Strike Clustering**: Suggests directional expectations
+        - **Time to Expiry**: Near-term OTM often speculative
+        
+        📈 **Confidence Levels:**
+        - 🎯 **High**: Multiple signals align (50+ confidence points)
+        - ⚠️ **Medium**: Some signals present (25-50 points)  
+        - ❓ **Low**: Unclear signals or conflicting data
+        
+        ⚠️ **Use Caution**: All directional interpretations are probabilistic estimates based on market patterns, not definitive buy/sell data.
+        """)
+    
+    st.caption(f"🕒 Last updated: {et_now.strftime('%Y-%m-%d %H:%M:%S ET')} | Auto-refresh: 10 min")
+    st.caption("📊 Data: CBOE | Enhanced analysis with multi-factor direction inference")
 
 if __name__ == "__main__":
     main()
