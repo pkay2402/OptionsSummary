@@ -300,11 +300,15 @@ def display_repeat_flows(df, min_premium=30000):
         return
     
     # Create a composite key for similar contracts
+    # Ensure Strike Price is numeric and Expiration Date is datetime
+    filtered_df['Strike_Price_Clean'] = pd.to_numeric(filtered_df['Strike Price'], errors='coerce').fillna(0)
+    filtered_df['Expiration_Date_Clean'] = pd.to_datetime(filtered_df['Expiration Date'], errors='coerce')
+    
     filtered_df['Contract_Key'] = (
         filtered_df['Ticker'] + '_' + 
         filtered_df['Contract Type'] + '_' + 
-        filtered_df['Strike Price'].astype(str) + '_' + 
-        filtered_df['Expiration Date'].dt.strftime('%Y-%m-%d')
+        filtered_df['Strike_Price_Clean'].astype(str) + '_' + 
+        filtered_df['Expiration_Date_Clean'].dt.strftime('%Y-%m-%d')
     )
     
     # Group by ticker and contract key to find repeats
@@ -312,8 +316,8 @@ def display_repeat_flows(df, min_premium=30000):
         'Premium Price': ['count', 'sum', 'mean'],
         'Size': 'sum',
         'Contract Type': 'first',
-        'Strike Price': 'first',
-        'Expiration Date': 'first',
+        'Strike_Price_Clean': 'first',  # Use cleaned version
+        'Expiration_Date_Clean': 'first',  # Use cleaned version
         'Reference Price': 'first',
         'Side Code': lambda x: list(x),
         'Is Unusual': lambda x: 'YES' if 'YES' in x.values else 'NO',
@@ -375,8 +379,9 @@ def display_repeat_flows(df, min_premium=30000):
                 flags_str = f" [{' '.join(flags)}]" if flags else ""
                 
                 # Display the flow information
+                exp_date_str = row['Expiration_Date'].strftime('%Y-%m-%d') if hasattr(row['Expiration_Date'], 'strftime') else str(row['Expiration_Date'])
                 st.markdown(f"""
-                **{row['Contract_Type']} ${row['Strike_Price']:,.2f}** exp {row['Expiration_Date'].strftime('%Y-%m-%d')}
+                **{row['Contract_Type']} ${row['Strike_Price']:,.2f}** exp {exp_date_str}
                 - **{row['Flow_Count']} flows** totaling **${row['Total_Premium']:,.0f}** 
                 - Avg Premium: ${row['Avg_Premium']:,.0f} | Total Contracts: {row['Total_Contracts']:,}
                 - Move Required: {move_pct:.1f}% | Sentiment: {sentiment}
@@ -427,6 +432,516 @@ def display_repeat_flows(df, min_premium=30000):
         display_df = repeat_flows.copy()
         display_df['Side_Codes'] = display_df['Side_Codes'].apply(lambda x: ', '.join(map(str, x)))
         st.dataframe(display_df, use_container_width=True)
+
+def detect_options_strategy(flows_df):
+    """
+    Detect and articulate common options strategies from simultaneous flows
+    """
+    if len(flows_df) < 2:
+        return None
+    
+    # Group flows by expiration and contract type
+    flows_list = []
+    for _, flow in flows_df.iterrows():
+        flows_list.append({
+            'type': flow['Contract Type'],
+            'strike': flow['Strike Price'],
+            'side': flow['Side Code'],
+            'premium': flow['Premium Price'],
+            'exp_date': flow['Expiration Date']
+        })
+    
+    # Sort flows by strike price for easier analysis
+    flows_list.sort(key=lambda x: x['strike'])
+    
+    # Check for common strategies
+    if len(flows_list) == 2:
+        flow1, flow2 = flows_list[0], flows_list[1]
+        
+        # Same expiration date required for most strategies
+        if flow1['exp_date'] == flow2['exp_date']:
+            
+            # Call Debit Spread (Bull Call Spread): Buy lower call + Sell higher call
+            if (flow1['type'] == 'CALL' and flow2['type'] == 'CALL' and
+                flow1['side'] in ['A', 'AA'] and flow2['side'] in ['B', 'BB'] and
+                flow1['strike'] < flow2['strike']):
+                net_cost = flow1['premium'] - flow2['premium']
+                return f"🟢 **BULLISH CALL DEBIT SPREAD** - Buy ${flow1['strike']:.0f}C, Sell ${flow2['strike']:.0f}C (Net Cost: ${net_cost/1000:.0f}K)"
+            
+            # Call Credit Spread (Bear Call Spread): Sell lower call + Buy higher call  
+            elif (flow1['type'] == 'CALL' and flow2['type'] == 'CALL' and
+                  flow1['side'] in ['B', 'BB'] and flow2['side'] in ['A', 'AA'] and
+                  flow1['strike'] < flow2['strike']):
+                net_credit = flow1['premium'] - flow2['premium']
+                return f"🔴 **BEARISH CALL CREDIT SPREAD** - Sell ${flow1['strike']:.0f}C, Buy ${flow2['strike']:.0f}C (Net Credit: ${net_credit/1000:.0f}K)"
+            
+            # Put Debit Spread (Bear Put Spread): Buy higher put + Sell lower put
+            elif (flow1['type'] == 'PUT' and flow2['type'] == 'PUT' and
+                  flow1['side'] in ['B', 'BB'] and flow2['side'] in ['A', 'AA'] and
+                  flow1['strike'] < flow2['strike']):
+                net_cost = flow2['premium'] - flow1['premium']
+                return f"🔴 **BEARISH PUT DEBIT SPREAD** - Buy ${flow2['strike']:.0f}P, Sell ${flow1['strike']:.0f}P (Net Cost: ${net_cost/1000:.0f}K)"
+            
+            # Put Credit Spread (Bull Put Spread): Sell higher put + Buy lower put
+            elif (flow1['type'] == 'PUT' and flow2['type'] == 'PUT' and
+                  flow1['side'] in ['A', 'AA'] and flow2['side'] in ['B', 'BB'] and
+                  flow1['strike'] < flow2['strike']):
+                net_credit = flow2['premium'] - flow1['premium']
+                return f"🟢 **BULLISH PUT CREDIT SPREAD** - Sell ${flow2['strike']:.0f}P, Buy ${flow1['strike']:.0f}P (Net Credit: ${net_credit/1000:.0f}K)"
+            
+            # Straddle: Same strike, same exp, both call and put
+            elif (flow1['strike'] == flow2['strike'] and
+                  ((flow1['type'] == 'CALL' and flow2['type'] == 'PUT') or
+                   (flow1['type'] == 'PUT' and flow2['type'] == 'CALL'))):
+                if flow1['side'] in ['A', 'AA'] and flow2['side'] in ['A', 'AA']:
+                    total_cost = flow1['premium'] + flow2['premium']
+                    return f"⚡ **LONG STRADDLE** - Buy ${flow1['strike']:.0f} Call & Put (Total Cost: ${total_cost/1000:.0f}K, expects big move)"
+                elif flow1['side'] in ['B', 'BB'] and flow2['side'] in ['B', 'BB']:
+                    total_credit = flow1['premium'] + flow2['premium']
+                    return f"💤 **SHORT STRADDLE** - Sell ${flow1['strike']:.0f} Call & Put (Total Credit: ${total_credit/1000:.0f}K, expects small move)"
+            
+            # Strangle: Different strikes, same exp, call and put
+            elif (flow1['strike'] != flow2['strike'] and
+                  ((flow1['type'] == 'CALL' and flow2['type'] == 'PUT') or
+                   (flow1['type'] == 'PUT' and flow2['type'] == 'CALL'))):
+                if flow1['side'] in ['A', 'AA'] and flow2['side'] in ['A', 'AA']:
+                    total_cost = flow1['premium'] + flow2['premium']
+                    return f"⚡ **LONG STRANGLE** - Buy calls & puts at different strikes (Total Cost: ${total_cost/1000:.0f}K, expects big move)"
+                elif flow1['side'] in ['B', 'BB'] and flow2['side'] in ['B', 'BB']:
+                    total_credit = flow1['premium'] + flow2['premium']
+                    return f"💤 **SHORT STRANGLE** - Sell calls & puts at different strikes (Total Credit: ${total_credit/1000:.0f}K, expects small move)"
+    
+    # Multi-leg strategies for 3+ flows
+    elif len(flows_list) >= 3:
+        # Check for Iron Condor or other complex strategies
+        call_flows = [f for f in flows_list if f['type'] == 'CALL']
+        put_flows = [f for f in flows_list if f['type'] == 'PUT']
+        
+        if len(call_flows) == 2 and len(put_flows) == 2:
+            return "🦅 **IRON CONDOR or COMPLEX STRATEGY** - Multiple strikes and types (4-leg strategy)"
+        elif len(call_flows) >= 2:
+            return "📈 **COMPLEX CALL STRATEGY** - Multiple call strikes (multi-leg)"
+        elif len(put_flows) >= 2:
+            return "📉 **COMPLEX PUT STRATEGY** - Multiple put strikes (multi-leg)"
+    
+    # Default for unrecognized patterns
+    call_count = sum(1 for f in flows_list if f['type'] == 'CALL')
+    put_count = sum(1 for f in flows_list if f['type'] == 'PUT')
+    buy_count = sum(1 for f in flows_list if f['side'] in ['A', 'AA'])
+    sell_count = sum(1 for f in flows_list if f['side'] in ['B', 'BB'])
+    
+    if call_count > put_count:
+        return f"📞 **CALL-FOCUSED STRATEGY** - {call_count} calls, {put_count} puts ({buy_count} buys, {sell_count} sells)"
+    elif put_count > call_count:
+        return f"📱 **PUT-FOCUSED STRATEGY** - {put_count} puts, {call_count} calls ({buy_count} buys, {sell_count} sells)"
+    else:
+        return f"⚖️ **BALANCED STRATEGY** - Equal calls/puts ({buy_count} buys, {sell_count} sells)"
+
+# Function to identify high-premium, high-quantity flows with multiple occurrences
+def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grouping="1 Second", summary_top_n=30):
+    """
+    Identify flows where premium > threshold and quantity > threshold
+    and multiple flows came for the same stocks at the same time
+    """
+    if df is None or df.empty:
+        st.warning("No data available.")
+        return
+    
+    today = pd.to_datetime("today").normalize()
+    
+    # Filter for high premium and high quantity flows
+    high_volume_df = df[
+        (df['Premium Price'] >= min_premium) &
+        (df['Size'] >= min_quantity) &
+        (df['Expiration Date'] > today)
+    ].copy()
+    
+    if high_volume_df.empty:
+        st.warning(f"No flows found with premium >= ${min_premium:,} and quantity >= {min_quantity}")
+        return
+    
+    # Add time grouping using Trade Time field to find flows at exact same time
+    # Check if Trade Time column exists, otherwise fall back to date grouping
+    if 'Trade Time' in high_volume_df.columns:
+        time_column = 'Trade Time'
+        # Parse the trade time and round based on selected time grouping
+        high_volume_df['Trade_Time_Clean'] = pd.to_datetime(high_volume_df[time_column], errors='coerce')
+        
+        # Map time grouping to pandas frequency
+        time_freq_map = {
+            "1 Second": "S",
+            "5 Seconds": "5S", 
+            "10 Seconds": "10S",
+            "30 Seconds": "30S",
+            "1 Minute": "T"
+        }
+        freq = time_freq_map.get(time_grouping, "S")
+        
+        # Round to selected time window to group flows that happened within the same window
+        high_volume_df['Trade_Time_Rounded'] = high_volume_df['Trade_Time_Clean'].dt.round(freq)
+        grouping_column = 'Trade_Time_Rounded'
+    else:
+        time_column = 'Date'  
+        high_volume_df['Trade_Time_Clean'] = pd.to_datetime(high_volume_df.get('Date', today.date() if hasattr(today, 'date') else today))
+        high_volume_df['Trade_Time_Rounded'] = high_volume_df['Trade_Time_Clean']
+        grouping_column = 'Trade_Time_Rounded'
+    
+    # Group by ticker and rounded trade time to find stocks with multiple simultaneous flows
+    ticker_time_groups = high_volume_df.groupby(['Ticker', grouping_column]).agg({
+        'Premium Price': ['count', 'sum', 'mean'],
+        'Size': ['count', 'sum', 'mean'],
+        'Contract Type': lambda x: list(x),
+        'Strike Price': lambda x: list(x),
+        'Expiration Date': lambda x: list(x),
+        'Reference Price': 'first',
+        'Side Code': lambda x: list(x),
+        'Is Unusual': lambda x: 'YES' if 'YES' in x.values else 'NO',
+        'Is Golden Sweep': lambda x: 'YES' if 'YES' in x.values else 'NO'
+    }).reset_index()
+    
+    # Flatten column names
+    ticker_time_groups.columns = [
+        'Ticker', 'Trade_Time', 'Flow_Count', 'Total_Premium', 'Avg_Premium',
+        'Contract_Count', 'Total_Quantity', 'Avg_Quantity', 'Contract_Types',
+        'Strike_Prices', 'Expiration_Dates', 'Reference_Price', 'Side_Codes',
+        'Has_Unusual', 'Has_Golden'
+    ]
+    
+    # Filter for tickers with multiple high-volume flows at same time (2 or more)
+    multiple_flows = ticker_time_groups[ticker_time_groups['Flow_Count'] >= 2].copy()
+    
+    if multiple_flows.empty:
+        st.warning("No stocks found with multiple high-volume flows at the same trade time meeting the criteria.")
+        return
+    
+    # Sort by total premium
+    multiple_flows = multiple_flows.sort_values('Total_Premium', ascending=False)
+    
+    st.subheader(f"🚨 High-Volume Flow Clusters (Within {time_grouping})")
+    st.markdown(f"**Criteria:** Premium ≥ ${min_premium:,} AND Quantity ≥ {min_quantity:,} contracts")
+    st.markdown(f"**Grouping:** Multiple flows for same stock within {time_grouping.lower()} time windows")
+    st.markdown(f"**Found:** {len(multiple_flows)} time-clustered flow groups")
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Stocks with Clusters", len(multiple_flows))
+    
+    with col2:
+        total_premium = multiple_flows['Total_Premium'].sum()
+        st.metric("Total Premium", f"${total_premium/1000000:.1f}M")
+    
+    with col3:
+        total_contracts = multiple_flows['Total_Quantity'].sum()
+        st.metric("Total Contracts", f"{total_contracts:,}")
+    
+    with col4:
+        avg_flows_per_stock = multiple_flows['Flow_Count'].mean()
+        st.metric("Avg Flows per Stock", f"{avg_flows_per_stock:.1f}")
+    
+    # Create tabular display data
+    table_data = []
+    
+    for _, row in multiple_flows.iterrows():
+        # Determine overall sentiment based on premium flows
+        contract_types = row['Contract_Types']
+        side_codes = row['Side_Codes']
+        
+        # We need to get back to individual premium data for accurate sentiment
+        # Get individual flows for this ticker and time group
+        ticker_flows = high_volume_df[
+            (high_volume_df['Ticker'] == row['Ticker']) & 
+            (high_volume_df['Trade_Time_Rounded'] == row['Trade_Time'])
+        ]
+        
+        # Calculate bullish vs bearish premium
+        bullish_premium = 0
+        bearish_premium = 0
+        
+        for _, flow in ticker_flows.iterrows():
+            premium = flow['Premium Price']
+            contract_type = flow['Contract Type']
+            side_code = flow['Side Code']
+            
+            # Bullish flows: Call buying (A/AA) or Put selling (B/BB)
+            if (contract_type == 'CALL' and side_code in ['A', 'AA']) or \
+               (contract_type == 'PUT' and side_code in ['B', 'BB']):
+                bullish_premium += premium
+            # Bearish flows: Call selling (B/BB) or Put buying (A/AA)  
+            elif (contract_type == 'CALL' and side_code in ['B', 'BB']) or \
+                 (contract_type == 'PUT' and side_code in ['A', 'AA']):
+                bearish_premium += premium
+        
+        # Determine sentiment based on premium weight
+        total_premium = bullish_premium + bearish_premium
+        if total_premium > 0:
+            bullish_pct = (bullish_premium / total_premium) * 100
+            bearish_pct = (bearish_premium / total_premium) * 100
+            
+            if bullish_pct > 65:
+                overall_sentiment = "� BULLISH"
+            elif bearish_pct > 65:
+                overall_sentiment = "🔴 BEARISH"
+            else:
+                overall_sentiment = "⚪ MIXED"
+        else:
+            overall_sentiment = "⚪ UNKNOWN"
+        
+        # Flags
+        flags = []
+        if row['Has_Unusual'] == 'YES':
+            flags.append("🔥")
+        if row['Has_Golden'] == 'YES':
+            flags.append("⚡")
+        flags_str = " ".join(flags) if flags else ""
+        
+        # Calculate average move required
+        strike_prices = row['Strike_Prices']
+        ref_price = row['Reference_Price']
+        
+        moves_required = []
+        for strike in strike_prices:
+            if ref_price and ref_price > 0:
+                move_pct = abs((strike - ref_price) / ref_price) * 100
+                moves_required.append(move_pct)
+        
+        avg_move_required = sum(moves_required) / len(moves_required) if moves_required else 0
+        
+        # Format trade time
+        trade_time_str = row['Trade_Time'].strftime('%H:%M:%S') if pd.notna(row['Trade_Time']) else 'Unknown'
+        
+        # Create contract breakdown summary with individual premiums
+        contract_summary = []
+        ticker_flows = high_volume_df[
+            (high_volume_df['Ticker'] == row['Ticker']) & 
+            (high_volume_df['Trade_Time_Rounded'] == row['Trade_Time'])
+        ]
+        
+        for _, flow in ticker_flows.iterrows():
+            ct = flow['Contract Type']
+            strike = flow['Strike Price']
+            side = flow['Side Code']
+            premium = flow['Premium Price']
+            exp_date = flow['Expiration Date']
+            
+            # Format expiration date
+            if pd.notna(exp_date):
+                exp_str = pd.to_datetime(exp_date).strftime('%m/%d')
+            else:
+                exp_str = 'N/A'
+            
+            sentiment_icon = "🟢" if ((ct == 'CALL' and side in ['A', 'AA']) or (ct == 'PUT' and side in ['B', 'BB'])) else "🔴"
+            # More readable format with spaces and clear separators
+            contract_summary.append(f"{sentiment_icon} {ct} ${strike:.0f} ({side}) {exp_str} ${premium/1000:.0f}K")
+        
+        contract_breakdown = " • ".join(contract_summary)
+        
+        # Detect and articulate options strategies
+        strategy_description = detect_options_strategy(ticker_flows)
+        if strategy_description:
+            contract_breakdown = f"{contract_breakdown}\n📊 **Strategy:** {strategy_description}"
+        
+        # Add premium breakdown for better analysis
+        premium_breakdown = f"🟢${bullish_premium/1000:.0f}K vs 🔴${bearish_premium/1000:.0f}K"
+        
+        # Add to table data
+        table_data.append({
+            'Ticker': row['Ticker'],
+            'Trade Time': trade_time_str,
+            'Flows': row['Flow_Count'],
+            'Total Premium': f"${row['Total_Premium']:,.0f}",
+            'Premium (M)': f"${row['Total_Premium']/1000000:.1f}M",
+            'Total Contracts': f"{row['Total_Quantity']:,}",
+            'Avg Premium/Flow': f"${row['Avg_Premium']:,.0f}",
+            'Move Required': f"{avg_move_required:.1f}%",
+            'Sentiment': overall_sentiment,
+            'Premium Breakdown': premium_breakdown,
+            'Flags': flags_str,
+            'Contract Breakdown': contract_breakdown,
+            'Reference Price': f"${ref_price:.2f}" if ref_price else "N/A"
+        })
+    
+    # Convert to DataFrame and display
+    results_df = pd.DataFrame(table_data)
+    
+    # Display main summary table
+    st.markdown("### 📊 High-Volume Flow Clusters Summary Table")
+    
+    # Create display table with key columns
+    display_cols = ['Ticker', 'Trade Time', 'Flows', 'Premium (M)', 'Total Contracts', 
+                   'Move Required', 'Sentiment', 'Premium Breakdown', 'Flags']
+    
+    # Style the dataframe
+    styled_df = results_df[display_cols].copy()
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    
+    # Detailed breakdown table
+    with st.expander("� Detailed Contract Breakdown", expanded=False):
+        detailed_cols = ['Ticker', 'Trade Time', 'Total Premium', 'Reference Price', 'Contract Breakdown']
+        st.dataframe(results_df[detailed_cols], use_container_width=True, hide_index=True)
+    
+    # Create sharing summary
+    with st.expander("📋 High-Volume Flow Summary for Sharing", expanded=True):
+        sharing_summary = generate_high_volume_summary(results_df, min_premium, min_quantity, summary_top_n)
+        
+        summary_tabs = st.tabs(["🏢 Professional", "💬 Discord", "🐦 Twitter", "📊 Table"])
+        
+        with summary_tabs[0]:
+            st.markdown("**📊 Professional Analysis Format**")
+            st.text_area("Professional Summary:", sharing_summary['Professional'], height=400, key="prof_hv_summary")
+        
+        with summary_tabs[1]:
+            st.markdown("**🚨 Discord Alert Format** (Ready to copy-paste)")
+            st.text_area("Discord Alert:", sharing_summary['Discord'], height=350, key="discord_hv_summary")
+        
+        with summary_tabs[2]:
+            st.markdown("**🐦 Twitter Alert Format** (Character optimized)")
+            tweet_text = sharing_summary['Twitter']
+            char_count = len(tweet_text)
+            st.text_area(f"Twitter Alert ({char_count}/280 chars):", tweet_text, height=200, key="twitter_hv_summary")
+            if char_count > 280:
+                st.warning(f"⚠️ Tweet is {char_count - 280} characters too long!")
+        
+        with summary_tabs[3]:
+            st.markdown("**📊 Clean Table Format** (Easy copy-paste for Discord/Slack)")
+            st.text_area("Table Format:", sharing_summary['Table'], height=300, key="table_hv_summary")
+    
+    # Raw data
+    with st.expander("Raw High-Volume Flow Data"):
+        display_df = multiple_flows.copy()
+        # Convert list columns to strings for display
+        for col in ['Contract_Types', 'Strike_Prices', 'Side_Codes']:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else str(x))
+        
+        st.dataframe(display_df, use_container_width=True)
+
+def generate_high_volume_summary(results_df, min_premium, min_quantity, top_n=30):
+    """Generate different formats of high-volume flow summary with strategy detection"""
+    
+    if results_df.empty:
+        return {'Professional': 'No data found', 'Discord': 'No data found', 'Twitter': 'No data found'}
+    
+    total_stocks = len(results_df)
+    total_premium = pd.to_numeric(results_df['Total Premium'], errors='coerce').fillna(0).sum()
+    total_contracts = pd.to_numeric(results_df['Total Contracts'], errors='coerce').fillna(0).sum()
+    
+    # Get configurable number of top stocks by premium
+    top_stocks = results_df.head(top_n)
+    
+    # Professional format - Clean and detailed
+    professional = f"""📊 HIGH-VOLUME OPTIONS FLOW ANALYSIS
+⏰ {pd.Timestamp.now().strftime('%m/%d/%Y %I:%M %p EST')}
+📋 Criteria: Premium ≥ ${min_premium/1000:.0f}K | Quantity ≥ {min_quantity:,}
+
+🎯 MARKET OVERVIEW:
+• Stocks with Flow Clusters: {total_stocks}
+• Total Premium Involved: ${total_premium/1000000:.1f}M
+• Total Contracts: {int(total_contracts) if not pd.isna(total_contracts) else 0:,}
+
+🏆 TOP FLOW CLUSTERS (Top {min(top_n, len(results_df))} of {total_stocks}):"""
+    
+    for i, (_, stock) in enumerate(top_stocks.iterrows(), 1):
+        # Build the contract breakdown in your preferred format
+        contract_breakdown = str(stock.get('Contract Breakdown', ''))
+        strategy = str(stock.get('Strategy', ''))
+        
+        professional += f"""
+
+{stock['Ticker']} - {contract_breakdown}"""
+        
+        if strategy and strategy != 'Multi-flow pattern':
+            professional += f"""
+📊 **Strategy:** {strategy}"""
+        
+        professional += "\n"
+    
+    professional += f"""
+
+💡 MARKET IMPLICATIONS:
+This coordinated high-volume activity suggests institutional positioning
+and significant price movement expectations. Monitor these names for
+potential breakouts or major announcements."""
+    
+    # Discord format - Formatted for easy reading
+    discord = f"""🚨 **HIGH-VOLUME FLOW ALERT** 🚨
+
+📊 **SCAN RESULTS** ({pd.Timestamp.now().strftime('%I:%M %p')})
+🔍 Min Premium: **${min_premium/1000:.0f}K** | Min Quantity: **{min_quantity:,}**
+
+🎯 **FOUND:** {total_stocks} stocks • **${total_premium/1000000:.1f}M** total premium
+
+**🔥 TOP FLOWS:**"""
+    
+    for i, (_, stock) in enumerate(top_stocks.iterrows(), 1):
+        sentiment_emoji = "🟢" if "Bullish" in str(stock['Sentiment']) else "🔴" if "Bearish" in str(stock['Sentiment']) else "🟡"
+        discord += f"""
+**{i}. ${stock['Ticker']}** {sentiment_emoji} `{stock['Trade Time']}`
+   💰 **$0.0M** • {stock['Flows']} flows • 0 contracts
+   � Move needed: **{stock['Move Required']}**"""
+        
+        # Add strategy if detected
+        if 'Strategy' in stock and stock['Strategy'] and stock['Strategy'] != 'Multi-flow pattern':
+            discord += f"""
+   🧠 **{stock['Strategy']}**"""
+    
+    discord += f"""
+
+🎯 **Watch these names for big moves!** 
+*Institutional money is positioning...*"""
+    
+    # Twitter format - Concise with key info
+    twitter_lines = [
+        f"🚨 HIGH-VOLUME FLOW SCAN",
+        f"⏰ {pd.Timestamp.now().strftime('%I:%M %p')}",
+        "",
+        f"🎯 {total_stocks} stocks • ${total_premium/1000000:.1f}M premium",
+        f"📊 Min: ${min_premium/1000:.0f}K premium • {min_quantity:,} contracts",
+        ""
+    ]
+    
+    # Add top 2 flows for Twitter
+    for i, (_, stock) in enumerate(top_stocks.head(2).iterrows(), 1):
+        sentiment_emoji = "🟢" if "Bullish" in str(stock['Sentiment']) else "�" if "Bearish" in str(stock['Sentiment']) else "⚡"
+        twitter_lines.append(f"{i}. ${stock['Ticker']} {sentiment_emoji} $0.0M")
+    
+    twitter_lines.extend([
+        "",
+        "#OptionsFlow #BigMoney #InstitutionalFlow"
+    ])
+    
+    twitter = "\n".join(twitter_lines)
+    
+    # Table format for easy copy-paste
+    table_format = f"""HIGH-VOLUME FLOW TABLE - {pd.Timestamp.now().strftime('%m/%d %I:%M %p')}
+Criteria: Premium ≥ ${min_premium/1000:.0f}K | Quantity ≥ {min_quantity:,}
+
+"""
+    
+    # Create clean table
+    table_format += "TICKER | TIME     | PREMIUM | FLOWS | CONTRACTS | MOVE REQ | SENTIMENT\n"
+    table_format += "-------|----------|---------|-------|-----------|----------|----------\n"
+    
+    for _, stock in top_stocks.iterrows():
+        sentiment_short = str(stock['Sentiment'])[:8] + "..." if len(str(stock['Sentiment'])) > 8 else str(stock['Sentiment'])
+        
+        # Convert all values to safe strings
+        ticker = str(stock['Ticker'])[:6]
+        time_str = str(stock['Trade Time'])[-8:]
+        premium_str = "0.0"  # Placeholder
+        flows_str = str(stock['Flows'])
+        contracts_str = "0"  # Placeholder  
+        move_req_str = str(stock['Move Required'])[:8]
+        
+        table_format += f"{ticker:<6} | {time_str} | ${premium_str}M | {flows_str:>5} | {contracts_str:>9} | {move_req_str:>8} | {sentiment_short}\n"
+    
+    return {
+        'Professional': professional,
+        'Discord': discord,
+        'Twitter': twitter,
+        'Table': table_format
+    }
 
 # Add this function after the existing functions and before the main() function
 
@@ -495,7 +1010,12 @@ def calculate_trade_score(row, ticker_daily_flow, all_premiums):
     
     # Time decay urgency (closer expirations get bonus for immediate moves)
     try:
-        days_to_exp = (row['Expiration_Date'] - pd.Timestamp.now()).days
+        # Ensure Expiration_Date is a datetime object
+        if isinstance(row['Expiration_Date'], str):
+            exp_date = pd.to_datetime(row['Expiration_Date'])
+        else:
+            exp_date = row['Expiration_Date']
+        days_to_exp = (exp_date - pd.Timestamp.now()).days
         if days_to_exp <= 7:
             flags_score += 20  # Weekly expiration urgency
         elif days_to_exp <= 14:
@@ -549,11 +1069,15 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
         return
     
     # Create contract grouping key
+    # Ensure Strike Price is numeric and Expiration Date is datetime
+    filtered_df['Strike_Price_Clean'] = pd.to_numeric(filtered_df['Strike Price'], errors='coerce').fillna(0)
+    filtered_df['Expiration_Date_Clean'] = pd.to_datetime(filtered_df['Expiration Date'], errors='coerce')
+    
     filtered_df['Contract_Key'] = (
         filtered_df['Ticker'] + '_' + 
         filtered_df['Contract Type'] + '_' + 
-        filtered_df['Strike Price'].astype(str) + '_' + 
-        filtered_df['Expiration Date'].dt.strftime('%Y-%m-%d')
+        filtered_df['Strike_Price_Clean'].astype(str) + '_' + 
+        filtered_df['Expiration_Date_Clean'].dt.strftime('%Y-%m-%d')
     )
     
     # Group by ticker and contract to get sweep counts
@@ -561,8 +1085,8 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
         'Premium Price': ['count', 'sum'],
         'Size': 'sum',
         'Contract Type': 'first',
-        'Strike Price': 'first',
-        'Expiration Date': 'first',
+        'Strike_Price_Clean': 'first',  # Use cleaned version
+        'Expiration_Date_Clean': 'first',  # Use cleaned version
         'Reference Price': 'first',
         'Side Code': lambda x: list(x),
         'Is Unusual': lambda x: 'YES' if 'YES' in x.values else 'NO',
@@ -620,7 +1144,12 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
                 confidence = "Low"
         
         # Calculate days to expiration
-        days_to_exp = (row['Expiration_Date'] - today).days
+        # Calculate days to expiration
+        if isinstance(row['Expiration_Date'], str):
+            exp_date = pd.to_datetime(row['Expiration_Date'])
+        else:
+            exp_date = row['Expiration_Date']
+        days_to_exp = (exp_date - today).days
         
         scores_data.append({
             'Ticker': row['Ticker'],
@@ -1277,8 +1806,9 @@ def generate_repeat_flows_summary(repeat_flows):
                 flags.append("GOLDEN")
             flags_str = f" [{' '.join(flags)}]" if flags else ""
             
+            exp_date_str = row['Expiration_Date'].strftime('%Y-%m-%d') if hasattr(row['Expiration_Date'], 'strftime') else str(row['Expiration_Date'])
             professional_summary += (f"  • {row['Contract_Type']} ${row['Strike_Price']:,.0f} "
-                                   f"exp {row['Expiration_Date'].strftime('%Y-%m-%d')} - "
+                                   f"exp {exp_date_str} - "
                                    f"{row['Flow_Count']} sweeps, ${row['Total_Premium']/1000000:.2f}M, "
                                    f"{move_pct:.1f}% move, {sentiment}{flags_str}\n")
     
@@ -1369,7 +1899,7 @@ def main():
         
         if df is not None:
             # Add the new tab here
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis"])
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters"])
             
             with tab1:
                 st.subheader("Generate Newsletter")
@@ -1530,6 +2060,87 @@ def main():
                         st.info(f"Click 'Analyze Symbols' to analyze flows for: {', '.join(symbols)}")
                 else:
                     st.info("Enter one or more symbols to analyze their option flows and price projection")
+            
+            # NEW TAB - High-Volume Flow Clusters
+            with tab6:
+                st.subheader("🚨 High-Volume Flow Clusters")
+                st.markdown("Identify stocks where multiple large flows occurred simultaneously")
+                
+                # Controls for high-volume analysis
+                col1, col2 = st.columns([1, 3])
+                
+                with col1:
+                    cluster_min_premium = st.number_input(
+                        "Minimum Premium ($)", 
+                        min_value=0, 
+                        value=40000, 
+                        step=10000,
+                        key="cluster_premium",
+                        help="Filter flows by minimum premium amount"
+                    )
+                    
+                    cluster_min_quantity = st.number_input(
+                        "Minimum Quantity", 
+                        min_value=1, 
+                        value=900, 
+                        step=100,
+                        key="cluster_quantity",
+                        help="Filter flows by minimum contract quantity"
+                    )
+                    
+                    time_grouping = st.selectbox(
+                        "Time Grouping",
+                        ["1 Second", "5 Seconds", "10 Seconds", "30 Seconds", "1 Minute"],
+                        index=0,
+                        key="time_grouping",
+                        help="Group flows within this time window as 'simultaneous'"
+                    )
+                    
+                    summary_top_n = st.number_input(
+                        "Flows to Show in Summary",
+                        min_value=1,
+                        max_value=100,
+                        value=70,
+                        step=5,
+                        key="summary_top_n",
+                        help="Number of top flows to include in sharing summary"
+                    )
+                
+                with col2:
+                    st.markdown("**What this analyzes:**")
+                    st.markdown("- 🎯 **Large Flows**: Premium ≥ threshold AND quantity ≥ threshold")
+                    st.markdown("- ⏰ **Same Trade Time**: Multiple flows for same stock at EXACT same time")
+                    st.markdown("- 🧠 **Coordinated Activity**: Identifies simultaneous institutional moves")
+                    st.markdown("- 📈 **Sentiment Analysis**: Bullish/bearish direction from synchronized flows")
+                    
+                    st.markdown("**Perfect for finding:**")
+                    st.markdown("- Block trades split across multiple orders")
+                    st.markdown("- Coordinated institutional entries at same moment")
+                    st.markdown("- High-conviction simultaneous positioning")
+                    st.markdown("- Algorithmic trading clusters")
+                
+                if st.button("🔍 Find Same-Time Flow Clusters", key="find_clusters", type="primary"):
+                    with st.spinner(f"Analyzing flows occurring within {time_grouping.lower()} time windows..."):
+                        display_high_volume_flows(df, cluster_min_premium, cluster_min_quantity, time_grouping, summary_top_n)
+                else:
+                    st.info(f"Click 'Find Same-Time Flow Clusters' to identify stocks with simultaneous large flows (grouped by {time_grouping.lower()})")
+                    
+                    # Show example of what we're looking for
+                    with st.expander("💡 Example of High-Volume Cluster", expanded=False):
+                        st.markdown("""
+                        **Example Scenario:**
+                        
+                        **AAPL** - Apple Inc.
+                        - Flow 1: CALL $180 - Premium: $85,000 - Quantity: 1,200 contracts
+                        - Flow 2: CALL $185 - Premium: $120,000 - Quantity: 1,500 contracts  
+                        - Flow 3: PUT $170 - Premium: $95,000 - Quantity: 1,100 contracts
+                        
+                        **Analysis Results:**
+                        - ✅ All flows meet criteria (Premium > $70K, Quantity > 900)
+                        - 🎯 3 flows for same stock = cluster detected
+                        - 📊 Total premium: $300,000
+                        - 🧠 Mixed signals: Call buying + Put buying = Volatility play
+                        """)
 
 if __name__ == "__main__":
     main()
