@@ -77,102 +77,415 @@ def send_to_discord(content, webhook_url):
     except Exception as e:
         return f"Discord send error: {e}"
 
-# Function to generate newsletter
+# Function to generate dashboard newsletter
 def generate_newsletter(df, top_n=10, min_premium=250000, side_codes=['A', 'AA'], 
                       tickers=None, sort_by='Premium Price'):
     if df is None or df.empty:
         return "No valid data for newsletter."
     
     today = pd.to_datetime("today").normalize()
-    max_date = today + timedelta(days=32)  # Next 2 weeks
-    exclude_tickers = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT'}
+    max_date = today + timedelta(days=2048)  # Next 4 weeks
     
-    # Filter data
-    filtered_df = df[
+    # Initialize newsletter
+    newsletter = f"📊 **DAILY OPTIONS FLOW DASHBOARD - {today.strftime('%B %d, %Y')}** 📊\n"
+    newsletter += "═" * 60 + "\n"
+    newsletter += "🎯 Professional Options Flow Analysis & Market Intelligence\n\n"
+    
+    # === SECTION 1: MAJOR INDICES OVERVIEW ===
+    newsletter += "█ **1. MAJOR INDICES POSITIONING** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    major_indices = ['SPY', 'QQQ', 'IWM', 'DIA', 'SMH']
+    index_flows = df[df['Ticker'].isin(major_indices)].copy()
+    
+    if not index_flows.empty:
+        for index in major_indices:
+            ticker_flows = index_flows[index_flows['Ticker'] == index]
+            if not ticker_flows.empty:
+                # Calculate total premium and bias
+                total_premium = ticker_flows['Premium Price'].sum()
+                call_premium = ticker_flows[ticker_flows['Contract Type'] == 'CALL']['Premium Price'].sum()
+                put_premium = ticker_flows[ticker_flows['Contract Type'] == 'PUT']['Premium Price'].sum()
+                
+                call_put_ratio = call_premium / put_premium if put_premium > 0 else float('inf')
+                bias = "🟢 BULLISH" if call_put_ratio > 1.5 else "🔴 BEARISH" if call_put_ratio < 0.67 else "⚪ NEUTRAL"
+                
+                newsletter += f"**{index}**: ${total_premium/1000000:.1f}M total | C/P Ratio: {call_put_ratio:.2f} {bias}\n"
+        newsletter += "\n"
+    
+    # === SECTION 2: VIX POSITIONING SUMMARY ===
+    newsletter += "█ **2. VIX POSITIONING & VOLATILITY** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    vix_related = df[df['Ticker'].str.contains('VIX|UVXY|VXX|SVXY', na=False)].copy()
+    if not vix_related.empty:
+        vix_flows = vix_related.sort_values('Premium Price', ascending=False).head(5)
+        for _, row in vix_flows.iterrows():
+            exp_str = row['Expiration Date'].strftime('%m/%d') if pd.notnull(row['Expiration Date']) else 'N/A'
+            
+            # Determine buy/sell action for VIX
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY CALL"
+                sentiment = "📈 Vol Up"
+            elif row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL CALL"
+                sentiment = "📉 Vol Down"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY PUT"
+                sentiment = "📉 Vol Down"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL PUT"
+                sentiment = "📈 Vol Up"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+                sentiment = "⚪"
+            
+            newsletter += f"• {row['Ticker']} {action} ${row['Strike Price']:.0f} exp {exp_str} - ${row['Premium Price']/1000:.0f}K {sentiment}\n"
+    else:
+        newsletter += "• No significant VIX positioning detected\n"
+    newsletter += "\n"
+    
+    # === SECTION 3: S&P 500 SECTOR ETFs ===
+    newsletter += "█ **3. S&P 500 SECTOR ETF FLOWS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    sector_etfs = ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
+    sector_flows = df[
+        df['Ticker'].isin(sector_etfs) & 
+        (df['Premium Price'] >= min_premium) &
+        (df['Expiration Date'] > today)
+    ].copy()
+    
+    if not sector_flows.empty:
+        # Sort by premium and show individual flows with strike and date
+        sector_flows = sector_flows.sort_values('Premium Price', ascending=False).head(6)
+        
+        for _, row in sector_flows.iterrows():
+            flags = "🔥" if row['Is Unusual'] == 'YES' else ""
+            flags += "⚡" if row['Is Golden Sweep'] == 'YES' else ""
+            
+            # Determine buy/sell action for clarity
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY CALL"
+                sentiment = "📈"
+            elif row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL CALL"
+                sentiment = "�"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY PUT"
+                sentiment = "📉"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL PUT"
+                sentiment = "📈"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+                sentiment = "⚪"
+            
+            newsletter += (f"• **{row['Ticker']}** {action} ${row['Strike Price']:,.0f} "
+                          f"exp {row['Expiration Date'].strftime('%m/%d')} - "
+                          f"${row['Premium Price']/1000:.0f}K {sentiment} {flags}\n")
+    else:
+        newsletter += "• No significant sector ETF flows detected\n"
+    newsletter += "\n"
+    
+    # === SECTION 4: EXTREME BULLISH STOCKS ===
+    newsletter += "█ **4. EXTREME BULLISH POSITIONS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    exclude_indices = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT', 'DIA', 'SMH'}
+    bullish_df = df[
+        ~df['Ticker'].isin(exclude_indices) &
         (df['Expiration Date'] > today) &
         (df['Expiration Date'] <= max_date) &
         (df['Premium Price'] >= min_premium) &
-        (df['Side Code'].isin(side_codes)) &
-        (~df['Ticker'].isin(exclude_tickers))
-    ]
+        (((df['Contract Type'] == 'CALL') & (df['Side Code'].isin(['A', 'AA']))) |
+         ((df['Contract Type'] == 'PUT') & (df['Side Code'].isin(['B', 'BB']))))
+    ].copy()
     
-    if tickers:
-        filtered_df = filtered_df[filtered_df['Ticker'].isin(tickers)]
-    
-    if filtered_df.empty:
-        return "No OTM flows match the criteria."
-    
-    # Initialize newsletter
-    newsletter = f"📊 **Options Flow Newsletter - {today.strftime('%B %d, %Y')}** 📊\n\n"
-    newsletter += "🔍 Analyzing OUT-THE-MONEY opening positions for the next 4 weeks\n\n"
-    
-    # Long Plays (Bullish: CALL A/AA or PUT B/BB)
-    long_df = filtered_df[
-        ((filtered_df['Contract Type'] == 'CALL') & (filtered_df['Side Code'].isin(['A', 'AA']))) |
-        ((filtered_df['Contract Type'] == 'PUT') & (filtered_df['Side Code'].isin(['B', 'BB'])))
-    ]
-    
-    newsletter += "**📈 Top Long Plays**\n"
-    if long_df.empty:
-        newsletter += "No bullish OTM flows detected.\n"
-    else:
-        if sort_by == 'Premium Price':
-            long_df = long_df.sort_values('Premium Price', ascending=False)
-        else:
-            long_df = long_df.sort_values(['Ticker', 'Premium Price'])
-        
-        for _, row in long_df.head(top_n).iterrows():
-            move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
-                          row['Reference Price'] * 100)
-            flags = []
-            if row['Is Unusual'] == 'YES':
-                flags.append("UNUSUAL")
-            if row['Is Golden Sweep'] == 'YES':
-                flags.append("GOLDEN")
-            flags_str = f" [{' '.join(flags)}]" if flags else ""
+    if not bullish_df.empty:
+        bullish_df = bullish_df.sort_values('Premium Price', ascending=False).head(top_n)
+        for _, row in bullish_df.iterrows():
+            move_pct = abs((row['Strike Price'] - row['Reference Price']) / row['Reference Price'] * 100)
+            flags = "🔥" if row['Is Unusual'] == 'YES' else ""
+            flags += "⚡" if row['Is Golden Sweep'] == 'YES' else ""
             
-            newsletter += (
-                f"• **{row['Ticker']}** {row['Contract Type']} ${row['Strike Price']:,.2f} "
-                f"exp {row['Expiration Date'].strftime('%Y-%m-%d')} - "
-                f"${row['Premium Price']:,.0f} ({row['Size']} contracts, "
-                f"{move_pct:.1f}% move, 🟢 {row['Side Code']}){flags_str}\n"
-            )
+            # Determine buy/sell action for clarity
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY CALL"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL PUT"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+            
+            newsletter += (f"• **{row['Ticker']}** {action} ${row['Strike Price']:,.0f} "
+                          f"exp {row['Expiration Date'].strftime('%m/%d')} - "
+                          f"${row['Premium Price']/1000:.0f}K ({move_pct:.0f}% move) {flags}\n")
+    newsletter += "\n"
+    
+    # === SECTION 5: EXTREME BEARISH STOCKS ===
+    newsletter += "█ **5. EXTREME BEARISH POSITIONS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    bearish_df = df[
+        ~df['Ticker'].isin(exclude_indices) &
+        (df['Expiration Date'] > today) &
+        (df['Expiration Date'] <= max_date) &
+        (df['Premium Price'] >= min_premium) &
+        (((df['Contract Type'] == 'CALL') & (df['Side Code'].isin(['B', 'BB']))) |
+         ((df['Contract Type'] == 'PUT') & (df['Side Code'].isin(['A', 'AA']))))
+    ].copy()
+    
+    if not bearish_df.empty:
+        bearish_df = bearish_df.sort_values('Premium Price', ascending=False).head(top_n)
+        for _, row in bearish_df.iterrows():
+            move_pct = abs((row['Strike Price'] - row['Reference Price']) / row['Reference Price'] * 100)
+            flags = "🔥" if row['Is Unusual'] == 'YES' else ""
+            flags += "⚡" if row['Is Golden Sweep'] == 'YES' else ""
+            
+            # Determine buy/sell action for clarity
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL CALL"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY PUT"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+            
+            newsletter += (f"• **{row['Ticker']}** {action} ${row['Strike Price']:,.0f} "
+                          f"exp {row['Expiration Date'].strftime('%m/%d')} - "
+                          f"${row['Premium Price']/1000:.0f}K ({move_pct:.0f}% move) {flags}\n")
+    newsletter += "\n"
+    
+    # === SECTION 6: UNUSUAL ACTIVITY ALERTS ===
+    newsletter += "█ **6. UNUSUAL ACTIVITY ALERTS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    unusual_flows = df[
+        (df['Is Unusual'] == 'YES') &
+        (df['Premium Price'] >= min_premium/2) &  # Lower threshold for unusual
+        (df['Expiration Date'] > today)
+    ].sort_values('Premium Price', ascending=False).head(8)
+    
+    if not unusual_flows.empty:
+        for _, row in unusual_flows.iterrows():
+            move_pct = abs((row['Strike Price'] - row['Reference Price']) / row['Reference Price'] * 100)
+            
+            # Determine buy/sell action for clarity
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY CALL"
+                sentiment = "📈"
+            elif row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL CALL"
+                sentiment = "📉"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY PUT"
+                sentiment = "📉"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL PUT"
+                sentiment = "📈"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+                sentiment = "⚪"
+            
+            newsletter += (f"🔥 **{row['Ticker']}** {action} ${row['Strike Price']:,.0f} "
+                          f"exp {row['Expiration Date'].strftime('%m/%d')} - "
+                          f"${row['Premium Price']/1000:.0f}K {sentiment}\n")
+    else:
+        newsletter += "• No significant unusual activity detected\n"
+    newsletter += "\n"
+    
+    # === SECTION 7: HIGH VOLUME CONCENTRATION ===
+    newsletter += "█ **7. HIGH VOLUME CONCENTRATIONS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    high_volume = df[
+        (df['Size'] >= 1000) &  # High contract volume
+        (df['Premium Price'] >= min_premium) &
+        (df['Expiration Date'] > today)
+    ].groupby('Ticker').agg({
+        'Premium Price': 'sum',
+        'Size': 'sum',
+        'Contract Type': lambda x: list(x)
+    }).sort_values('Premium Price', ascending=False).head(5)
+    
+    if not high_volume.empty:
+        for ticker, row in high_volume.iterrows():
+            total_contracts = row['Size']
+            total_premium = row['Premium Price']
+            call_count = sum(1 for ct in row['Contract Type'] if ct == 'CALL')
+            put_count = len(row['Contract Type']) - call_count
+            bias = "📈 CALL HEAVY" if call_count > put_count * 1.5 else "📉 PUT HEAVY" if put_count > call_count * 1.5 else "⚖️ MIXED"
+            
+            newsletter += (f"• **{ticker}**: {total_contracts:,} contracts, "
+                          f"${total_premium/1000000:.1f}M premium {bias}\n")
+    else:
+        newsletter += "• No high volume concentrations detected\n"
+    newsletter += "\n"
+    
+    # === SECTION 8: WEEKLY EXPIRATION FOCUS ===
+    newsletter += "█ **8. WEEKLY EXPIRATION FOCUS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    weekly_exp = today + timedelta(days=7 - today.weekday() + 4)  # Next Friday
+    weekly_flows = df[
+        (df['Expiration Date'] == weekly_exp) &
+        (df['Premium Price'] >= min_premium/2)
+    ].sort_values('Premium Price', ascending=False).head(6)
+    
+    if not weekly_flows.empty:
+        newsletter += f"⏰ **Expiring {weekly_exp.strftime('%m/%d/%Y')}**:\n"
+        for _, row in weekly_flows.iterrows():
+            # Determine buy/sell action for clarity
+            if row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY CALL"
+                sentiment = "📈"
+            elif row['Contract Type'] == 'CALL' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL CALL"
+                sentiment = "📉"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['A', 'AA']:
+                action = "BUY PUT"
+                sentiment = "📉"
+            elif row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']:
+                action = "SELL PUT"
+                sentiment = "📈"
+            else:
+                action = f"{row['Side Code']} {row['Contract Type']}"
+                sentiment = "⚪"
+            
+            newsletter += (f"• {row['Ticker']} {action} ${row['Strike Price']:,.0f} - "
+                          f"${row['Premium Price']/1000:.0f}K {sentiment}\n")
+    else:
+        newsletter += f"• No significant weekly flows for {weekly_exp.strftime('%m/%d')}\n"
+    newsletter += "\n"
+    
+    # === SECTION 9: CROSS-SECTION ANALYSIS ===
+    newsletter += "█ **9. CROSS-SECTION ANALYSIS** █\n"
+    newsletter += "─" * 40 + "\n"
+    
+    # Define stock ecosystems and themes
+    ecosystems = {
+        "AI/Chip Theme": ["NVDA", "AMD", "TSM", "ASML", "AVGO", "QCOM", "MU", "INTC", "ARM", "MRVL"],
+        "Cloud/Software": ["MSFT", "GOOGL", "CRWD", "AMZN", "CRM", "ORCL", "ADBE", "NOW", "SNOW", "PLTR"],
+        "EV/Auto Theme": ["TSLA", "RIVN", "LCID", "F", "GM", "NIO", "XPEV", "LI", "BYD"],
+        "Social/Meta": ["META", "SNAP", "PINS", "RDDT", "ROKU", "SPOT"],
+        "Fintech/Banks": ["JPM", "BAC", "GS", "MS", "WFC", "C", "PYPL", "XYZ", "COIN", "HOOD"],
+        "Energy/Oil": ["XOM", "CVX", "COP", "EOG", "SLB", "OXY", "DVN", "MRO"],
+        "Biotech/Pharma": ["JNJ", "PFE", "MRNA", "BNTX", "GILD", "BIIB", "AMGN", "REGN"],
+        "Retail/Consumer": ["AMZN", "WMT", "TGT", "COST", "HD", "LOW", "NKE", "SBUX"],
+        "Streaming/Media": ["NFLX", "DIS", "WBD", "PARA", "ROKU", "SPOT"],
+        "Crypto Proxy": ["COIN", "MSTR", "RIOT", "MARA", "IBIT", "ETHA"]
+    }
+    
+    # Get significant flows for analysis (lower threshold for theme detection)
+    theme_flows = df[
+        (df['Premium Price'] >= min_premium/2) &
+        (df['Expiration Date'] > today)
+    ].copy()
+    
+    if not theme_flows.empty:
+        detected_themes = []
+        
+        for theme, tickers in ecosystems.items():
+            # Find flows in this theme
+            theme_data = theme_flows[theme_flows['Ticker'].isin(tickers)]
+            
+            if len(theme_data) >= 2:  # At least 2 flows to constitute a theme
+                total_premium = theme_data['Premium Price'].sum()
+                bullish_flows = theme_data[
+                    ((theme_data['Contract Type'] == 'CALL') & (theme_data['Side Code'].isin(['A', 'AA']))) |
+                    ((theme_data['Contract Type'] == 'PUT') & (theme_data['Side Code'].isin(['B', 'BB'])))
+                ]
+                bearish_flows = theme_data[
+                    ((theme_data['Contract Type'] == 'CALL') & (theme_data['Side Code'].isin(['B', 'BB']))) |
+                    ((theme_data['Contract Type'] == 'PUT') & (theme_data['Side Code'].isin(['A', 'AA'])))
+                ]
+                
+                bullish_premium = bullish_flows['Premium Price'].sum()
+                bearish_premium = bearish_flows['Premium Price'].sum()
+                
+                # Determine theme bias
+                if bullish_premium > bearish_premium * 1.5:
+                    bias = "📈 BULLISH"
+                    bias_ratio = f"{bullish_premium/1000000:.1f}M vs {bearish_premium/1000000:.1f}M"
+                elif bearish_premium > bullish_premium * 1.5:
+                    bias = "📉 BEARISH" 
+                    bias_ratio = f"{bearish_premium/1000000:.1f}M vs {bullish_premium/1000000:.1f}M"
+                else:
+                    bias = "⚖️ MIXED"
+                    bias_ratio = f"${total_premium/1000000:.1f}M total"
+                
+                # Get top tickers in theme
+                top_theme_tickers = theme_data.groupby('Ticker')['Premium Price'].sum().sort_values(ascending=False).head(3)
+                ticker_list = ", ".join([f"{ticker}(${premium/1000000:.1f}M)" for ticker, premium in top_theme_tickers.items()])
+                
+                detected_themes.append({
+                    'theme': theme,
+                    'bias': bias,
+                    'ratio': bias_ratio,
+                    'tickers': ticker_list,
+                    'total_premium': total_premium,
+                    'flow_count': len(theme_data)
+                })
+        
+        # Sort by total premium and show top themes
+        detected_themes.sort(key=lambda x: x['total_premium'], reverse=True)
+        
+        if detected_themes:
+            for theme_info in detected_themes[:5]:  # Show top 5 themes
+                newsletter += (f"🎯 **{theme_info['theme']}**: {theme_info['bias']} "
+                              f"({theme_info['flow_count']} flows, {theme_info['ratio']})\n")
+                newsletter += f"   └─ Key Players: {theme_info['tickers']}\n\n"
+        else:
+            newsletter += "• No clear thematic patterns detected\n"
+    
+    # Cross-asset correlations
+    newsletter += "**🔄 Cross-Asset Signals:**\n"
+    
+    # VIX vs Equity flows
+    vix_flows = df[df['Ticker'].str.contains('VIX|UVXY|VXX', na=False)]
+    equity_flows = df[~df['Ticker'].isin(['SPY', 'QQQ', 'IWM', 'DIA']) & 
+                     ~df['Ticker'].str.contains('VIX|UVXY|VXX', na=False)]
+    
+    if not vix_flows.empty and not equity_flows.empty:
+        vix_call_buying = vix_flows[(vix_flows['Contract Type'] == 'CALL') & 
+                                   (vix_flows['Side Code'].isin(['A', 'AA']))]['Premium Price'].sum()
+        
+        equity_put_buying = equity_flows[(equity_flows['Contract Type'] == 'PUT') & 
+                                        (equity_flows['Side Code'].isin(['A', 'AA']))]['Premium Price'].sum()
+        
+        if vix_call_buying > 0 and equity_put_buying > 0:
+            correlation = "🔄 VIX calls + Equity puts = Defensive positioning"
+            newsletter += f"• {correlation}\n"
+    
+    # Sector rotation signals
+    sector_etfs = ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
+    sector_data = df[df['Ticker'].isin(sector_etfs) & (df['Premium Price'] >= min_premium/4)]
+    
+    if not sector_data.empty:
+        sector_summary = []
+        for sector in sector_etfs:
+            sector_flows = sector_data[sector_data['Ticker'] == sector]
+            if not sector_flows.empty:
+                bullish_premium = sector_flows[
+                    ((sector_flows['Contract Type'] == 'CALL') & (sector_flows['Side Code'].isin(['A', 'AA']))) |
+                    ((sector_flows['Contract Type'] == 'PUT') & (sector_flows['Side Code'].isin(['B', 'BB'])))
+                ]['Premium Price'].sum()
+                
+                bearish_premium = sector_flows[
+                    ((sector_flows['Contract Type'] == 'CALL') & (sector_flows['Side Code'].isin(['B', 'BB']))) |
+                    ((sector_flows['Contract Type'] == 'PUT') & (sector_flows['Side Code'].isin(['A', 'AA'])))
+                ]['Premium Price'].sum()
+                
+                net_flow = bullish_premium - bearish_premium
+                sector_summary.append({'sector': sector, 'net_flow': net_flow})
+        
+        if sector_summary:
+            sector_summary.sort(key=lambda x: abs(x['net_flow']), reverse=True)
+            top_rotation = sector_summary[:3]
+            rotation_text = " | ".join([f"{s['sector']}({'📈' if s['net_flow'] > 0 else '📉'})" for s in top_rotation])
+            newsletter += f"• Sector Rotation: {rotation_text}\n"
     
     newsletter += "\n"
     
-    # Short Plays (Bearish: CALL B/BB or PUT A/AA)
-    short_df = filtered_df[
-        ((filtered_df['Contract Type'] == 'CALL') & (filtered_df['Side Code'].isin(['B', 'BB']))) |
-        ((filtered_df['Contract Type'] == 'PUT') & (filtered_df['Side Code'].isin(['A', 'AA'])))
-    ]
-    
-    newsletter += "**📉 Top Short Plays**\n"
-    if short_df.empty:
-        newsletter += "No bearish OTM flows detected.\n"
-    else:
-        if sort_by == 'Premium Price':
-            short_df = short_df.sort_values('Premium Price', ascending=False)
-        else:
-            short_df = short_df.sort_values(['Ticker', 'Premium Price'])
-        
-        for _, row in short_df.head(top_n).iterrows():
-            move_pct = abs((row['Strike Price'] - row['Reference Price']) / 
-                          row['Reference Price'] * 100)
-            flags = []
-            if row['Is Unusual'] == 'YES':
-                flags.append("UNUSUAL")
-            if row['Is Golden Sweep'] == 'YES':
-                flags.append("GOLDEN")
-            flags_str = f" [{' '.join(flags)}]" if flags else ""
-            
-            newsletter += (
-                f"• **{row['Ticker']}** {row['Contract Type']} ${row['Strike Price']:,.2f} "
-                f"exp {row['Expiration Date'].strftime('%Y-%m-%d')} - "
-                f"${row['Premium Price']:,.0f} ({row['Size']} contracts, "
-                f"{move_pct:.1f}% move, 🔴 {row['Side Code']}){flags_str}\n"
-            )
-    
-    newsletter += "\n⚠️ **For educational purposes only. Not financial advice.**"
     return newsletter
 
 # Function to generate Twitter newsletter
@@ -183,58 +496,79 @@ def generate_twitter_newsletter(df, top_n=5, min_premium=500000, side_codes=['A'
     
     today = pd.to_datetime("today").normalize()
     max_date = today + timedelta(days=32)
-    exclude_tickers = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT'}
+    exclude_indices = {'SPY', 'QQQ', 'SPX', 'SPXW', 'IWM', 'NDX', 'RUT', 'DIA', 'SMH'}
     
-    # Filter data
-    filtered_df = df[
+    # Twitter newsletter - concise dashboard format
+    twitter_post = f"📊 DAILY FLOW DASHBOARD - {today.strftime('%m/%d/%Y')}\n"
+    twitter_post += "═" * 35 + "\n\n"
+    
+    # 1. INDICES OVERVIEW
+    major_indices = ['SPY', 'QQQ', 'IWM', 'DIA', 'SMH']
+    index_flows = df[df['Ticker'].isin(major_indices)]
+    
+    if not index_flows.empty:
+        twitter_post += "🎯 INDICES:\n"
+        for index in ['SPY', 'QQQ', 'IWM']:  # Top 3 for Twitter
+            ticker_flows = index_flows[index_flows['Ticker'] == index]
+            if not ticker_flows.empty:
+                total_premium = ticker_flows['Premium Price'].sum()
+                call_premium = ticker_flows[ticker_flows['Contract Type'] == 'CALL']['Premium Price'].sum()
+                put_premium = ticker_flows[ticker_flows['Contract Type'] == 'PUT']['Premium Price'].sum()
+                
+                if put_premium > 0:
+                    ratio = call_premium / put_premium
+                    bias = "📈" if ratio > 1.5 else "📉" if ratio < 0.67 else "⚪"
+                    twitter_post += f"{index}: {bias} ${total_premium/1000000:.1f}M\n"
+        twitter_post += "\n"
+    
+    # 2. TOP BULLISH PLAYS
+    bullish_df = df[
+        ~df['Ticker'].isin(exclude_indices) &
         (df['Expiration Date'] > today) &
-        (df['Expiration Date'] <= max_date) &
         (df['Premium Price'] >= min_premium) &
-        (df['Side Code'].isin(side_codes)) &
-        (~df['Ticker'].isin(exclude_tickers))
-    ]
+        (((df['Contract Type'] == 'CALL') & (df['Side Code'].isin(['A', 'AA']))) |
+         ((df['Contract Type'] == 'PUT') & (df['Side Code'].isin(['B', 'BB']))))
+    ].sort_values('Premium Price', ascending=False).head(3)
     
-    if tickers:
-        filtered_df = filtered_df[filtered_df['Ticker'].isin(tickers)]
+    if not bullish_df.empty:
+        twitter_post += "📈 BULLISH:\n"
+        for _, row in bullish_df.iterrows():
+            flags = "🔥" if row['Is Unusual'] == 'YES' else ""
+            twitter_post += f"{row['Ticker']} ${row['Strike Price']:,.0f}{row['Contract Type'][0]} ${row['Premium Price']/1000:.0f}K {flags}\n"
+        twitter_post += "\n"
     
-    if filtered_df.empty:
-        return "No OTM flows match the criteria for Twitter."
+    # 3. TOP BEARISH PLAYS
+    bearish_df = df[
+        ~df['Ticker'].isin(exclude_indices) &
+        (df['Expiration Date'] > today) &
+        (df['Premium Price'] >= min_premium) &
+        (((df['Contract Type'] == 'CALL') & (df['Side Code'].isin(['B', 'BB']))) |
+         ((df['Contract Type'] == 'PUT') & (df['Side Code'].isin(['A', 'AA']))))
+    ].sort_values('Premium Price', ascending=False).head(3)
     
-    # Twitter newsletter - shorter format
-    twitter_post = f"📊 OPTIONS FLOW ALERT - {today.strftime('%m/%d/%Y')}\n\n"
-    twitter_post += "🎯 TOP OTM PLAYS:\n\n"
+    if not bearish_df.empty:
+        twitter_post += "� BEARISH:\n"
+        for _, row in bearish_df.iterrows():
+            flags = "�" if row['Is Unusual'] == 'YES' else ""
+            twitter_post += f"{row['Ticker']} ${row['Strike Price']:,.0f}{row['Contract Type'][0]} ${row['Premium Price']/1000:.0f}K {flags}\n"
+        twitter_post += "\n"
     
-    # Combine long and short plays, sorted by premium
-    all_flows = filtered_df.copy()
-    if sort_by == 'Premium Price':
-        all_flows = all_flows.sort_values('Premium Price', ascending=False)
-    else:
-        all_flows = all_flows.sort_values(['Ticker', 'Premium Price'])
+    # 4. UNUSUAL ACTIVITY
+    unusual_flows = df[
+        (df['Is Unusual'] == 'YES') &
+        (df['Premium Price'] >= min_premium/2)
+    ].sort_values('Premium Price', ascending=False).head(2)
     
-    for i, (_, row) in enumerate(all_flows.head(top_n).iterrows(), 1):
-        # Determine sentiment
-        is_bullish = ((row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']) or
-                     (row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB']))
-        sentiment = "🟢" if is_bullish else "🔴"
-        
-        move_pct = abs((row['Strike Price'] - row['Reference Price']) / row['Reference Price'] * 100)
-        
-        # Flags
-        flags = []
-        if row['Is Unusual'] == 'YES':
-            flags.append("🔥")
-        if row['Is Golden Sweep'] == 'YES':
-            flags.append("⚡")
-        flag_str = " ".join(flags)
-        
-        twitter_post += (f"{i}. {sentiment} ${row['Ticker']} "
-                        f"{row['Contract Type']} ${row['Strike Price']:,.0f}\n"
-                        f"   Exp: {row['Expiration Date'].strftime('%m/%d')} | "
-                        f"${row['Premium Price']/1000000:.1f}M | "
-                        f"{move_pct:.0f}% move {flag_str}\n\n")
+    if not unusual_flows.empty:
+        twitter_post += "🔥 UNUSUAL:\n"
+        for _, row in unusual_flows.iterrows():
+            sentiment = "📈" if ((row['Contract Type'] == 'CALL' and row['Side Code'] in ['A', 'AA']) or 
+                               (row['Contract Type'] == 'PUT' and row['Side Code'] in ['B', 'BB'])) else "📉"
+            twitter_post += f"{row['Ticker']} ${row['Strike Price']:,.0f}{row['Contract Type'][0]} ${row['Premium Price']/1000:.0f}K {sentiment}\n"
+        twitter_post += "\n"
     
     twitter_post += "⚠️ Educational only. Not financial advice.\n"
-    twitter_post += "#OptionsFlow #Trading #StockMarket"
+    twitter_post += "#OptionsFlow #Trading #FlowDashboard"
     
     return twitter_post
 
@@ -1902,19 +2236,26 @@ def main():
             tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters"])
             
             with tab1:
-                st.subheader("Generate Newsletter")
+                st.subheader("📊 Generate Dashboard Newsletter")
                 
                 # Create two columns for different newsletter types
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("### 📄 Full Newsletter")
-                    top_n = st.number_input("Number of Flows", min_value=1, max_value=50, value=20, key="full_top_n")
+                    st.markdown("### 📄 Full Dashboard")
+                    st.markdown("*Comprehensive 8-section flow analysis*")
+                    top_n = st.number_input("Flows per Section", min_value=1, max_value=50, value=8, key="full_top_n")
                     min_premium = st.number_input("Min Premium ($)", min_value=0, value=250000, key="full_premium")
-                    side_codes = st.multiselect("Side Codes", ['A', 'AA', 'B', 'BB'], default=['A', 'AA'], key="full_sides")
-                    with st.expander("Ticker Filter", expanded=False):
-                        tickers = st.multiselect("Tickers", df['Ticker'].unique(), default=df['Ticker'].unique(), key="full_tickers")
-                    sort_by = st.selectbox("Sort By", ["Premium Price", "Ticker"], key="full_sort")
+                    
+                    st.markdown("**Dashboard Sections:**")
+                    st.markdown("1. 🎯 Major Indices (SPY,QQQ,IWM,DIA,SMH)")
+                    st.markdown("2. 📊 VIX & Volatility Positioning")
+                    st.markdown("3. 🏭 S&P 500 Sector ETFs")
+                    st.markdown("4. 📈 Extreme Bullish Stocks")
+                    st.markdown("5. 📉 Extreme Bearish Stocks")
+                    st.markdown("6. 🔥 Unusual Activity Alerts")
+                    st.markdown("7. 📊 High Volume Concentrations")
+                    st.markdown("8. ⏰ Weekly Expiration Focus")
                     
                     webhook_url = st.text_input(
                         "Discord Webhook URL", 
@@ -1923,30 +2264,74 @@ def main():
                     )
                     send_discord = st.checkbox("Send to Discord")
                     
-                    if st.button("Generate Full Newsletter"):
-                        with st.spinner("Generating..."):
-                            newsletter = generate_newsletter(df, top_n, min_premium, side_codes, 
-                                                          tickers, sort_by)
-                            st.markdown(f"```\n{newsletter}\n```")
+                    if st.button("🚀 Generate Dashboard Newsletter", type="primary"):
+                        with st.spinner("Generating comprehensive dashboard..."):
+                            newsletter = generate_newsletter(df, top_n, min_premium)
+                            st.markdown("### 📋 Generated Newsletter:")
+                            st.text_area("Newsletter Content", newsletter, height=500, key="newsletter_output")
                             if send_discord and webhook_url:
                                 result = send_to_discord(newsletter, webhook_url)
-                                st.info(result)
+                                st.success(result)
                 
                 with col2:
-                    st.markdown("### 🐦 Twitter Newsletter")
-                    twitter_top_n = st.number_input("Number of Flows", min_value=1, max_value=10, value=5, key="twitter_top_n")
+                    st.markdown("### 🐦 Twitter Dashboard")
+                    st.markdown("*Condensed dashboard for social media*")
+                    twitter_top_n = st.number_input("Flows per Section", min_value=1, max_value=10, value=3, key="twitter_top_n")
                     twitter_min_premium = st.number_input("Min Premium ($)", min_value=0, value=500000, key="twitter_premium")
-                    twitter_side_codes = st.multiselect("Side Codes", ['A', 'AA', 'B', 'BB'], default=['A', 'AA'], key="twitter_sides")
-                    with st.expander("Ticker Filter", expanded=False):
-                        twitter_tickers = st.multiselect("Tickers", df['Ticker'].unique(), default=df['Ticker'].unique(), key="twitter_tickers")
-                    twitter_sort_by = st.selectbox("Sort By", ["Premium Price", "Ticker"], key="twitter_sort")
                     
-                    if st.button("Generate Twitter Post"):
-                        with st.spinner("Generating Twitter post..."):
-                            twitter_newsletter = generate_twitter_newsletter(df, twitter_top_n, twitter_min_premium, 
-                                                                           twitter_side_codes, twitter_tickers, twitter_sort_by)
-                            st.markdown("**Copy this for Twitter:**")
-                            st.text_area("Twitter Post", twitter_newsletter, height=400, key="twitter_output")
+                    st.markdown("**Twitter Sections:**")
+                    st.markdown("• 🎯 Top 3 Indices Overview")
+                    st.markdown("• 📈 Top 3 Bullish Plays")
+                    st.markdown("• 📉 Top 3 Bearish Plays") 
+                    st.markdown("• 🔥 Top 2 Unusual Alerts")
+                    
+                    if st.button("📱 Generate Twitter Dashboard"):
+                        with st.spinner("Generating Twitter dashboard..."):
+                            twitter_newsletter = generate_twitter_newsletter(df, twitter_top_n, twitter_min_premium)
+                            st.markdown("### 🐦 Twitter Post:")
+                            st.text_area("Twitter Content", twitter_newsletter, height=350, key="twitter_output")
+                            
+                            # Character count
+                            char_count = len(twitter_newsletter)
+                            if char_count <= 280:
+                                st.success(f"✅ Perfect! {char_count}/280 characters")
+                            elif char_count <= 1400:
+                                st.warning(f"⚠️ Thread needed: {char_count} characters ({char_count//280 + 1} tweets)")
+                            else:
+                                st.error(f"❌ Too long: {char_count} characters - consider shortening")
+                
+                # Add dashboard preview/explanation
+                st.markdown("---")
+                st.markdown("### 📊 **Dashboard Newsletter Features**")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("""
+                    **🎯 Professional Structure**
+                    - 8 comprehensive sections
+                    - Visual separators and emojis
+                    - Clear section headers
+                    - Professional formatting
+                    """)
+                
+                with col2:
+                    st.markdown("""
+                    **📈 Market Intelligence**
+                    - Index positioning analysis
+                    - Sector rotation insights
+                    - Volatility positioning (VIX)
+                    - Weekly expiration focus
+                    """)
+                
+                with col3:
+                    st.markdown("""
+                    **🔥 Advanced Analytics**
+                    - Unusual activity detection
+                    - High volume concentrations
+                    - Bullish/bearish extremes
+                    - Smart filtering & ranking
+                    """)
 
             with tab2:
                 st.subheader("View Symbol Flows")
