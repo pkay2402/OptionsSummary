@@ -10,7 +10,7 @@ import hashlib
 TOP_30_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'UNH', 'JNJ',
     'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ',
-    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR',
+    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR','GS','VRT','BABA',
     # More tech stocks added below
     'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'NOW', 'SNOW', 'SHOP', 'RDDT', 'XYZ','MSTR',
     'NBIS', 'ASML', 'MRVL', 'GOOG', 'IBM', 'GEV', 'UBER', 'BA', 'DDOG', 'PANW','MDB','HOOD','COIN'
