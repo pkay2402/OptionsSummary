@@ -3,6 +3,380 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import os
+import sqlite3
+import hashlib
+
+# Top 30 stocks to track in database
+TOP_30_STOCKS = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'UNH', 'JNJ',
+    'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ',
+    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR',
+    # More tech stocks added below
+    'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'NOW', 'SNOW', 'SHOP', 'RDDT', 'XYZ','MSTR',
+    'NBIS', 'ASML', 'MRVL', 'GOOG', 'IBM', 'GEV', 'UBER', 'BA', 'DDOG', 'PANW','MDB','HOOD','COIN'
+]
+
+def init_flow_database():
+    """Initialize SQLite database for flow storage"""
+    conn = sqlite3.connect('flow_database.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS flows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date TEXT,
+            order_type TEXT,
+            symbol TEXT,
+            strike TEXT,
+            expiry TEXT,
+            contracts INTEGER,
+            premium REAL,
+            data_hash TEXT UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Create indexes for better performance
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_symbol ON flows(symbol)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_trade_date ON flows(trade_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_order_type ON flows(order_type)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_expiry ON flows(expiry)')
+    
+    conn.commit()
+    conn.close()
+
+def store_flows_in_database(df):
+    """Store flows for top 30 stocks in database (minimum 900 contracts)"""
+    if df is None or df.empty:
+        return 0
+    
+    # Filter for top 30 stocks only
+    df_filtered = df[df['Ticker'].isin(TOP_30_STOCKS)].copy()
+    
+    # Filter for minimum 900 contracts
+    df_filtered = df_filtered[df_filtered['Size'] >= 900].copy()
+    
+    if df_filtered.empty:
+        return 0
+    
+    conn = sqlite3.connect('flow_database.db')
+    cursor = conn.cursor()
+    
+    stored_count = 0
+    
+    for _, row in df_filtered.iterrows():
+        try:
+            # Create data hash to prevent duplicates
+            data_string = f"{row.get('Ticker', '')}{row.get('Strike Price', '')}{row.get('Contract Type', '')}{row.get('Expiration Date', '')}{row.get('Size', '')}"
+            data_hash = hashlib.md5(data_string.encode()).hexdigest()
+            
+            # Determine order type based on contract type and side code
+            contract_type = str(row.get('Contract Type', '')).upper()
+            side_code = str(row.get('Side Code', '')).upper()
+            
+            if contract_type == 'CALL':
+                order_type = 'Calls Bought' if side_code in ['A', 'AA', 'B'] else 'Calls Sold'
+            elif contract_type == 'PUT':
+                order_type = 'Puts Bought' if side_code in ['A', 'AA', 'B'] else 'Puts Sold'
+            else:
+                continue  # Skip unknown contract types
+            
+            # Format strike price
+            strike_price = row.get('Strike Price', 0)
+            strike = f"{strike_price:.0f}{'C' if contract_type == 'CALL' else 'P'}"
+            
+            # Handle expiration date
+            exp_date = row.get('Expiration Date')
+            if pd.isna(exp_date):
+                continue
+            
+            if isinstance(exp_date, str):
+                try:
+                    exp_date = pd.to_datetime(exp_date)
+                except:
+                    continue
+            
+            expiry = exp_date.strftime('%Y-%m-%d')
+            
+            # Get trade date (current date if not specified)
+            trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            
+            # Calculate premium
+            premium = float(row.get('Premium Price', 0))
+            
+            cursor.execute('''
+                INSERT OR IGNORE INTO flows 
+                (trade_date, order_type, symbol, strike, expiry, contracts, premium, data_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                trade_date,
+                order_type,
+                row.get('Ticker'),
+                strike,
+                expiry,
+                int(row.get('Size', 0)),
+                premium,
+                data_hash
+            ))
+            
+            if cursor.rowcount > 0:
+                stored_count += 1
+                
+        except Exception as e:
+            continue  # Skip problematic rows
+    
+    conn.commit()
+    conn.close()
+    
+    return stored_count
+
+def get_flows_from_database(symbol_filter=None, order_type_filter=None, date_from=None, date_to=None):
+    """Retrieve flows from database with filters"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    query = "SELECT trade_date, order_type, symbol, strike, expiry, contracts FROM flows WHERE 1=1"
+    params = []
+    
+    if symbol_filter and symbol_filter != "All":
+        query += " AND symbol = ?"
+        params.append(symbol_filter)
+    
+    if order_type_filter and order_type_filter != "All":
+        query += " AND order_type = ?"
+        params.append(order_type_filter)
+    
+    if date_from:
+        query += " AND trade_date >= ?"
+        params.append(date_from.strftime('%Y-%m-%d'))
+    
+    if date_to:
+        query += " AND trade_date <= ?"
+        params.append((date_to + timedelta(days=1)).strftime('%Y-%m-%d'))
+    
+    query += " ORDER BY trade_date DESC"
+    
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    
+    return df
+
+def get_todays_flows_summary():
+    """Get consolidated summary of today's flows from database"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    # Get today's flows with detailed information
+    query = """
+        SELECT symbol, order_type, strike, contracts, COUNT(*) as flow_count, 
+               SUM(contracts) as total_contracts, AVG(contracts) as avg_contracts, 
+               MIN(trade_date) as first_flow, MAX(trade_date) as last_flow
+        FROM flows 
+        WHERE DATE(trade_date) = ?
+        GROUP BY symbol, order_type, strike, contracts
+        ORDER BY total_contracts DESC
+    """
+    
+    detailed_flows = pd.read_sql_query(query, conn, params=[today])
+    
+    # Get summary by symbol and order type
+    summary_query = """
+        SELECT symbol, order_type, COUNT(*) as flow_count, SUM(contracts) as total_contracts, 
+               AVG(contracts) as avg_contracts, MIN(contracts) as min_contracts, 
+               MAX(contracts) as max_contracts, MIN(trade_date) as first_flow, MAX(trade_date) as last_flow
+        FROM flows 
+        WHERE DATE(trade_date) = ?
+        GROUP BY symbol, order_type
+        ORDER BY total_contracts DESC
+    """
+    
+    summary_df = pd.read_sql_query(summary_query, conn, params=[today])
+    
+    # Get overall stats for today
+    overall_query = """
+        SELECT 
+            COUNT(*) as total_flows,
+            COUNT(DISTINCT symbol) as unique_symbols,
+            SUM(contracts) as total_contracts,
+            SUM(CASE WHEN order_type LIKE '%Calls%' THEN contracts ELSE 0 END) as call_contracts,
+            SUM(CASE WHEN order_type LIKE '%Puts%' THEN contracts ELSE 0 END) as put_contracts,
+            SUM(CASE WHEN order_type LIKE '%Bought%' THEN contracts ELSE 0 END) as bought_contracts,
+            SUM(CASE WHEN order_type LIKE '%Sold%' THEN contracts ELSE 0 END) as sold_contracts,
+            MIN(contracts) as min_contract_size,
+            MAX(contracts) as max_contract_size,
+            AVG(contracts) as avg_contract_size
+        FROM flows 
+        WHERE DATE(trade_date) = ?
+    """
+    
+    overall_stats = pd.read_sql_query(overall_query, conn, params=[today])
+    
+    conn.close()
+    
+    return summary_df, overall_stats, detailed_flows
+
+def format_todays_summary(summary_df, overall_stats, detailed_flows):
+    """Format today's flow summary into readable text with notable strikes and contract sizes"""
+    if summary_df.empty:
+        return "📭 No flows stored for today yet."
+    
+    stats = overall_stats.iloc[0]
+    
+    summary_text = f"""
+📊 **TODAY'S FLOW SUMMARY** - {datetime.now().strftime('%Y-%m-%d')}
+
+**🎯 OVERALL STATISTICS:**
+• Total Flows: {stats['total_flows']}
+• Unique Symbols: {stats['unique_symbols']}
+• Total Contracts: {stats['total_contracts']:,}
+• Call Contracts: {stats['call_contracts']:,} ({stats['call_contracts']/stats['total_contracts']*100:.1f}%)
+• Put Contracts: {stats['put_contracts']:,} ({stats['put_contracts']/stats['total_contracts']*100:.1f}%)
+• Bought vs Sold: {stats['bought_contracts']:,} bought | {stats['sold_contracts']:,} sold
+• Contract Size Range: {stats['min_contract_size']:,} - {stats['max_contract_size']:,} (Avg: {stats['avg_contract_size']:,.0f})
+
+**📈 TOP ACTIVITY BY SYMBOL:**
+"""
+    
+    # Group by symbol for cleaner display
+    symbol_summary = summary_df.groupby('symbol').agg({
+        'flow_count': 'sum',
+        'total_contracts': 'sum',
+        'avg_contracts': 'mean',
+        'min_contracts': 'min',
+        'max_contracts': 'max'
+    }).sort_values('total_contracts', ascending=False).head(10)
+    
+    for symbol, row in symbol_summary.iterrows():
+        symbol_flows = summary_df[summary_df['symbol'] == symbol]
+        
+        # Get breakdown by order type
+        call_flows = symbol_flows[symbol_flows['order_type'].str.contains('Calls')]
+        put_flows = symbol_flows[symbol_flows['order_type'].str.contains('Puts')]
+        
+        call_contracts = call_flows['total_contracts'].sum() if not call_flows.empty else 0
+        put_contracts = put_flows['total_contracts'].sum() if not put_flows.empty else 0
+        
+        bias = "📈 CALL HEAVY" if call_contracts > put_contracts * 1.5 else "📉 PUT HEAVY" if put_contracts > call_contracts * 1.5 else "⚖️ MIXED"
+        
+        # Get notable strikes and contract sizes for this symbol
+        symbol_detailed = detailed_flows[detailed_flows['symbol'] == symbol].sort_values('total_contracts', ascending=False)
+        
+        # Find most notable strikes (top 2)
+        notable_strikes = []
+        if not symbol_detailed.empty:
+            top_flows = symbol_detailed.head(2)
+            for _, flow in top_flows.iterrows():
+                strike_clean = flow['strike'].replace('C', '').replace('P', '')
+                contract_type = '📞' if 'C' in flow['strike'] else '📻'
+                order_action = '🟢BUY' if 'Bought' in flow['order_type'] else '🔴SELL'
+                notable_strikes.append(f"{contract_type}{strike_clean} ({order_action} {flow['contracts']:,})")
+        
+        # Get contract size range for this symbol
+        min_size = int(row['min_contracts'])
+        max_size = int(row['max_contracts'])
+        size_range = f"{min_size:,}" if min_size == max_size else f"{min_size:,}-{max_size:,}"
+        
+        summary_text += f"""
+**{symbol}** {bias}
+  └─ {int(row['flow_count'])} flows | {int(row['total_contracts']):,} total contracts | Size range: {size_range}
+  └─ Calls: {call_contracts:,} | Puts: {put_contracts:,}"""
+        
+        # Add notable strikes if available
+        if notable_strikes:
+            strikes_text = " | ".join(notable_strikes[:2])  # Limit to top 2 to keep clean
+            summary_text += f"""
+  └─ 🎯 Notable: {strikes_text}"""
+    
+    return summary_text
+
+def generate_symbol_interpretation(flows_df, symbol):
+    """Generate interpretation summary for a specific symbol's flows"""
+    if flows_df.empty:
+        return f"📭 No flows found for {symbol} in the selected time period."
+    
+    symbol_flows = flows_df[flows_df['symbol'] == symbol]
+    if symbol_flows.empty:
+        return f"📭 No flows found for {symbol} in the selected time period."
+    
+    # Analyze the flows
+    total_flows = len(symbol_flows)
+    call_flows = symbol_flows[symbol_flows['order_type'].str.contains('Calls')]
+    put_flows = symbol_flows[symbol_flows['order_type'].str.contains('Puts')]
+    bought_flows = symbol_flows[symbol_flows['order_type'].str.contains('Bought')]
+    sold_flows = symbol_flows[symbol_flows['order_type'].str.contains('Sold')]
+    
+    total_contracts = symbol_flows['contracts'].sum()
+    call_contracts = call_flows['contracts'].sum() if not call_flows.empty else 0
+    put_contracts = put_flows['contracts'].sum() if not put_flows.empty else 0
+    bought_contracts = bought_flows['contracts'].sum() if not bought_flows.empty else 0
+    sold_contracts = sold_flows['contracts'].sum() if not sold_flows.empty else 0
+    
+    # Determine bias and sentiment
+    if call_contracts > put_contracts * 1.5:
+        direction_bias = "📈 BULLISH BIAS"
+        bias_explanation = f"Call activity dominates with {call_contracts:,} vs {put_contracts:,} put contracts"
+    elif put_contracts > call_contracts * 1.5:
+        direction_bias = "📉 BEARISH BIAS" 
+        bias_explanation = f"Put activity dominates with {put_contracts:,} vs {call_contracts:,} call contracts"
+    else:
+        direction_bias = "⚖️ NEUTRAL/MIXED"
+        bias_explanation = f"Balanced activity with {call_contracts:,} call and {put_contracts:,} put contracts"
+    
+    # Analyze buying vs selling
+    if bought_contracts > sold_contracts * 1.3:
+        action_bias = "🟢 NET BUYING"
+        action_explanation = f"Heavy buying pressure with {bought_contracts:,} bought vs {sold_contracts:,} sold"
+    elif sold_contracts > bought_contracts * 1.3:
+        action_bias = "🔴 NET SELLING"
+        action_explanation = f"Heavy selling pressure with {sold_contracts:,} sold vs {bought_contracts:,} bought"
+    else:
+        action_bias = "🟡 MIXED TRADING"
+        action_explanation = f"Balanced trading with {bought_contracts:,} bought and {sold_contracts:,} sold"
+    
+    # Get notable strikes
+    strike_activity = symbol_flows.groupby('strike')['contracts'].sum().sort_values(ascending=False)
+    top_strikes = strike_activity.head(3)
+    
+    # Get size distribution
+    avg_size = symbol_flows['contracts'].mean()
+    min_size = symbol_flows['contracts'].min()
+    max_size = symbol_flows['contracts'].max()
+    
+    # Recent activity (latest flows)
+    latest_flows = symbol_flows.sort_values('trade_date', ascending=False).head(3)
+    
+    interpretation = f"""
+🎯 **{symbol} FLOW INTERPRETATION**
+
+**📊 ACTIVITY OVERVIEW:**
+• Total Flows: {total_flows}
+• Total Contracts: {total_contracts:,}
+• Size Range: {min_size:,} - {max_size:,} (Avg: {avg_size:,.0f})
+
+**🎭 MARKET SENTIMENT:**
+• {direction_bias}
+• {action_bias}
+
+**📈 DETAILED ANALYSIS:**
+• {bias_explanation}
+• {action_explanation}
+
+**🎯 MOST ACTIVE STRIKES:**"""
+    
+    for strike, contracts in top_strikes.items():
+        strike_clean = strike.replace('C', '').replace('P', '')
+        contract_type = "📞 Call" if 'C' in strike else "📻 Put"
+        interpretation += f"\n• {contract_type} ${strike_clean}: {contracts:,} contracts"
+    
+    if not latest_flows.empty:
+        interpretation += f"\n\n**⏰ RECENT ACTIVITY:**"
+        for _, flow in latest_flows.iterrows():
+            strike_clean = flow['strike'].replace('C', '').replace('P', '')
+            contract_type = "📞" if 'C' in flow['strike'] else "📻"
+            action_color = "🟢" if 'Bought' in flow['order_type'] else "🔴"
+            interpretation += f"\n• {contract_type} ${strike_clean} - {action_color} {flow['order_type']} {flow['contracts']:,} contracts"
+    
+    return interpretation
 
 # Function to load and process CSV file
 def load_csv(file):
@@ -746,20 +1120,9 @@ def display_repeat_flows(df, min_premium=30000):
     with st.expander("📋 Easy Sharing Summary", expanded=True):
         sharing_summary = generate_repeat_flows_summary(repeat_flows)
         
-        # Create tabs for different sharing formats
-        summary_tabs = st.tabs(["Professional Summary", "Discord/Slack", "Quick List"])
-        
-        with summary_tabs[0]:
-            st.markdown("**📊 Professional Report Format**")
-            st.text_area("Professional Summary:", sharing_summary['Professional'], height=400, key="prof_repeat_summary")
-        
-        with summary_tabs[1]:
-            st.markdown("**💬 Social Media Format (Discord/Slack optimized)**")
-            st.text_area("Social Format:", sharing_summary['Social'], height=300, key="social_repeat_summary")
-        
-        with summary_tabs[2]:
-            st.markdown("**⚡ Quick List Format**")
-            st.text_area("Quick List:", sharing_summary['Quick'], height=200, key="quick_repeat_summary")
+        # Streamlined single format
+        st.markdown("**📊 Professional Report Format**")
+        st.text_area("Copy & Share:", sharing_summary['Professional'], height=300, key="repeat_summary")
     
     # Show raw data
     with st.expander("Raw Repeat Flows Data"):
@@ -1119,27 +1482,21 @@ def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grou
     with st.expander("📋 High-Volume Flow Summary for Sharing", expanded=True):
         sharing_summary = generate_high_volume_summary(results_df, min_premium, min_quantity, summary_top_n)
         
-        summary_tabs = st.tabs(["🏢 Professional", "💬 Discord", "🐦 Twitter", "📊 Table"])
+        # Streamlined format selection
+        format_choice = st.selectbox("Choose Format:", 
+                                   ["Professional", "Discord", "Twitter", "Table"], 
+                                   key="hv_format_choice")
         
-        with summary_tabs[0]:
-            st.markdown("**📊 Professional Analysis Format**")
-            st.text_area("Professional Summary:", sharing_summary['Professional'], height=400, key="prof_hv_summary")
-        
-        with summary_tabs[1]:
-            st.markdown("**🚨 Discord Alert Format** (Ready to copy-paste)")
-            st.text_area("Discord Alert:", sharing_summary['Discord'], height=350, key="discord_hv_summary")
-        
-        with summary_tabs[2]:
-            st.markdown("**🐦 Twitter Alert Format** (Character optimized)")
-            tweet_text = sharing_summary['Twitter']
-            char_count = len(tweet_text)
-            st.text_area(f"Twitter Alert ({char_count}/280 chars):", tweet_text, height=200, key="twitter_hv_summary")
+        selected_format = sharing_summary[format_choice]
+        if format_choice == "Twitter":
+            char_count = len(selected_format)
+            st.text_area(f"Twitter Format ({char_count}/280 chars):", 
+                        selected_format, height=200, key="selected_hv_summary")
             if char_count > 280:
                 st.warning(f"⚠️ Tweet is {char_count - 280} characters too long!")
-        
-        with summary_tabs[3]:
-            st.markdown("**📊 Clean Table Format** (Easy copy-paste for Discord/Slack)")
-            st.text_area("Table Format:", sharing_summary['Table'], height=300, key="table_hv_summary")
+        else:
+            st.text_area(f"{format_choice} Format:", 
+                        selected_format, height=300, key="selected_hv_summary")
     
     # Raw data
     with st.expander("Raw High-Volume Flow Data"):
@@ -1567,27 +1924,25 @@ def display_top_trades_summary(df, min_premium=250000, min_flows=3):
             display_trade_tier(lower_trades, "⚠️")
     
     # Enhanced copy-to-clipboard functionality with multiple formats
-    with st.expander("📋 Copy Professional Summary (Multiple Formats)", expanded=True):
+    with st.expander("📋 Copy Professional Summary", expanded=True):
         summary_formats = generate_professional_summary(top_trades)
         
-        # Create tabs for different formats
-        format_tabs = st.tabs(["Full Report", "Discord", "Twitter", "Quick Summary"])
+        # Simple dropdown instead of tabs
+        format_type = st.selectbox("Select Format:", 
+                                 ["Full Report", "Discord", "Twitter", "Quick Summary"], 
+                                 key="summary_format_choice")
         
-        with format_tabs[0]:
-            st.markdown("**📄 Complete comprehensive report with all tiers**")
-            st.text_area("Full Report:", summary_formats['Full Report'], height=500, key="full_report")
+        selected_summary = summary_formats[format_type]
         
-        with format_tabs[1]:
-            st.markdown("**💬 Optimized for Discord sharing (under 2000 chars)**")
-            st.text_area("Discord Format:", summary_formats['Discord'], height=300, key="discord_format")
-        
-        with format_tabs[2]:
-            st.markdown("**🐦 Optimized for Twitter (under 280 chars)**")
-            st.text_area("Twitter Format:", summary_formats['Twitter'], height=150, key="twitter_format")
-        
-        with format_tabs[3]:
-            st.markdown("**⚡ Quick one-liner summary**")
-            st.text_area("Quick Summary:", summary_formats['Quick Summary'], height=100, key="quick_summary")
+        if format_type == "Twitter":
+            char_count = len(selected_summary)
+            st.text_area(f"Twitter Format ({char_count}/280 chars):", 
+                        selected_summary, height=150, key="selected_summary")
+            if char_count > 280:
+                st.warning(f"⚠️ Tweet is {char_count - 280} characters too long!")
+        else:
+            height = 500 if format_type == "Full Report" else 200
+            st.text_area(f"{format_type}:", selected_summary, height=height, key="selected_summary")
     
     # Enhanced scoring methodology
     with st.expander("🧠 Enhanced AI Scoring Methodology"):
@@ -2232,8 +2587,8 @@ def main():
             df = load_csv(uploaded_file)
         
         if df is not None:
-            # Add the new tab here
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters"])
+            # Add the new Flow Database tab
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters", "Flow Database"])
             
             with tab1:
                 st.subheader("📊 Generate Dashboard Newsletter")
@@ -2526,6 +2881,116 @@ def main():
                         - 📊 Total premium: $300,000
                         - 🧠 Mixed signals: Call buying + Put buying = Volatility play
                         """)
-
+            
+            # NEW TAB - Flow Database
+            with tab7:
+                st.subheader("🗄️ Flow Database")
+                st.markdown("Store and analyze flows for top 30 stocks (minimum 900 contracts) with advanced filtering")
+                
+                # Initialize database
+                init_flow_database()
+                
+                # Two main sections
+                col1, col2 = st.columns([1, 2])
+                
+                with col1:
+                    st.markdown("### 📥 Store New Flows")
+                    st.info("⚡ Only flows with 900+ contracts will be stored")
+                    
+                    # Show which stocks are tracked
+                    with st.expander("📊 Tracked Stocks (Top 30)", expanded=False):
+                        stock_cols = st.columns(3)
+                        for i, stock in enumerate(TOP_30_STOCKS):
+                            with stock_cols[i % 3]:
+                                st.write(f"• {stock}")
+                    
+                    if st.button("💾 Store High-Volume Flows (900+ contracts)", type="primary"):
+                        with st.spinner("Storing high-volume flows in database..."):
+                            count = store_flows_in_database(df)
+                        if count > 0:
+                            st.success(f"✅ Stored {count} high-volume flows in database!")
+                        else:
+                            st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts)")
+                
+                with col2:
+                    st.markdown("### 🔍 Filter & View Database")
+                    
+                    # Filter controls
+                    filter_cols = st.columns(4)
+                    
+                    with filter_cols[0]:
+                        symbol_options = ["All"] + TOP_30_STOCKS
+                        symbol_filter = st.selectbox("Symbol", symbol_options, key="db_symbol_filter")
+                    
+                    with filter_cols[1]:
+                        order_type_options = ["All", "Calls Bought", "Calls Sold", "Puts Bought", "Puts Sold"]
+                        order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
+                    
+                    with filter_cols[2]:
+                        date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=30), key="db_date_from")
+                    
+                    with filter_cols[3]:
+                        date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
+                
+                # Automatically load and display filtered data (reactive filtering)
+                with st.spinner("Loading flows from database..."):
+                    flows_df = get_flows_from_database(
+                        symbol_filter=symbol_filter if symbol_filter != "All" else None,
+                        order_type_filter=order_type_filter if order_type_filter != "All" else None,
+                        date_from=date_from,
+                        date_to=date_to
+                    )
+                
+                # Show interpretation when specific symbol is selected
+                if symbol_filter != "All":
+                    with st.expander(f"🧠 {symbol_filter} Flow Interpretation", expanded=True):
+                        interpretation = generate_symbol_interpretation(flows_df, symbol_filter)
+                        st.markdown(interpretation)
+                
+                # Display results
+                if not flows_df.empty:
+                    # Summary stats
+                    stats_cols = st.columns(4)
+                    with stats_cols[0]:
+                        st.metric("Total Flows", len(flows_df))
+                    with stats_cols[1]:
+                        unique_symbols = flows_df['symbol'].nunique()
+                        st.metric("Unique Symbols", unique_symbols)
+                    with stats_cols[2]:
+                        calls_count = flows_df[flows_df['order_type'].str.contains('Calls')].shape[0]
+                        st.metric("Call Flows", calls_count)
+                    with stats_cols[3]:
+                        puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
+                        st.metric("Put Flows", puts_count)
+                    
+                    # Format the data for display exactly like the user's example
+                    display_df = flows_df.copy()
+                    display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts']
+                    
+                    # Apply styling to match the user's example
+                    def style_order_type(val):
+                        if 'Bought' in val:
+                            return 'background-color: #d4edda; color: #155724; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
+                        elif 'Sold' in val:
+                            return 'background-color: #f8d7da; color: #721c24; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
+                        return ''
+                    
+                    # Display with enhanced formatting
+                    st.markdown("### 📊 Flow Database Results")
+                    
+                    styled_df = display_df.style.applymap(style_order_type, subset=['Order Type'])
+                    st.dataframe(styled_df, use_container_width=True, height=400)
+                    
+                    # Export option
+                    csv_data = display_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Filtered Data as CSV",
+                        data=csv_data,
+                        file_name=f"flow_database_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                else:
+                    st.info("No flows found matching the current filters.")
 if __name__ == "__main__":
     main()
