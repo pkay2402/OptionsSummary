@@ -9,8 +9,8 @@ import hashlib
 # Top 30 stocks to track in database
 TOP_30_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'UNH', 'JNJ',
-    'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ',
-    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR','GS','VRT','BABA',
+    'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ','GS','VRT','BABA',
+    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR',
     # More tech stocks added below
     'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'NOW', 'SNOW', 'SHOP', 'RDDT', 'XYZ','MSTR',
     'NBIS', 'ASML', 'MRVL', 'GOOG', 'IBM', 'GEV', 'UBER', 'BA', 'DDOG', 'PANW','MDB','HOOD','COIN'
@@ -2580,17 +2580,25 @@ def main():
     st.title("🔍 Options Flow Analyzer")
     st.markdown("Generate a newsletter or view OTM option flows for the next 2 weeks.")
     
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    # Main tabs (always available)
+    main_tab1, main_tab2 = st.tabs(["📊 Flow Analysis", "🗄️ Flow Database"])
     
-    if uploaded_file:
-        with st.spinner("Loading data..."):
-            df = load_csv(uploaded_file)
+    with main_tab1:
+        st.markdown("### 📤 Upload CSV for Analysis")
+        uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
         
-        if df is not None:
-            # Add the new Flow Database tab
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters", "Flow Database"])
+        if uploaded_file:
+            with st.spinner("Loading data..."):
+                df = load_csv(uploaded_file)
             
-            with tab1:
+            if df is not None:
+                # Store in session state for Flow Database tab access
+                st.session_state.uploaded_df = df
+                
+                # Analysis tabs (only when CSV is uploaded)
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters"])
+                
+                with tab1:
                 st.subheader("📊 Generate Dashboard Newsletter")
                 
                 # Create two columns for different newsletter types
@@ -2881,116 +2889,126 @@ def main():
                         - 📊 Total premium: $300,000
                         - 🧠 Mixed signals: Call buying + Put buying = Volatility play
                         """)
+        else:
+            st.info("👆 Upload a CSV file to start analyzing options flow data")
+    
+    with main_tab2:
+        st.subheader("🗄️ Flow Database")
+        st.markdown("Store and analyze flows for top 30 stocks (minimum 900 contracts) with advanced filtering")
+        
+        # Initialize database
+        init_flow_database()
+        
+        # Two main sections
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown("### 📥 Store New Flows")
+            st.info("⚡ Only flows with 900+ contracts will be stored")
             
-            # NEW TAB - Flow Database
-            with tab7:
-                st.subheader("🗄️ Flow Database")
-                st.markdown("Store and analyze flows for top 30 stocks (minimum 900 contracts) with advanced filtering")
-                
-                # Initialize database
-                init_flow_database()
-                
-                # Two main sections
-                col1, col2 = st.columns([1, 2])
-                
-                with col1:
-                    st.markdown("### 📥 Store New Flows")
-                    st.info("⚡ Only flows with 900+ contracts will be stored")
-                    
-                    # Show which stocks are tracked
-                    with st.expander("📊 Tracked Stocks (Top 30)", expanded=False):
-                        stock_cols = st.columns(3)
-                        for i, stock in enumerate(TOP_30_STOCKS):
-                            with stock_cols[i % 3]:
-                                st.write(f"• {stock}")
-                    
-                    if st.button("💾 Store High-Volume Flows (900+ contracts)", type="primary"):
-                        with st.spinner("Storing high-volume flows in database..."):
-                            count = store_flows_in_database(df)
-                        if count > 0:
-                            st.success(f"✅ Stored {count} high-volume flows in database!")
-                        else:
-                            st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts)")
-                
-                with col2:
-                    st.markdown("### 🔍 Filter & View Database")
-                    
-                    # Filter controls
-                    filter_cols = st.columns(4)
-                    
-                    with filter_cols[0]:
-                        symbol_options = ["All"] + TOP_30_STOCKS
-                        symbol_filter = st.selectbox("Symbol", symbol_options, key="db_symbol_filter")
-                    
-                    with filter_cols[1]:
-                        order_type_options = ["All", "Calls Bought", "Calls Sold", "Puts Bought", "Puts Sold"]
-                        order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
-                    
-                    with filter_cols[2]:
-                        date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=30), key="db_date_from")
-                    
-                    with filter_cols[3]:
-                        date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
-                
-                # Automatically load and display filtered data (reactive filtering)
-                with st.spinner("Loading flows from database..."):
-                    flows_df = get_flows_from_database(
-                        symbol_filter=symbol_filter if symbol_filter != "All" else None,
-                        order_type_filter=order_type_filter if order_type_filter != "All" else None,
-                        date_from=date_from,
-                        date_to=date_to
-                    )
-                
-                # Show interpretation when specific symbol is selected
-                if symbol_filter != "All":
-                    with st.expander(f"🧠 {symbol_filter} Flow Interpretation", expanded=True):
-                        interpretation = generate_symbol_interpretation(flows_df, symbol_filter)
-                        st.markdown(interpretation)
-                
-                # Display results
-                if not flows_df.empty:
-                    # Summary stats
-                    stats_cols = st.columns(4)
-                    with stats_cols[0]:
-                        st.metric("Total Flows", len(flows_df))
-                    with stats_cols[1]:
-                        unique_symbols = flows_df['symbol'].nunique()
-                        st.metric("Unique Symbols", unique_symbols)
-                    with stats_cols[2]:
-                        calls_count = flows_df[flows_df['order_type'].str.contains('Calls')].shape[0]
-                        st.metric("Call Flows", calls_count)
-                    with stats_cols[3]:
-                        puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
-                        st.metric("Put Flows", puts_count)
-                    
-                    # Format the data for display exactly like the user's example
-                    display_df = flows_df.copy()
-                    display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts']
-                    
-                    # Apply styling to match the user's example
-                    def style_order_type(val):
-                        if 'Bought' in val:
-                            return 'background-color: #d4edda; color: #155724; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
-                        elif 'Sold' in val:
-                            return 'background-color: #f8d7da; color: #721c24; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
-                        return ''
-                    
-                    # Display with enhanced formatting
-                    st.markdown("### 📊 Flow Database Results")
-                    
-                    styled_df = display_df.style.applymap(style_order_type, subset=['Order Type'])
-                    st.dataframe(styled_df, use_container_width=True, height=400)
-                    
-                    # Export option
-                    csv_data = display_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Filtered Data as CSV",
-                        data=csv_data,
-                        file_name=f"flow_database_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv"
-                    )
-                    
-                else:
-                    st.info("No flows found matching the current filters.")
+            # Show which stocks are tracked
+            with st.expander("📊 Tracked Stocks (Top 30)", expanded=False):
+                stock_cols = st.columns(3)
+                for i, stock in enumerate(TOP_30_STOCKS):
+                    with stock_cols[i % 3]:
+                        st.write(f"• {stock}")
+            
+            # Check if we have uploaded data in the Flow Analysis tab
+            upload_section = st.empty()
+            if 'uploaded_df' not in st.session_state:
+                with upload_section.container():
+                    st.warning("📤 No CSV data available. Upload a CSV in the 'Flow Analysis' tab first.")
+                    if st.button("🔄 Check for Uploaded Data", key="check_upload"):
+                        st.rerun()
+            else:
+                if st.button("💾 Store High-Volume Flows (900+ contracts)", type="primary"):
+                    with st.spinner("Storing high-volume flows in database..."):
+                        count = store_flows_in_database(st.session_state.uploaded_df)
+                    if count > 0:
+                        st.success(f"✅ Stored {count} high-volume flows in database!")
+                    else:
+                        st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts)")
+        
+        with col2:
+            st.markdown("### 🔍 Filter & View Database")
+            
+            # Filter controls
+            filter_cols = st.columns(4)
+            
+            with filter_cols[0]:
+                symbol_options = ["All"] + TOP_30_STOCKS
+                symbol_filter = st.selectbox("Symbol", symbol_options, key="db_symbol_filter")
+            
+            with filter_cols[1]:
+                order_type_options = ["All", "Calls Bought", "Calls Sold", "Puts Bought", "Puts Sold"]
+                order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
+            
+            with filter_cols[2]:
+                date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=30), key="db_date_from")
+            
+            with filter_cols[3]:
+                date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
+        
+        # Automatically load and display filtered data (reactive filtering)
+        with st.spinner("Loading flows from database..."):
+            flows_df = get_flows_from_database(
+                symbol_filter=symbol_filter if symbol_filter != "All" else None,
+                order_type_filter=order_type_filter if order_type_filter != "All" else None,
+                date_from=date_from,
+                date_to=date_to
+            )
+        
+        # Show interpretation when specific symbol is selected
+        if symbol_filter != "All":
+            with st.expander(f"🧠 {symbol_filter} Flow Interpretation", expanded=True):
+                interpretation = generate_symbol_interpretation(flows_df, symbol_filter)
+                st.markdown(interpretation)
+        
+        # Display results
+        if not flows_df.empty:
+            # Summary stats
+            stats_cols = st.columns(4)
+            with stats_cols[0]:
+                st.metric("Total Flows", len(flows_df))
+            with stats_cols[1]:
+                unique_symbols = flows_df['symbol'].nunique()
+                st.metric("Unique Symbols", unique_symbols)
+            with stats_cols[2]:
+                calls_count = flows_df[flows_df['order_type'].str.contains('Calls')].shape[0]
+                st.metric("Call Flows", calls_count)
+            with stats_cols[3]:
+                puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
+                st.metric("Put Flows", puts_count)
+            
+            # Format the data for display exactly like the user's example
+            display_df = flows_df.copy()
+            display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts']
+            
+            # Apply styling to match the user's example
+            def style_order_type(val):
+                if 'Bought' in val:
+                    return 'background-color: #d4edda; color: #155724; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
+                elif 'Sold' in val:
+                    return 'background-color: #f8d7da; color: #721c24; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
+                return ''
+            
+            # Display with enhanced formatting
+            st.markdown("### 📊 Flow Database Results")
+            
+            styled_df = display_df.style.applymap(style_order_type, subset=['Order Type'])
+            st.dataframe(styled_df, use_container_width=True, height=400)
+            
+            # Export option
+            csv_data = display_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Filtered Data as CSV",
+                data=csv_data,
+                file_name=f"flow_database_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv"
+            )
+            
+        else:
+            st.info("No flows found matching the current filters.")
+
 if __name__ == "__main__":
     main()
