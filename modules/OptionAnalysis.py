@@ -2599,10 +2599,10 @@ def main():
                 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Newsletter", "Symbol Flows", "Repeat Flows", "Top Trades Summary", "Symbol Analysis", "High-Volume Clusters"])
                 
                 with tab1:
-                st.subheader("📊 Generate Dashboard Newsletter")
-                
-                # Create two columns for different newsletter types
-                col1, col2 = st.columns(2)
+                    st.subheader("📊 Generate Dashboard Newsletter")
+                    
+                    # Create two columns for different newsletter types
+                    col1, col2 = st.columns(2)
                 
                 with col1:
                     st.markdown("### 📄 Full Dashboard")
