@@ -10,7 +10,7 @@ import hashlib
 TOP_30_STOCKS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'UNH', 'JNJ',
     'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ','GS','VRT','BABA',
-    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR',
+    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR','APP','TEM','IBIT'
     # More tech stocks added below
     'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'NOW', 'SNOW', 'SHOP', 'RDDT', 'XYZ','MSTR',
     'NBIS', 'ASML', 'MRVL', 'GOOG', 'IBM', 'GEV', 'UBER', 'BA', 'DDOG', 'PANW','MDB','HOOD','COIN'
@@ -46,7 +46,7 @@ def init_flow_database():
     conn.close()
 
 def store_flows_in_database(df):
-    """Store flows for top 30 stocks in database (minimum 900 contracts)"""
+    """Store flows for top 30 stocks in database (minimum 900 contracts and $200K premium)"""
     if df is None or df.empty:
         return 0
     
@@ -55,6 +55,9 @@ def store_flows_in_database(df):
     
     # Filter for minimum 900 contracts
     df_filtered = df_filtered[df_filtered['Size'] >= 900].copy()
+    
+    # Filter for minimum $200K premium
+    df_filtered = df_filtered[df_filtered['Premium Price'] >= 200000].copy()
     
     if df_filtered.empty:
         return 0
@@ -98,8 +101,21 @@ def store_flows_in_database(df):
             
             expiry = exp_date.strftime('%Y-%m-%d')
             
-            # Get trade date (current date if not specified)
-            trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            # Get trade date from CSV Trade Time, fallback to current date if not available
+            trade_time = row.get('Trade Time')
+            if pd.isna(trade_time) or trade_time is None:
+                trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            else:
+                if isinstance(trade_time, str):
+                    try:
+                        trade_time = pd.to_datetime(trade_time)
+                    except:
+                        trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+                
+                if isinstance(trade_time, pd.Timestamp):
+                    trade_date = trade_time.strftime('%Y-%m-%d %H:%M')
+                else:
+                    trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
             
             # Calculate premium
             premium = float(row.get('Premium Price', 0))
@@ -322,16 +338,50 @@ def generate_symbol_interpretation(flows_df, symbol):
         direction_bias = "⚖️ NEUTRAL/MIXED"
         bias_explanation = f"Balanced activity with {call_contracts:,} call and {put_contracts:,} put contracts"
     
-    # Analyze buying vs selling
-    if bought_contracts > sold_contracts * 1.3:
-        action_bias = "🟢 NET BUYING"
-        action_explanation = f"Heavy buying pressure with {bought_contracts:,} bought vs {sold_contracts:,} sold"
-    elif sold_contracts > bought_contracts * 1.3:
-        action_bias = "🔴 NET SELLING"
-        action_explanation = f"Heavy selling pressure with {sold_contracts:,} sold vs {bought_contracts:,} bought"
+    # Calculate detailed buying/selling by type for better sentiment analysis
+    call_bought = symbol_flows[symbol_flows['order_type'] == 'Calls Bought']['contracts'].sum()
+    call_sold = symbol_flows[symbol_flows['order_type'] == 'Calls Sold']['contracts'].sum()
+    put_bought = symbol_flows[symbol_flows['order_type'] == 'Puts Bought']['contracts'].sum()
+    put_sold = symbol_flows[symbol_flows['order_type'] == 'Puts Sold']['contracts'].sum()
+    
+    # Calculate true market sentiment based on bullish vs bearish actions
+    bullish_activity = call_bought + put_sold  # Buying calls + Selling puts = Bullish
+    bearish_activity = put_bought + call_sold  # Buying puts + Selling calls = Bearish
+    
+    total_activity = bullish_activity + bearish_activity
+    if total_activity > 0:
+        bullish_percentage = (bullish_activity / total_activity) * 100
+        bearish_percentage = (bearish_activity / total_activity) * 100
+        
+        if bullish_percentage > 65:
+            market_sentiment = "🟢 BULLISH SENTIMENT"
+            sentiment_explanation = f"Strong bullish sentiment: {bullish_percentage:.1f}% bullish activity ({call_bought:,} calls bought + {put_sold:,} puts sold)"
+        elif bearish_percentage > 65:
+            market_sentiment = "🔴 BEARISH SENTIMENT"
+            sentiment_explanation = f"Strong bearish sentiment: {bearish_percentage:.1f}% bearish activity ({put_bought:,} puts bought + {call_sold:,} calls sold)"
+        elif bullish_percentage > bearish_percentage:
+            market_sentiment = "🟢 MILDLY BULLISH"
+            sentiment_explanation = f"Mildly bullish sentiment: {bullish_percentage:.1f}% vs {bearish_percentage:.1f}% bearish activity"
+        elif bearish_percentage > bullish_percentage:
+            market_sentiment = "🔴 MILDLY BEARISH"
+            sentiment_explanation = f"Mildly bearish sentiment: {bearish_percentage:.1f}% vs {bullish_percentage:.1f}% bullish activity"
+        else:
+            market_sentiment = "🟡 NEUTRAL SENTIMENT"
+            sentiment_explanation = f"Neutral sentiment: {bullish_percentage:.1f}% bullish vs {bearish_percentage:.1f}% bearish activity"
     else:
-        action_bias = "🟡 MIXED TRADING"
-        action_explanation = f"Balanced trading with {bought_contracts:,} bought and {sold_contracts:,} sold"
+        market_sentiment = "� NO CLEAR SENTIMENT"
+        sentiment_explanation = "No clear sentiment can be determined from available data"
+    
+    # Analyze pure buying vs selling pressure (separate from sentiment)
+    if bought_contracts > sold_contracts * 1.3:
+        flow_pressure = "⬆️ STRONG INFLOW"
+        pressure_explanation = f"Heavy buying pressure with {bought_contracts:,} bought vs {sold_contracts:,} sold"
+    elif sold_contracts > bought_contracts * 1.3:
+        flow_pressure = "⬇️ STRONG OUTFLOW"
+        pressure_explanation = f"Heavy selling pressure with {sold_contracts:,} sold vs {bought_contracts:,} bought"
+    else:
+        flow_pressure = "↔️ BALANCED FLOW"
+        pressure_explanation = f"Balanced flow with {bought_contracts:,} bought and {sold_contracts:,} sold"
     
     # Get notable strikes
     strike_activity = symbol_flows.groupby('strike')['contracts'].sum().sort_values(ascending=False)
@@ -354,12 +404,19 @@ def generate_symbol_interpretation(flows_df, symbol):
 • Size Range: {min_size:,} - {max_size:,} (Avg: {avg_size:,.0f})
 
 **🎭 MARKET SENTIMENT:**
-• {direction_bias}
-• {action_bias}
+• {market_sentiment}
+• {flow_pressure}
 
 **📈 DETAILED ANALYSIS:**
 • {bias_explanation}
-• {action_explanation}
+• {sentiment_explanation}
+• {pressure_explanation}
+
+**📊 BREAKDOWN BY ORDER TYPE:**
+• Calls Bought: {call_bought:,} contracts
+• Calls Sold: {call_sold:,} contracts
+• Puts Bought: {put_bought:,} contracts  
+• Puts Sold: {put_sold:,} contracts
 
 **🎯 MOST ACTIVE STRIKES:**"""
     
@@ -378,20 +435,118 @@ def generate_symbol_interpretation(flows_df, symbol):
     
     return interpretation
 
+def get_trending_bullish_stocks(days_back=7, min_flows=3):
+    """Get trending bullish stocks based on recent flow patterns"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    cutoff_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    
+    query = """
+        SELECT 
+            symbol,
+            COUNT(*) as total_flows,
+            SUM(contracts) as total_contracts,
+            SUM(CASE WHEN order_type = 'Calls Bought' THEN contracts ELSE 0 END) as calls_bought,
+            SUM(CASE WHEN order_type = 'Calls Sold' THEN contracts ELSE 0 END) as calls_sold,
+            SUM(CASE WHEN order_type = 'Puts Bought' THEN contracts ELSE 0 END) as puts_bought,
+            SUM(CASE WHEN order_type = 'Puts Sold' THEN contracts ELSE 0 END) as puts_sold,
+            MAX(trade_date) as latest_activity
+        FROM flows 
+        WHERE DATE(trade_date) >= ?
+        GROUP BY symbol
+        HAVING COUNT(*) >= ?
+        ORDER BY symbol
+    """
+    
+    df = pd.read_sql_query(query, conn, params=[cutoff_date, min_flows])
+    conn.close()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Calculate bullish sentiment score
+    df['bullish_activity'] = df['calls_bought'] + df['puts_sold']
+    df['bearish_activity'] = df['puts_bought'] + df['calls_sold']
+    df['total_activity'] = df['bullish_activity'] + df['bearish_activity']
+    
+    # Filter out stocks with no activity
+    df = df[df['total_activity'] > 0].copy()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    df['bullish_percentage'] = (df['bullish_activity'] / df['total_activity']) * 100
+    df['sentiment_score'] = df['bullish_percentage'] * (df['total_contracts'] / df['total_contracts'].max())
+    
+    # Filter for predominantly bullish stocks (>60% bullish activity)
+    bullish_df = df[df['bullish_percentage'] > 60].copy()
+    bullish_df = bullish_df.sort_values('sentiment_score', ascending=False)
+    
+    return bullish_df
+
+def get_trending_bearish_stocks(days_back=7, min_flows=3):
+    """Get trending bearish stocks based on recent flow patterns"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    cutoff_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    
+    query = """
+        SELECT 
+            symbol,
+            COUNT(*) as total_flows,
+            SUM(contracts) as total_contracts,
+            SUM(CASE WHEN order_type = 'Calls Bought' THEN contracts ELSE 0 END) as calls_bought,
+            SUM(CASE WHEN order_type = 'Calls Sold' THEN contracts ELSE 0 END) as calls_sold,
+            SUM(CASE WHEN order_type = 'Puts Bought' THEN contracts ELSE 0 END) as puts_bought,
+            SUM(CASE WHEN order_type = 'Puts Sold' THEN contracts ELSE 0 END) as puts_sold,
+            MAX(trade_date) as latest_activity
+        FROM flows 
+        WHERE DATE(trade_date) >= ?
+        GROUP BY symbol
+        HAVING COUNT(*) >= ?
+        ORDER BY symbol
+    """
+    
+    df = pd.read_sql_query(query, conn, params=[cutoff_date, min_flows])
+    conn.close()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Calculate bearish sentiment score
+    df['bullish_activity'] = df['calls_bought'] + df['puts_sold']
+    df['bearish_activity'] = df['puts_bought'] + df['calls_sold']
+    df['total_activity'] = df['bullish_activity'] + df['bearish_activity']
+    
+    # Filter out stocks with no activity
+    df = df[df['total_activity'] > 0].copy()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    df['bearish_percentage'] = (df['bearish_activity'] / df['total_activity']) * 100
+    df['sentiment_score'] = df['bearish_percentage'] * (df['total_contracts'] / df['total_contracts'].max())
+    
+    # Filter for predominantly bearish stocks (>60% bearish activity)
+    bearish_df = df[df['bearish_percentage'] > 60].copy()
+    bearish_df = bearish_df.sort_values('sentiment_score', ascending=False)
+    
+    return bearish_df
+
 # Function to load and process CSV file
 def load_csv(file):
     try:
         df = pd.read_csv(file)
         
         # Define expected columns
-        required_columns = ['Ticker', 'Expiration Date', 'Contract Type', 'Strike Price', 
+        required_columns = ['Trade Time', 'Ticker', 'Expiration Date', 'Contract Type', 'Strike Price', 
                            'Reference Price', 'Size', 'Premium Price', 'Side Code', 
                            'Is Opening Position', 'Money Type', 'Is Unusual', 'Is Golden Sweep']
         
         # Map columns by position if names don't match
         if not all(col in df.columns for col in required_columns):
             column_mapping = {
-                2: 'Ticker', 3: 'Expiration Date', 4: 'Days Until Expiration',
+                1: 'Trade Time', 2: 'Ticker', 3: 'Expiration Date', 4: 'Days Until Expiration',
                 5: 'Strike Price', 6: 'Contract Type', 7: 'Reference Price',
                 8: 'Size', 9: 'Option Price', 12: 'Premium Price', 19: 'Side Code',
                 15: 'Is Unusual', 16: 'Is Golden Sweep', 17: 'Is Opening Position',
@@ -400,6 +555,7 @@ def load_csv(file):
             df.columns = [column_mapping.get(i, col) for i, col in enumerate(df.columns)]
         
         # Convert and clean data
+        df['Trade Time'] = pd.to_datetime(df['Trade Time'], errors='coerce')
         df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
         numeric_cols = ['Strike Price', 'Reference Price', 'Size', 'Premium Price']
         for col in numeric_cols:
@@ -2884,7 +3040,7 @@ def main():
                         - Flow 3: PUT $170 - Premium: $95,000 - Quantity: 1,100 contracts
                         
                         **Analysis Results:**
-                        - ✅ All flows meet criteria (Premium > $70K, Quantity > 900)
+                        - ✅ All flows meet criteria (Premium > $200K, Quantity > 900)
                         - 🎯 3 flows for same stock = cluster detected
                         - 📊 Total premium: $300,000
                         - 🧠 Mixed signals: Call buying + Put buying = Volatility play
@@ -2894,7 +3050,7 @@ def main():
     
     with main_tab2:
         st.subheader("🗄️ Flow Database")
-        st.markdown("Store and analyze flows for top 30 stocks (minimum 900 contracts) with advanced filtering")
+        st.markdown("Store and analyze flows for (minimum 900 contracts + $200K premium) with advanced filtering")
         
         # Initialize database
         init_flow_database()
@@ -2904,10 +3060,10 @@ def main():
         
         with col1:
             st.markdown("### 📥 Store New Flows")
-            st.info("⚡ Only flows with 900+ contracts will be stored")
+            st.info("⚡ Only flows with 900+ contracts and $200K+ premium will be stored")
             
             # Show which stocks are tracked
-            with st.expander("📊 Tracked Stocks (Top 30)", expanded=False):
+            with st.expander("📊 Tracked Stocks", expanded=False):
                 stock_cols = st.columns(3)
                 for i, stock in enumerate(TOP_30_STOCKS):
                     with stock_cols[i % 3]:
@@ -2921,13 +3077,13 @@ def main():
                     if st.button("🔄 Check for Uploaded Data", key="check_upload"):
                         st.rerun()
             else:
-                if st.button("💾 Store High-Volume Flows (900+ contracts)", type="primary"):
+                if st.button("💾 Store High-Volume Flows (900+ contracts, $200K+ premium)", type="primary"):
                     with st.spinner("Storing high-volume flows in database..."):
                         count = store_flows_in_database(st.session_state.uploaded_df)
                     if count > 0:
                         st.success(f"✅ Stored {count} high-volume flows in database!")
                     else:
-                        st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts)")
+                        st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts + $200K+ premium)")
         
         with col2:
             st.markdown("### 🔍 Filter & View Database")
@@ -2979,6 +3135,54 @@ def main():
             with stats_cols[3]:
                 puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
                 st.metric("Put Flows", puts_count)
+            
+            # Add trending sections if showing all symbols
+            if symbol_filter == "All":
+                st.markdown("---")
+                
+                trending_cols = st.columns(2)
+                
+                with trending_cols[0]:
+                    st.markdown("### 📈 Top Trending Bullish Stocks")
+                    with st.spinner("Analyzing bullish trends..."):
+                        bullish_stocks = get_trending_bullish_stocks(days_back=7, min_flows=2)
+                    
+                    if not bullish_stocks.empty:
+                        for idx, row in bullish_stocks.head(10).iterrows():
+                            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                            
+                            with col1:
+                                st.write(f"**{row['symbol']}**")
+                            with col2:
+                                st.write(f"🟢 {row['bullish_percentage']:.1f}%")
+                            with col3:
+                                st.write(f"{row['total_flows']} flows")
+                            with col4:
+                                st.write(f"{row['total_contracts']:,} contracts")
+                    else:
+                        st.info("No trending bullish stocks found in the last 7 days")
+                
+                with trending_cols[1]:
+                    st.markdown("### 📉 Top Trending Bearish Stocks")
+                    with st.spinner("Analyzing bearish trends..."):
+                        bearish_stocks = get_trending_bearish_stocks(days_back=7, min_flows=2)
+                    
+                    if not bearish_stocks.empty:
+                        for idx, row in bearish_stocks.head(10).iterrows():
+                            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                            
+                            with col1:
+                                st.write(f"**{row['symbol']}**")
+                            with col2:
+                                st.write(f"🔴 {row['bearish_percentage']:.1f}%")
+                            with col3:
+                                st.write(f"{row['total_flows']} flows")
+                            with col4:
+                                st.write(f"{row['total_contracts']:,} contracts")
+                    else:
+                        st.info("No trending bearish stocks found in the last 7 days")
+                
+                st.markdown("---")
             
             # Format the data for display exactly like the user's example
             display_df = flows_df.copy()
