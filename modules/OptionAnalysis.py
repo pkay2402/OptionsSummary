@@ -6,14 +6,33 @@ import os
 import sqlite3
 import hashlib
 
+try:
+    import pytz
+    TIMEZONE_AVAILABLE = True
+except ImportError:
+    TIMEZONE_AVAILABLE = False
+    st.warning("⚠️ pytz not installed. Install with: pip install pytz for proper timezone handling")
+
 # Top 30 stocks to track in database
 TOP_30_STOCKS = [
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'UNH', 'JNJ',
-    'XOM', 'V', 'PG', 'JPM', 'HD', 'CVX', 'SNOW', 'MU', 'ABBV', 'TQQQ','GS','VRT','BABA',
-    'AMD', 'AVGO', 'NFLX', 'COST', 'WMT', 'ORCL', 'UNH', 'LLY', 'PLTR','APP','TEM','IBIT'
-    # More tech stocks added below
-    'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'NOW', 'SNOW', 'SHOP', 'RDDT', 'XYZ','MSTR',
-    'NBIS', 'ASML', 'MRVL', 'GOOG', 'IBM', 'GEV', 'UBER', 'BA', 'DDOG', 'PANW','MDB','HOOD','COIN'
+    # Mega-cap tech & growth
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'AVGO', 'AMD', 'SNOW', 'NOW', 'SHOP', 'PLTR', 'UBER', 'PANW', 'DDOG', 'MDB', 'MRVL', 'ASML', 'VRT', 'APP', 'TEM', 'MSTR', 'RDDT', 'HOOD', 'COIN', 'XYZ', 'NBIS',
+    # Financials
+    'JPM', 'GS', 'BAC', 'MS', 'WFC', 'C', 'PYPL', 'V', 'MA', 'AXP', 'SCHW', 'BLK',
+    # Healthcare & Pharma
+    'UNH', 'JNJ', 'LLY', 'ABBV', 'PFE', 'MRNA', 'BNTX', 'GILD', 'BIIB', 'AMGN', 'REGN',
+    # Consumer & Retail
+    'HD', 'LOW', 'COST', 'WMT', 'TGT', 'NKE', 'SBUX', 'DIS', 'NFLX', 'WBD', 'PARA', 'ROKU', 'SPOT',
+    # Energy & Industrials
+    'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'DVN', 'MRO', 'GE', 'BA', 'CAT', 'DE', 'HON', 'MMM', 'LMT',
+    # ETFs & Index proxies
+    'SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'VIX', 'UVXY', 'VXX', 'SVXY', 'IBIT',
+    # Autos & EV
+    'TSLA', 'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'BYD',
+    # China/Asia
+    'BABA', 'JD', 'PDD', 'TCEHY', 'NTES', 'BIDU',
+    # Others - high volume
+    'REGN', 'VRTX', 'ENPH', 'XYZ', 'TTD', 'ETSY', 'SHOP', 'PLUG', 'SOFI', 'DKNG', 'ABNB', 'ZS', 'CRWD', 'ROKU', 'PLTR', 'MARA', 'RIOT', 'IBIT', 'ETHA'
 ]
 
 def init_flow_database():
@@ -31,6 +50,7 @@ def init_flow_database():
             expiry TEXT,
             contracts INTEGER,
             premium REAL,
+            implied_volatility REAL,
             data_hash TEXT UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -44,6 +64,87 @@ def init_flow_database():
     
     conn.commit()
     conn.close()
+
+def smart_flow_interpretation(df):
+    """
+    Smart interpretation of flow direction using multiple factors:
+    - Side code patterns
+    - Implied volatility levels
+    - Block size clustering
+    - Time proximity
+    - Premium levels
+    """
+    if df is None or df.empty:
+        return df
+    
+    df = df.copy()
+    df['smart_order_type'] = df.apply(lambda row: determine_smart_order_type(row, df), axis=1)
+    return df
+
+def determine_smart_order_type(row, full_df):
+    """
+    Determine the likely true order type using contextual analysis
+    """
+    symbol = row['Ticker']
+    strike = row['Strike Price']
+    contract_type = row['Contract Type']
+    side_code = row['Side Code']
+    trade_time = row['Trade Time']
+    size = row['Size']
+    iv = row.get('Implied Volatility', 0)
+    premium = row.get('Premium Price', 0)
+    
+    # Default interpretation based on side code
+    if contract_type == 'CALL':
+        default_order = 'Calls Bought' if side_code in ['A', 'AA'] else 'Calls Sold'
+    else:
+        default_order = 'Puts Bought' if side_code in ['A', 'AA'] else 'Puts Sold'
+    
+    # Look for clustering patterns (same strike, similar times, large sizes)
+    if pd.notna(trade_time):
+        time_window = pd.Timedelta(minutes=30)
+        similar_flows = full_df[
+            (full_df['Ticker'] == symbol) &
+            (full_df['Strike Price'] == strike) &
+            (full_df['Contract Type'] == contract_type) &
+            (full_df['Size'] >= 1000) &  # Large institutional flows
+            (abs(full_df['Trade Time'] - trade_time) <= time_window)
+        ]
+        
+        if len(similar_flows) >= 3:  # Multiple large flows at same strike
+            total_volume = similar_flows['Size'].sum()
+            avg_iv = similar_flows['Implied Volatility'].mean()
+            
+            # High volume clustering with high IV suggests institutional positioning
+            if total_volume >= 5000 and avg_iv > 50:
+                # Look at the flow pattern
+                side_b_volume = similar_flows[similar_flows['Side Code'] == 'B']['Size'].sum()
+                side_a_volume = similar_flows[similar_flows['Side Code'] == 'A']['Size'].sum()
+                
+                # If predominantly one side, it's likely institutional positioning
+                if side_b_volume > side_a_volume * 2:  # Mostly "B" (bid hits)
+                    # Large bid hits often indicate institutional buying despite being marked as "sold"
+                    if contract_type == 'CALL':
+                        return 'Calls Bought'  # Override: likely institutional call buying
+                    else:
+                        return 'Puts Bought'   # Override: likely institutional put buying
+                        
+                elif side_a_volume > side_b_volume * 2:  # Mostly "A" (ask lifts)
+                    # Ask lifts confirm buying pressure
+                    if contract_type == 'CALL':
+                        return 'Calls Bought'
+                    else:
+                        return 'Puts Bought'
+    
+    # High IV with large size suggests aggressive positioning
+    if iv > 75 and size >= 2000:
+        if contract_type == 'CALL' and side_code == 'B':
+            return 'Calls Bought'  # Override: likely aggressive call buying despite bid hit
+        elif contract_type == 'PUT' and side_code == 'B':
+            return 'Puts Bought'   # Override: likely aggressive put buying despite bid hit
+    
+    # Default to original interpretation
+    return default_order
 
 def store_flows_in_database(df):
     """Store flows for top 30 stocks in database (minimum 900 contracts and $200K premium)"""
@@ -62,6 +163,9 @@ def store_flows_in_database(df):
     if df_filtered.empty:
         return 0
     
+    # Apply smart flow interpretation
+    df_filtered = smart_flow_interpretation(df_filtered)
+    
     conn = sqlite3.connect('flow_database.db')
     cursor = conn.cursor()
     
@@ -77,16 +181,25 @@ def store_flows_in_database(df):
             contract_type = str(row.get('Contract Type', '')).upper()
             side_code = str(row.get('Side Code', '')).upper()
             
-            if contract_type == 'CALL':
-                order_type = 'Calls Bought' if side_code in ['A', 'AA', 'B'] else 'Calls Sold'
-            elif contract_type == 'PUT':
-                order_type = 'Puts Bought' if side_code in ['A', 'AA', 'B'] else 'Puts Sold'
-            else:
-                continue  # Skip unknown contract types
+            # Use smart interpretation (already applied to df_filtered)
+            # The order_type field now contains the smart interpretation result
+            order_type = row.get('order_type', '')
+            if not order_type:
+                # Fallback to simple interpretation if smart interpretation failed
+                if contract_type == 'CALL':
+                    order_type = 'Calls Bought' if side_code in ['A', 'AA'] else 'Calls Sold'
+                elif contract_type == 'PUT':
+                    order_type = 'Puts Bought' if side_code in ['A', 'AA'] else 'Puts Sold'
+                else:
+                    continue  # Skip unknown contract types
             
-            # Format strike price
+            # Format strike price with proper decimal places
             strike_price = row.get('Strike Price', 0)
-            strike = f"{strike_price:.0f}{'C' if contract_type == 'CALL' else 'P'}"
+            # Show one decimal place if needed, otherwise show whole number
+            if strike_price % 1 == 0:
+                strike = f"{strike_price:.0f}{'C' if contract_type == 'CALL' else 'P'}"
+            else:
+                strike = f"{strike_price:.1f}{'C' if contract_type == 'CALL' else 'P'}"
             
             # Handle expiration date
             exp_date = row.get('Expiration Date')
@@ -101,29 +214,46 @@ def store_flows_in_database(df):
             
             expiry = exp_date.strftime('%Y-%m-%d')
             
-            # Get trade date from CSV Trade Time, fallback to current date if not available
+            # Get trade date from CSV Trade Time and convert to EST/EDT
             trade_time = row.get('Trade Time')
             if pd.isna(trade_time) or trade_time is None:
-                trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
-            else:
-                if isinstance(trade_time, str):
-                    try:
-                        trade_time = pd.to_datetime(trade_time)
-                    except:
-                        trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
-                
-                if isinstance(trade_time, pd.Timestamp):
-                    trade_date = trade_time.strftime('%Y-%m-%d %H:%M')
+                continue  # Skip rows without trade time
+            
+            if isinstance(trade_time, str):
+                try:
+                    trade_time = pd.to_datetime(trade_time)
+                except:
+                    continue  # Skip rows with invalid trade time
+            
+            if isinstance(trade_time, pd.Timestamp):
+                if TIMEZONE_AVAILABLE:
+                    # Convert to Eastern Time (market timezone)
+                    eastern = pytz.timezone('US/Eastern')
+                    
+                    # Convert to Eastern time (handles EST/EDT automatically)
+                    if trade_time.tz is not None:
+                        # Already timezone-aware, convert to Eastern
+                        eastern_time = trade_time.astimezone(eastern)
+                    else:
+                        # Timezone-naive, assume UTC
+                        utc_time = pytz.utc.localize(trade_time)
+                        eastern_time = utc_time.astimezone(eastern)
+                    
+                    # Format with proper timezone abbreviation
+                    trade_date = eastern_time.strftime('%Y-%m-%d %H:%M %Z')
                 else:
-                    trade_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+                    # Fallback without timezone conversion
+                    trade_date = trade_time.strftime('%Y-%m-%d %H:%M UTC')
+            else:
+                continue  # Skip rows with invalid trade time format
             
             # Calculate premium
             premium = float(row.get('Premium Price', 0))
             
             cursor.execute('''
                 INSERT OR IGNORE INTO flows 
-                (trade_date, order_type, symbol, strike, expiry, contracts, premium, data_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (trade_date, order_type, symbol, strike, expiry, contracts, premium, implied_volatility, data_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 trade_date,
                 order_type,
@@ -132,6 +262,7 @@ def store_flows_in_database(df):
                 expiry,
                 int(row.get('Size', 0)),
                 premium,
+                float(row.get('IV', 0)),
                 data_hash
             ))
             
@@ -150,7 +281,7 @@ def get_flows_from_database(symbol_filter=None, order_type_filter=None, date_fro
     """Retrieve flows from database with filters"""
     conn = sqlite3.connect('flow_database.db')
     
-    query = "SELECT trade_date, order_type, symbol, strike, expiry, contracts FROM flows WHERE 1=1"
+    query = "SELECT trade_date, order_type, symbol, strike, expiry, contracts, premium FROM flows WHERE 1=1"
     params = []
     
     if symbol_filter and symbol_filter != "All":
@@ -188,7 +319,7 @@ def get_todays_flows_summary():
                SUM(contracts) as total_contracts, AVG(contracts) as avg_contracts, 
                MIN(trade_date) as first_flow, MAX(trade_date) as last_flow
         FROM flows 
-        WHERE DATE(trade_date) = ?
+        WHERE substr(trade_date, 1, 10) = ?
         GROUP BY symbol, order_type, strike, contracts
         ORDER BY total_contracts DESC
     """
@@ -201,7 +332,7 @@ def get_todays_flows_summary():
                AVG(contracts) as avg_contracts, MIN(contracts) as min_contracts, 
                MAX(contracts) as max_contracts, MIN(trade_date) as first_flow, MAX(trade_date) as last_flow
         FROM flows 
-        WHERE DATE(trade_date) = ?
+        WHERE substr(trade_date, 1, 10) = ?
         GROUP BY symbol, order_type
         ORDER BY total_contracts DESC
     """
@@ -222,7 +353,7 @@ def get_todays_flows_summary():
             MAX(contracts) as max_contract_size,
             AVG(contracts) as avg_contract_size
         FROM flows 
-        WHERE DATE(trade_date) = ?
+        WHERE substr(trade_date, 1, 10) = ?
     """
     
     overall_stats = pd.read_sql_query(overall_query, conn, params=[today])
@@ -435,36 +566,45 @@ def generate_symbol_interpretation(flows_df, symbol):
     
     return interpretation
 
-def get_trending_bullish_stocks(days_back=7, min_flows=3):
-    """Get trending bullish stocks based on recent flow patterns"""
+def get_trending_bullish_stocks(days_back=1, min_flows=2):
+    """Get trending bullish stocks based on latest trading day available in database"""
     conn = sqlite3.connect('flow_database.db')
     
-    cutoff_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    # First, find the latest trading day available in the database
+    latest_day_query = "SELECT MAX(substr(trade_date, 1, 10)) as latest_day FROM flows"
+    latest_day_result = pd.read_sql_query(latest_day_query, conn)
+    
+    if latest_day_result.empty or latest_day_result['latest_day'].iloc[0] is None:
+        conn.close()
+        return pd.DataFrame()
+    
+    latest_trading_day = latest_day_result['latest_day'].iloc[0]
     
     query = """
         SELECT 
             symbol,
             COUNT(*) as total_flows,
             SUM(contracts) as total_contracts,
+            SUM(premium) as total_premium,
             SUM(CASE WHEN order_type = 'Calls Bought' THEN contracts ELSE 0 END) as calls_bought,
             SUM(CASE WHEN order_type = 'Calls Sold' THEN contracts ELSE 0 END) as calls_sold,
             SUM(CASE WHEN order_type = 'Puts Bought' THEN contracts ELSE 0 END) as puts_bought,
             SUM(CASE WHEN order_type = 'Puts Sold' THEN contracts ELSE 0 END) as puts_sold,
             MAX(trade_date) as latest_activity
         FROM flows 
-        WHERE DATE(trade_date) >= ?
+        WHERE substr(trade_date, 1, 10) = ?
         GROUP BY symbol
         HAVING COUNT(*) >= ?
         ORDER BY symbol
     """
     
-    df = pd.read_sql_query(query, conn, params=[cutoff_date, min_flows])
+    df = pd.read_sql_query(query, conn, params=[latest_trading_day, min_flows])
     conn.close()
     
     if df.empty:
         return pd.DataFrame()
     
-    # Calculate bullish sentiment score
+    # Calculate bullish sentiment for latest trading day only
     df['bullish_activity'] = df['calls_bought'] + df['puts_sold']
     df['bearish_activity'] = df['puts_bought'] + df['calls_sold']
     df['total_activity'] = df['bullish_activity'] + df['bearish_activity']
@@ -476,44 +616,72 @@ def get_trending_bullish_stocks(days_back=7, min_flows=3):
         return pd.DataFrame()
     
     df['bullish_percentage'] = (df['bullish_activity'] / df['total_activity']) * 100
-    df['sentiment_score'] = df['bullish_percentage'] * (df['total_contracts'] / df['total_contracts'].max())
+    df['net_bullish_contracts'] = df['bullish_activity'] - df['bearish_activity']
     
-    # Filter for predominantly bullish stocks (>60% bullish activity)
-    bullish_df = df[df['bullish_percentage'] > 60].copy()
-    bullish_df = bullish_df.sort_values('sentiment_score', ascending=False)
+    # Simple scoring for latest day trending
+    df['volume_weight'] = df['total_contracts'] / df['total_contracts'].max()
+    df['premium_weight'] = df['total_premium'] / df['total_premium'].max()
+    df['flow_frequency_weight'] = df['total_flows'] / df['total_flows'].max()
+    df['bullish_strength'] = df['bullish_percentage'] / 100
+    
+    # Latest day bullish score
+    df['bullish_score'] = (
+        df['bullish_strength'] * 0.4 +     # 40% weight on bullish percentage
+        df['volume_weight'] * 0.3 +        # 30% weight on contract volume
+        df['premium_weight'] * 0.2 +       # 20% weight on premium volume
+        df['flow_frequency_weight'] * 0.1  # 10% weight on flow frequency
+    )
+    
+    # Filter for meaningful bullish activity today
+    bullish_df = df[
+        (df['bullish_percentage'] >= 60) &     # Must be at least 60% bullish today
+        (df['net_bullish_contracts'] > 0) &    # Must have net bullish contracts
+        (df['total_contracts'] >= 1000)        # Minimum volume threshold
+    ].copy()
+    
+    bullish_df = bullish_df.sort_values('bullish_score', ascending=False)
     
     return bullish_df
 
-def get_trending_bearish_stocks(days_back=7, min_flows=3):
-    """Get trending bearish stocks based on recent flow patterns"""
+def get_trending_bearish_stocks(days_back=1, min_flows=1):
+    """Get trending bearish stocks based on latest trading day available in database"""
     conn = sqlite3.connect('flow_database.db')
     
-    cutoff_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    # First, find the latest trading day available in the database
+    latest_day_query = "SELECT MAX(substr(trade_date, 1, 10)) as latest_day FROM flows"
+    latest_day_result = pd.read_sql_query(latest_day_query, conn)
+    
+    if latest_day_result.empty or latest_day_result['latest_day'].iloc[0] is None:
+        conn.close()
+        return pd.DataFrame()
+    
+    latest_trading_day = latest_day_result['latest_day'].iloc[0]
     
     query = """
         SELECT 
             symbol,
             COUNT(*) as total_flows,
             SUM(contracts) as total_contracts,
+            SUM(premium) as total_premium,
             SUM(CASE WHEN order_type = 'Calls Bought' THEN contracts ELSE 0 END) as calls_bought,
             SUM(CASE WHEN order_type = 'Calls Sold' THEN contracts ELSE 0 END) as calls_sold,
             SUM(CASE WHEN order_type = 'Puts Bought' THEN contracts ELSE 0 END) as puts_bought,
             SUM(CASE WHEN order_type = 'Puts Sold' THEN contracts ELSE 0 END) as puts_sold,
             MAX(trade_date) as latest_activity
         FROM flows 
-        WHERE DATE(trade_date) >= ?
+        WHERE substr(trade_date, 1, 10) = ?
         GROUP BY symbol
         HAVING COUNT(*) >= ?
         ORDER BY symbol
     """
     
-    df = pd.read_sql_query(query, conn, params=[cutoff_date, min_flows])
+    df = pd.read_sql_query(query, conn, params=[latest_trading_day, min_flows])
     conn.close()
     
     if df.empty:
         return pd.DataFrame()
     
-    # Calculate bearish sentiment score
+    # Calculate bearish sentiment for latest trading day only
     df['bullish_activity'] = df['calls_bought'] + df['puts_sold']
     df['bearish_activity'] = df['puts_bought'] + df['calls_sold']
     df['total_activity'] = df['bullish_activity'] + df['bearish_activity']
@@ -525,11 +693,30 @@ def get_trending_bearish_stocks(days_back=7, min_flows=3):
         return pd.DataFrame()
     
     df['bearish_percentage'] = (df['bearish_activity'] / df['total_activity']) * 100
-    df['sentiment_score'] = df['bearish_percentage'] * (df['total_contracts'] / df['total_contracts'].max())
+    df['net_bearish_contracts'] = df['bearish_activity'] - df['bullish_activity']
     
-    # Filter for predominantly bearish stocks (>60% bearish activity)
-    bearish_df = df[df['bearish_percentage'] > 60].copy()
-    bearish_df = bearish_df.sort_values('sentiment_score', ascending=False)
+    # Simple scoring for latest day trending
+    df['volume_weight'] = df['total_contracts'] / df['total_contracts'].max()
+    df['premium_weight'] = df['total_premium'] / df['total_premium'].max()
+    df['flow_frequency_weight'] = df['total_flows'] / df['total_flows'].max()
+    df['bearish_strength'] = df['bearish_percentage'] / 100
+    
+    # Latest day bearish score
+    df['bearish_score'] = (
+        df['bearish_strength'] * 0.4 +     # 40% weight on bearish percentage
+        df['volume_weight'] * 0.3 +        # 30% weight on contract volume
+        df['premium_weight'] * 0.2 +       # 20% weight on premium volume
+        df['flow_frequency_weight'] * 0.1  # 10% weight on flow frequency
+    )
+    
+    # Filter for meaningful bearish activity today
+    bearish_df = df[
+        (df['bearish_percentage'] >= 60) &     # Must be at least 60% bearish today
+        (df['net_bearish_contracts'] > 0) &    # Must have net bearish contracts
+        (df['total_contracts'] >= 1000)        # Minimum volume threshold
+    ].copy()
+    
+    bearish_df = bearish_df.sort_values('bearish_score', ascending=False)
     
     return bearish_df
 
@@ -541,7 +728,7 @@ def load_csv(file):
         # Define expected columns
         required_columns = ['Trade Time', 'Ticker', 'Expiration Date', 'Contract Type', 'Strike Price', 
                            'Reference Price', 'Size', 'Premium Price', 'Side Code', 
-                           'Is Opening Position', 'Money Type', 'Is Unusual', 'Is Golden Sweep']
+                           'Is Opening Position', 'Money Type', 'Is Unusual', 'Is Golden Sweep', 'Implied Volatility']
         
         # Map columns by position if names don't match
         if not all(col in df.columns for col in required_columns):
@@ -550,17 +737,21 @@ def load_csv(file):
                 5: 'Strike Price', 6: 'Contract Type', 7: 'Reference Price',
                 8: 'Size', 9: 'Option Price', 12: 'Premium Price', 19: 'Side Code',
                 15: 'Is Unusual', 16: 'Is Golden Sweep', 17: 'Is Opening Position',
-                18: 'Money Type'
+                18: 'Money Type', 20: 'Implied Volatility'
             }
             df.columns = [column_mapping.get(i, col) for i, col in enumerate(df.columns)]
         
         # Convert and clean data
-        df['Trade Time'] = pd.to_datetime(df['Trade Time'], errors='coerce')
+        df['Trade Time'] = pd.to_datetime(df['Trade Time'], errors='coerce', utc=True)
         df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
-        numeric_cols = ['Strike Price', 'Reference Price', 'Size', 'Premium Price']
+        numeric_cols = ['Strike Price', 'Reference Price', 'Size', 'Premium Price', 'Implied Volatility']
         for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace('[\$,]', '', regex=True), 
-                                  errors='coerce')
+            if col == 'Implied Volatility':
+                # Handle IV percentage format (remove % if present)
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace('%', ''), errors='coerce')
+            else:
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace('[\$,]', '', regex=True), 
+                                      errors='coerce')
         
         categorical_cols = ['Ticker', 'Contract Type', 'Side Code', 'Is Unusual', 
                           'Is Golden Sweep', 'Is Opening Position', 'Money Type']
@@ -1514,16 +1705,15 @@ def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grou
         
         for _, flow in ticker_flows.iterrows():
             premium = flow['Premium Price']
-            contract_type = flow['Contract Type']
-            side_code = flow['Side Code']
             
-            # Bullish flows: Call buying (A/AA) or Put selling (B/BB)
-            if (contract_type == 'CALL' and side_code in ['A', 'AA']) or \
-               (contract_type == 'PUT' and side_code in ['B', 'BB']):
+            # Use smart order type for sentiment analysis
+            order_type = flow.get('order_type', '')
+            
+            # Bullish flows: Call buying or Put selling
+            if 'Calls Bought' in order_type or 'Puts Sold' in order_type:
                 bullish_premium += premium
-            # Bearish flows: Call selling (B/BB) or Put buying (A/AA)  
-            elif (contract_type == 'CALL' and side_code in ['B', 'BB']) or \
-                 (contract_type == 'PUT' and side_code in ['A', 'AA']):
+            # Bearish flows: Call selling or Put buying  
+            elif 'Calls Sold' in order_type or 'Puts Bought' in order_type:
                 bearish_premium += premium
         
         # Determine sentiment based on premium weight
@@ -1595,6 +1785,9 @@ def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grou
         if strategy_description:
             contract_breakdown = f"{contract_breakdown}\n📊 **Strategy:** {strategy_description}"
         
+        # Calculate average implied volatility
+        avg_iv = ticker_flows['IV'].mean() if 'IV' in ticker_flows.columns and not ticker_flows['IV'].isna().all() else 0
+        
         # Add premium breakdown for better analysis
         premium_breakdown = f"🟢${bullish_premium/1000:.0f}K vs 🔴${bearish_premium/1000:.0f}K"
         
@@ -1608,6 +1801,7 @@ def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grou
             'Total Contracts': f"{row['Total_Quantity']:,}",
             'Avg Premium/Flow': f"${row['Avg_Premium']:,.0f}",
             'Move Required': f"{avg_move_required:.1f}%",
+            'Avg IV': f"{avg_iv:.1f}%" if avg_iv > 0 else "N/A",
             'Sentiment': overall_sentiment,
             'Premium Breakdown': premium_breakdown,
             'Flags': flags_str,
@@ -1623,7 +1817,7 @@ def display_high_volume_flows(df, min_premium=40000, min_quantity=900, time_grou
     
     # Create display table with key columns
     display_cols = ['Ticker', 'Trade Time', 'Flows', 'Premium (M)', 'Total Contracts', 
-                   'Move Required', 'Sentiment', 'Premium Breakdown', 'Flags']
+                   'Move Required', 'Avg IV', 'Sentiment', 'Premium Breakdown', 'Flags']
     
     # Style the dataframe
     styled_df = results_df[display_cols].copy()
@@ -3049,8 +3243,8 @@ def main():
             st.info("👆 Upload a CSV file to start analyzing options flow data")
     
     with main_tab2:
-        st.subheader("🗄️ Flow Database")
-        st.markdown("Store and analyze flows for (minimum 900 contracts + $200K premium) with advanced filtering")
+        #st.subheader("🗄️ Flow Database")
+        #st.markdown("Store and analyze flows for (minimum 900 contracts + $200K premium) with advanced filtering")
         
         # Initialize database
         init_flow_database()
@@ -3060,7 +3254,7 @@ def main():
         
         with col1:
             st.markdown("### 📥 Store New Flows")
-            st.info("⚡ Only flows with 900+ contracts and $200K+ premium will be stored")
+            #st.info("⚡ Only flows with 900+ contracts and $200K+ premium will be stored")
             
             # Show which stocks are tracked
             with st.expander("📊 Tracked Stocks", expanded=False):
@@ -3100,7 +3294,7 @@ def main():
                 order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
             
             with filter_cols[2]:
-                date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=30), key="db_date_from")
+                date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=5), key="db_date_from")
             
             with filter_cols[3]:
                 date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
@@ -3122,17 +3316,27 @@ def main():
         
         # Display results
         if not flows_df.empty:
-            # Summary stats
-            stats_cols = st.columns(4)
+            # Calculate total premium for summary
+            total_premium = flows_df['premium'].sum()
+            
+            # Summary stats with premium
+            stats_cols = st.columns(5)
             with stats_cols[0]:
                 st.metric("Total Flows", len(flows_df))
             with stats_cols[1]:
                 unique_symbols = flows_df['symbol'].nunique()
                 st.metric("Unique Symbols", unique_symbols)
             with stats_cols[2]:
+                # Format premium display
+                if total_premium >= 1000000:
+                    premium_display = f"${total_premium/1000000:.1f}M"
+                else:
+                    premium_display = f"${total_premium/1000:.0f}K"
+                st.metric("Total Premium", premium_display)
+            with stats_cols[3]:
                 calls_count = flows_df[flows_df['order_type'].str.contains('Calls')].shape[0]
                 st.metric("Call Flows", calls_count)
-            with stats_cols[3]:
+            with stats_cols[4]:
                 puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
                 st.metric("Put Flows", puts_count)
             
@@ -3140,12 +3344,29 @@ def main():
             if symbol_filter == "All":
                 st.markdown("---")
                 
+                # Get latest trading day for display headers
+                conn = sqlite3.connect('flow_database.db')
+                latest_day_query = "SELECT MAX(substr(trade_date, 1, 10)) as latest_day FROM flows"
+                latest_day_result = pd.read_sql_query(latest_day_query, conn)
+                conn.close()
+                
+                if not latest_day_result.empty and latest_day_result['latest_day'].iloc[0] is not None:
+                    latest_trading_day = latest_day_result['latest_day'].iloc[0]
+                    # Format date for display (e.g., "Sep 13" or "Friday")
+                    try:
+                        date_obj = datetime.strptime(latest_trading_day, '%Y-%m-%d')
+                        day_display = date_obj.strftime('%b %d')
+                    except:
+                        day_display = "Latest Day"
+                else:
+                    day_display = "Latest Day"
+                
                 trending_cols = st.columns(2)
                 
                 with trending_cols[0]:
-                    st.markdown("### 📈 Top Trending Bullish Stocks")
-                    with st.spinner("Analyzing bullish trends..."):
-                        bullish_stocks = get_trending_bullish_stocks(days_back=7, min_flows=2)
+                    st.markdown(f"### 📈 {day_display}'s Top Bullish flows")
+                    with st.spinner(f"Analyzing {day_display.lower()}'s bullish flows..."):
+                        bullish_stocks = get_trending_bullish_stocks(days_back=1, min_flows=1)
                     
                     if not bullish_stocks.empty:
                         for idx, row in bullish_stocks.head(10).iterrows():
@@ -3160,12 +3381,12 @@ def main():
                             with col4:
                                 st.write(f"{row['total_contracts']:,} contracts")
                     else:
-                        st.info("No trending bullish stocks found in the last 7 days")
+                        st.info(f"No bullish stocks found in {day_display.lower()}'s flows")
                 
                 with trending_cols[1]:
-                    st.markdown("### 📉 Top Trending Bearish Stocks")
-                    with st.spinner("Analyzing bearish trends..."):
-                        bearish_stocks = get_trending_bearish_stocks(days_back=7, min_flows=2)
+                    st.markdown(f"### 📉 {day_display}'s Top Bearish flows")
+                    with st.spinner(f"Analyzing {day_display.lower()}'s bearish flows..."):
+                        bearish_stocks = get_trending_bearish_stocks(days_back=1, min_flows=1)
                     
                     if not bearish_stocks.empty:
                         for idx, row in bearish_stocks.head(10).iterrows():
@@ -3180,19 +3401,29 @@ def main():
                             with col4:
                                 st.write(f"{row['total_contracts']:,} contracts")
                     else:
-                        st.info("No trending bearish stocks found in the last 7 days")
+                        st.info(f"No bearish stocks found in {day_display.lower()}'s flows")
                 
                 st.markdown("---")
             
-            # Format the data for display exactly like the user's example
+            # Format the data for display with premium information
             display_df = flows_df.copy()
-            display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts']
             
-            # Apply styling to match the user's example
+            # Format premium for better readability
+            display_df['premium_formatted'] = display_df['premium'].apply(
+                lambda x: f"${x/1000000:.2f}M" if x >= 1000000 else f"${x/1000:.0f}K"
+            )
+            
+            # Select and rename columns for display
+            display_df = display_df[['trade_date', 'order_type', 'symbol', 'strike', 'expiry', 'contracts', 'premium_formatted']]
+            display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts', 'Premium']
+            
+            # Apply styling based on bullish vs bearish sentiment (not just bought vs sold)
             def style_order_type(val):
-                if 'Bought' in val:
+                # Bullish activities (green): Calls Bought, Puts Sold
+                if val in ['Calls Bought', 'Puts Sold']:
                     return 'background-color: #d4edda; color: #155724; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
-                elif 'Sold' in val:
+                # Bearish activities (red): Calls Sold, Puts Bought
+                elif val in ['Calls Sold', 'Puts Bought']:
                     return 'background-color: #f8d7da; color: #721c24; font-weight: bold; border-radius: 4px; padding: 2px 8px;'
                 return ''
             
