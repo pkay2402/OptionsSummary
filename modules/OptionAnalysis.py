@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import os
 import sqlite3
 import hashlib
+import yfinance as yf
+import time
 
 try:
     import pytz
@@ -13,27 +15,117 @@ except ImportError:
     TIMEZONE_AVAILABLE = False
     st.warning("⚠️ pytz not installed. Install with: pip install pytz for proper timezone handling")
 
-# Top 30 stocks to track in database
-TOP_30_STOCKS = [
+def get_technical_indicators(symbol):
+    """Get current price and key technical indicators for a symbol"""
+    try:
+        # Get stock data for the last 252 trading days (1 year) to calculate 200 SMA
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1y")
+        
+        if hist.empty:
+            return "No data"
+        
+        # Get current close price
+        current_close = hist['Close'].iloc[-1]
+        
+        # Calculate moving averages
+        ema_8 = hist['Close'].ewm(span=8).mean().iloc[-1]
+        ema_21 = hist['Close'].ewm(span=21).mean().iloc[-1]
+        sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+        sma_200 = hist['Close'].rolling(window=200).mean().iloc[-1]
+        
+        # Format the output
+        return f"${current_close:.2f} | 8E: {ema_8:.2f} | 21E: {ema_21:.2f} | 50S: {sma_50:.2f} | 200S: {sma_200:.2f}"
+        
+    except Exception as e:
+        return "Error fetching data"
+
+# Top stocks to track in database
+TOP_STOCKS = list(dict.fromkeys([
     # Mega-cap tech & growth
-    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'TSLA', 'META', 'ORCL', 'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'AVGO', 'AMD', 'SNOW', 'NOW', 'SHOP', 'PLTR', 'UBER', 'PANW', 'DDOG', 'MDB', 'MRVL', 'ASML', 'VRT', 'APP', 'TEM', 'MSTR', 'RDDT', 'HOOD', 'COIN', 'XYZ', 'NBIS',
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN','GEV','APP', 'NVDA', 'TSLA', 'META', 'ORCL', 'CRM', 'ADBE', 'INTC', 'QCOM', 'TXN', 'AVGO', 'AMD', 'SNOW', 'NOW', 'SHOP', 'PLTR', 'UBER', 'PANW', 'DDOG', 'MDB', 'MRVL', 'ASML', 'VRT', 'APP', 'TEM', 'MSTR', 'RDDT', 'HOOD', 'COIN', 'NBIS', 'SMCI', 'ARM',
     # Financials
     'JPM', 'GS', 'BAC', 'MS', 'WFC', 'C', 'PYPL', 'V', 'MA', 'AXP', 'SCHW', 'BLK',
     # Healthcare & Pharma
-    'UNH', 'JNJ', 'LLY', 'ABBV', 'PFE', 'MRNA', 'BNTX', 'GILD', 'BIIB', 'AMGN', 'REGN',
+    'UNH', 'JNJ', 'LLY', 'ABBV', 'PFE', 'MRNA', 'BNTX', 'GILD', 'BIIB', 'AMGN', 'REGN', 'VRTX', 'KVUE',
     # Consumer & Retail
-    'HD', 'LOW', 'COST', 'WMT', 'TGT', 'NKE', 'SBUX', 'DIS', 'NFLX', 'WBD', 'PARA', 'ROKU', 'SPOT',
+    'HD', 'LOW', 'COST', 'WMT', 'TGT', 'NKE', 'SBUX', 'DIS', 'NFLX', 'WBD', 'PARA', 'ROKU', 'SPOT', 'ETSY', 'CAVA',
     # Energy & Industrials
     'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'DVN', 'MRO', 'GE', 'BA', 'CAT', 'DE', 'HON', 'MMM', 'LMT',
     # ETFs & Index proxies
-    'SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'VIX', 'UVXY', 'VXX', 'SVXY', 'IBIT',
+    'SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'VIX', 'UVXY', 'VXX', 'SVXY', 'IBIT', 'ETHA',
     # Autos & EV
-    'TSLA', 'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'BYD',
+    'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'BYD', 'VFS',
     # China/Asia
-    'BABA', 'JD', 'PDD', 'TCEHY', 'NTES', 'BIDU',
-    # Others - high volume
-    'REGN', 'VRTX', 'ENPH', 'XYZ', 'TTD', 'ETSY', 'SHOP', 'PLUG', 'SOFI', 'DKNG', 'ABNB', 'ZS', 'CRWD', 'ROKU', 'PLTR', 'MARA', 'RIOT', 'IBIT', 'ETHA'
-]
+    'BABA', 'JD', 'PDD', 'TCEHY', 'NTES', 'BIDU', 'NU',
+    # Fintech & Trading
+    'SOFI', 'DKNG', 'LYFT',
+    # Social Media & Tech
+    'SNAP', 'PINS', 'TTD', 'ABNB',
+    # Cybersecurity & Cloud
+    'CRWD', 'ZS',
+    # Energy & Clean Tech
+    'ENPH', 'PLUG',
+    # Crypto & Mining
+    'MARA', 'RIOT',
+    # Misc High Volume
+    'XYZ'
+]))
+
+@st.cache_data(ttl=900)  # Cache for 15 minutes
+def get_stock_technicals(symbol):
+    """Get current price and key moving averages for a stock"""
+    try:
+        ticker = yf.Ticker(symbol)
+        # Get last 200 days of data to calculate moving averages
+        hist = ticker.history(period="200d")
+        
+        if hist.empty:
+            return None
+        
+        # Get latest close price
+        current_price = hist['Close'].iloc[-1]
+        
+        # Calculate moving averages
+        ema_8 = hist['Close'].ewm(span=8).mean().iloc[-1]
+        ema_21 = hist['Close'].ewm(span=21).mean().iloc[-1]
+        sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+        sma_200 = hist['Close'].rolling(window=200).mean().iloc[-1]
+        
+        # Format the output
+        return {
+            'price': f"${current_price:.2f}",
+            'ema8': f"${ema_8:.2f}" if pd.notna(ema_8) else "N/A",
+            'ema21': f"${ema_21:.2f}" if pd.notna(ema_21) else "N/A", 
+            'sma50': f"${sma_50:.2f}" if pd.notna(sma_50) else "N/A",
+            'sma200': f"${sma_200:.2f}" if pd.notna(sma_200) else "N/A",
+            'formatted': f"${current_price:.2f} | 8EMA: ${ema_8:.2f} | 21EMA: ${ema_21:.2f} | 50SMA: ${sma_50:.2f} | 200SMA: ${sma_200:.2f}"
+        }
+    except Exception as e:
+        return None
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_batch_technicals(symbols_list):
+    """Fetch technical data for multiple symbols efficiently"""
+    results = {}
+    
+    # Batch process symbols to avoid overwhelming the API
+    batch_size = 10
+    for i in range(0, len(symbols_list), batch_size):
+        batch = symbols_list[i:i + batch_size]
+        
+        for symbol in batch:
+            try:
+                tech_data = get_stock_technicals(symbol)
+                results[symbol] = tech_data['formatted'] if tech_data else 'Data unavailable'
+            except Exception as e:
+                results[symbol] = 'Error fetching data'
+        
+        # Small delay between batches to be respectful to the API
+        if i + batch_size < len(symbols_list):
+            time.sleep(0.1)
+    
+    return results
 
 def init_flow_database():
     """Initialize SQLite database for flow storage"""
@@ -52,7 +144,10 @@ def init_flow_database():
             premium REAL,
             implied_volatility REAL,
             data_hash TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_open INTEGER DEFAULT 1,
+            days_to_expiry INTEGER,
+            position_status TEXT DEFAULT 'Open'
         )
     ''')
     
@@ -61,9 +156,132 @@ def init_flow_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_trade_date ON flows(trade_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_order_type ON flows(order_type)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_expiry ON flows(expiry)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_open ON flows(is_open)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_position_status ON flows(position_status)')
+    
+    # Add columns to existing table if they don't exist
+    try:
+        cursor.execute('ALTER TABLE flows ADD COLUMN is_open INTEGER DEFAULT 1')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute('ALTER TABLE flows ADD COLUMN days_to_expiry INTEGER')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute('ALTER TABLE flows ADD COLUMN position_status TEXT DEFAULT "Open"')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    # Update existing rows that might have NULL values in new columns
+    cursor.execute('''
+        UPDATE flows 
+        SET is_open = 1, 
+            position_status = 'Open',
+            days_to_expiry = CAST(julianday(expiry) - julianday('now') AS INTEGER)
+        WHERE is_open IS NULL OR position_status IS NULL OR days_to_expiry IS NULL
+    ''')
     
     conn.commit()
     conn.close()
+
+def migrate_existing_data():
+    """Migrate existing data to add position tracking"""
+    conn = sqlite3.connect('flow_database.db')
+    cursor = conn.cursor()
+    
+    # Check if we have any data
+    cursor.execute('SELECT COUNT(*) FROM flows')
+    total_rows = cursor.fetchone()[0]
+    
+    if total_rows > 0:
+        # Update position status for all existing rows
+        cursor.execute('''
+            UPDATE flows 
+            SET days_to_expiry = CAST(julianday(expiry) - julianday('now') AS INTEGER),
+                position_status = CASE 
+                    WHEN date(expiry) < date('now') THEN 'Expired'
+                    WHEN CAST(julianday(expiry) - julianday('now') AS INTEGER) <= 0 THEN 'Expires Today'
+                    WHEN CAST(julianday(expiry) - julianday('now') AS INTEGER) <= 7 THEN 'Expires This Week'
+                    WHEN CAST(julianday(expiry) - julianday('now') AS INTEGER) <= 30 THEN 'Expires This Month'
+                    ELSE 'Open'
+                END,
+                is_open = CASE 
+                    WHEN date(expiry) < date('now') THEN 0
+                    ELSE 1
+                END
+            WHERE 1=1
+        ''')
+        
+        conn.commit()
+    
+    conn.close()
+    return total_rows
+
+def get_position_analysis():
+    """Analyze position matching and provide detailed position tracking"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    # Get detailed position analysis
+    query = '''
+        SELECT 
+            symbol,
+            strike,
+            expiry,
+            SUM(CASE WHEN order_type IN ('Calls Bought', 'Puts Bought') THEN contracts ELSE 0 END) as total_bought,
+            SUM(CASE WHEN order_type IN ('Calls Sold', 'Puts Sold') THEN contracts ELSE 0 END) as total_sold,
+            SUM(CASE WHEN order_type = 'Calls Bought' THEN contracts ELSE 0 END) as calls_bought,
+            SUM(CASE WHEN order_type = 'Calls Sold' THEN contracts ELSE 0 END) as calls_sold,
+            SUM(CASE WHEN order_type = 'Puts Bought' THEN contracts ELSE 0 END) as puts_bought,
+            SUM(CASE WHEN order_type = 'Puts Sold' THEN contracts ELSE 0 END) as puts_sold,
+            COUNT(*) as trade_count,
+            MIN(trade_date) as first_trade,
+            MAX(trade_date) as last_trade,
+            SUM(premium) as total_premium,
+            days_to_expiry,
+            position_status
+        FROM flows 
+        GROUP BY symbol, strike, expiry
+        HAVING trade_count > 0
+        ORDER BY symbol, expiry, strike
+    '''
+    
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    
+    if df.empty:
+        return df
+    
+    # Calculate net positions and position types
+    df['net_contracts'] = df['total_bought'] - df['total_sold']
+    df['net_calls'] = df['calls_bought'] - df['calls_sold']
+    df['net_puts'] = df['puts_bought'] - df['puts_sold']
+    
+    # Determine position type
+    def determine_position_type(row):
+        if row['trade_count'] == 1:
+            return 'Single Trade'
+        elif row['net_contracts'] == 0:
+            return 'Fully Offset'
+        elif abs(row['net_contracts']) < min(row['total_bought'], row['total_sold']):
+            return 'Partially Offset'
+        elif row['net_contracts'] > 0:
+            return 'Net Long'
+        else:
+            return 'Net Short'
+    
+    df['position_type'] = df.apply(determine_position_type, axis=1)
+    
+    # Calculate offset percentage
+    df['offset_percentage'] = df.apply(
+        lambda row: min(row['total_bought'], row['total_sold']) / max(row['total_bought'], row['total_sold']) * 100 
+        if row['trade_count'] > 1 and max(row['total_bought'], row['total_sold']) > 0 else 0, 
+        axis=1
+    )
+    
+    return df
 
 def smart_flow_interpretation(df):
     """
@@ -147,18 +365,20 @@ def determine_smart_order_type(row, full_df):
     return default_order
 
 def store_flows_in_database(df):
-    """Store flows for top 30 stocks in database (minimum 900 contracts and $200K premium)"""
+    """Store flows for top 30 stocks in database with enhanced criteria"""
     if df is None or df.empty:
         return 0
     
     # Filter for top 30 stocks only
-    df_filtered = df[df['Ticker'].isin(TOP_30_STOCKS)].copy()
+    df_filtered = df[df['Ticker'].isin(TOP_STOCKS)].copy()
     
-    # Filter for minimum 900 contracts
-    df_filtered = df_filtered[df_filtered['Size'] >= 900].copy()
+    # Enhanced filtering criteria:
+    # 1. Original: 900+ contracts AND $200K+ premium, OR
+    # 2. New: $1M+ premium regardless of contract size
+    criteria_1 = (df_filtered['Size'] >= 900) & (df_filtered['Premium Price'] >= 200000)
+    criteria_2 = df_filtered['Premium Price'] >= 900000
     
-    # Filter for minimum $200K premium
-    df_filtered = df_filtered[df_filtered['Premium Price'] >= 200000].copy()
+    df_filtered = df_filtered[criteria_1 | criteria_2].copy()
     
     if df_filtered.empty:
         return 0
@@ -277,8 +497,8 @@ def store_flows_in_database(df):
     
     return stored_count
 
-def get_flows_from_database(symbol_filter=None, order_type_filter=None, date_from=None, date_to=None):
-    """Retrieve flows from database with filters"""
+def get_flows_from_database(symbol_filter=None, order_type_filter=None, date_from=None, date_to=None, include_technicals=True, limit=None):
+    """Retrieve flows from database with filters and optional technical indicators"""
     conn = sqlite3.connect('flow_database.db')
     
     query = "SELECT trade_date, order_type, symbol, strike, expiry, contracts, premium FROM flows WHERE 1=1"
@@ -294,16 +514,49 @@ def get_flows_from_database(symbol_filter=None, order_type_filter=None, date_fro
     
     if date_from:
         query += " AND trade_date >= ?"
-        params.append(date_from.strftime('%Y-%m-%d'))
+        if hasattr(date_from, 'strftime'):
+            params.append(date_from.strftime('%Y-%m-%d'))
+        else:
+            params.append(str(date_from))
     
     if date_to:
         query += " AND trade_date <= ?"
-        params.append((date_to + timedelta(days=1)).strftime('%Y-%m-%d'))
+        if hasattr(date_to, 'strftime'):
+            params.append((date_to + timedelta(days=1)).strftime('%Y-%m-%d'))
+        else:
+            # If it's already a string, just use it as is
+            params.append(str(date_to))
     
     query += " ORDER BY trade_date DESC"
     
+    # Add limit for performance
+    if limit:
+        query += f" LIMIT {limit}"
+    
     df = pd.read_sql_query(query, conn, params=params)
     conn.close()
+    
+    # Add technical indicators column only if requested and dataframe is not too large
+    if include_technicals and not df.empty and len(df) <= 1000:  # Limit technical data for large datasets
+        # Get unique symbols to minimize API calls
+        unique_symbols = df['symbol'].unique()
+        
+        # Only fetch technicals if we have a reasonable number of symbols
+        if len(unique_symbols) <= 50:  # Limit to 50 symbols max
+            # Use batch processing for better performance
+            with st.spinner(f"Fetching technical data for {len(unique_symbols)} symbols..."):
+                technicals_dict = get_batch_technicals(list(unique_symbols))
+            
+            # Add technical data to dataframe
+            df['Technicals'] = df['symbol'].apply(
+                lambda x: technicals_dict.get(x, 'Data unavailable')
+            )
+        else:
+            # Too many symbols, skip technicals to avoid performance issues
+            df['Technicals'] = 'Too many symbols - technicals disabled'
+    elif include_technicals and len(df) > 1000:
+        # Dataset too large, skip technicals
+        df['Technicals'] = 'Large dataset - technicals disabled'
     
     return df
 
@@ -643,7 +896,7 @@ def get_trending_bullish_stocks(days_back=1, min_flows=2):
     
     return bullish_df
 
-def get_trending_bearish_stocks(days_back=1, min_flows=1):
+def get_trending_bearish_stocks(days_back=1, min_flows=2):
     """Get trending bearish stocks based on latest trading day available in database"""
     conn = sqlite3.connect('flow_database.db')
     
@@ -2086,7 +2339,7 @@ def calculate_trade_score(row, ticker_daily_flow, all_premiums):
     
     return round(composite_score, 1), daily_flow_pct, move_required
 
-def display_top_trades_summary(df, min_premium=250000, min_flows=3):
+def display_top_trades_summary(df, min_premium=250000, min_flows=2):
     """
     Display top scoring trade for each ticker with enhanced analysis
     """
@@ -3249,17 +3502,63 @@ def main():
         # Initialize database
         init_flow_database()
         
+        # Migrate existing data and show debug info
+        with st.expander("🔧 Database Status", expanded=False):
+            total_rows = migrate_existing_data()
+            
+            # Show current database status
+            conn = sqlite3.connect('flow_database.db')
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM flows')
+            total_flows = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM flows WHERE is_open = 1')
+            open_flows = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM flows WHERE is_open = 0')
+            closed_flows = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(DISTINCT symbol) FROM flows')
+            unique_symbols = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            st.markdown(f"""
+            **Database Status:**
+            - Total Flows in Database: {total_flows}
+            - Open Positions: {open_flows}
+            - Closed/Expired: {closed_flows}
+            - Unique Symbols: {unique_symbols}
+            """)
+            
+            if total_flows == 0:
+                st.warning("📭 No flows in database. Upload CSV data in Flow Analysis tab and store flows.")
+            elif open_flows == 0 and closed_flows > 0:
+                st.info("📊 All flows are expired/closed. Adjust date filters to see historical data.")
+        
         # Two main sections
         col1, col2 = st.columns([1, 2])
         
         with col1:
             st.markdown("### 📥 Store New Flows")
-            #st.info("⚡ Only flows with 900+ contracts and $200K+ premium will be stored")
+            #st.info("⚡ Stores flows meeting either: 900+ contracts + $200K+ premium OR $900K+ premium (any size)")
+            
+            # Show enhanced criteria details
+            with st.expander("📋 Enhanced Storage Criteria", expanded=False):
+                st.markdown("**Flows are stored if they meet EITHER of these criteria:**")
+                st.markdown("1. **Volume + Premium**: 900+ contracts AND $200K+ premium")
+                st.markdown("2. **High Premium**: $900K+ premium (regardless of contract count)")
+                st.markdown("")
+                st.markdown("**Why the enhancement?**")
+                st.markdown("• Captures expensive single-contract flows (high strike/IV)")
+                st.markdown("• Ensures no large institutional flows are missed")
+                st.markdown("• Better coverage of high-value options activity")
             
             # Show which stocks are tracked
             with st.expander("📊 Tracked Stocks", expanded=False):
                 stock_cols = st.columns(3)
-                for i, stock in enumerate(TOP_30_STOCKS):
+                for i, stock in enumerate(TOP_STOCKS):
                     with stock_cols[i % 3]:
                         st.write(f"• {stock}")
             
@@ -3271,33 +3570,57 @@ def main():
                     if st.button("🔄 Check for Uploaded Data", key="check_upload"):
                         st.rerun()
             else:
-                if st.button("💾 Store High-Volume Flows (900+ contracts, $200K+ premium)", type="primary"):
-                    with st.spinner("Storing high-volume flows in database..."):
+                if st.button("💾 Store Institutional Flows (Enhanced Criteria)", type="primary"):
+                    with st.spinner("Storing institutional flows in database..."):
                         count = store_flows_in_database(st.session_state.uploaded_df)
                     if count > 0:
-                        st.success(f"✅ Stored {count} high-volume flows in database!")
+                        st.success(f"✅ Stored {count} institutional flows in database!")
                     else:
-                        st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + 900+ contracts + $200K+ premium)")
+                        st.warning("⚠️ No flows found meeting criteria (Top 30 stocks + enhanced filtering)")
         
-        with col2:
+        # Performance and display controls
+        perf_cols = st.columns([2, 1, 1, 1])
+        with perf_cols[0]:
             st.markdown("### 🔍 Filter & View Database")
-            
-            # Filter controls
-            filter_cols = st.columns(4)
-            
-            with filter_cols[0]:
-                symbol_options = ["All"] + TOP_30_STOCKS
-                symbol_filter = st.selectbox("Symbol", symbol_options, key="db_symbol_filter")
-            
-            with filter_cols[1]:
-                order_type_options = ["All", "Calls Bought", "Calls Sold", "Puts Bought", "Puts Sold"]
-                order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
-            
-            with filter_cols[2]:
-                date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=5), key="db_date_from")
-            
-            with filter_cols[3]:
-                date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
+        with perf_cols[1]:
+            include_technicals = st.checkbox("📈 Show Technicals", value=True, help="Disable for faster loading with large datasets")
+        with perf_cols[2]:
+            limit_results = st.selectbox("📊 Results Limit", [500, 1000, 2000, 5000, "All"], index=0, help="Limit results for better performance")
+        with perf_cols[3]:
+            if st.button("🔄 Refresh Data"):
+                st.cache_data.clear()
+                st.rerun()
+        
+        # Filter controls
+        filter_cols = st.columns(5)
+        
+        with filter_cols[0]:
+            symbol_options = ["All"] + TOP_STOCKS
+            symbol_filter = st.selectbox("Symbol", symbol_options, key="db_symbol_filter")
+        
+        with filter_cols[1]:
+            order_type_options = ["All", "Calls Bought", "Calls Sold", "Puts Bought", "Puts Sold"]
+            order_type_filter = st.selectbox("Order Type", order_type_options, key="db_order_filter")
+        
+        # Removed position filter - keeping columns aligned
+        with filter_cols[2]:
+            pass  # Empty column for layout
+        
+        with filter_cols[3]:
+            date_from = st.date_input("From Date", value=datetime.now() - timedelta(days=5), key="db_date_from")
+        
+        with filter_cols[4]:
+            date_to = st.date_input("To Date", value=datetime.now(), key="db_date_to")
+    
+        # Load flows from database (simplified without position tracking)
+        flows_df = get_flows_from_database(
+            symbol_filter=symbol_filter if symbol_filter != "All" else None,
+            order_type_filter=order_type_filter if order_type_filter != "All" else None,
+            date_from=date_from.strftime('%Y-%m-%d'),
+            date_to=date_to.strftime('%Y-%m-%d'),
+            include_technicals=include_technicals,
+            limit=None if limit_results == "All" else limit_results
+        )
         
         # Automatically load and display filtered data (reactive filtering)
         with st.spinner("Loading flows from database..."):
@@ -3305,7 +3628,9 @@ def main():
                 symbol_filter=symbol_filter if symbol_filter != "All" else None,
                 order_type_filter=order_type_filter if order_type_filter != "All" else None,
                 date_from=date_from,
-                date_to=date_to
+                date_to=date_to,
+                include_technicals=include_technicals,
+                limit=None if limit_results == "All" else int(limit_results)
             )
         
         # Show interpretation when specific symbol is selected
@@ -3366,7 +3691,7 @@ def main():
                 with trending_cols[0]:
                     st.markdown(f"### 📈 {day_display}'s Top Bullish flows")
                     with st.spinner(f"Analyzing {day_display.lower()}'s bullish flows..."):
-                        bullish_stocks = get_trending_bullish_stocks(days_back=1, min_flows=1)
+                        bullish_stocks = get_trending_bullish_stocks(days_back=1, min_flows=2)
                     
                     if not bullish_stocks.empty:
                         for idx, row in bullish_stocks.head(10).iterrows():
@@ -3386,7 +3711,7 @@ def main():
                 with trending_cols[1]:
                     st.markdown(f"### 📉 {day_display}'s Top Bearish flows")
                     with st.spinner(f"Analyzing {day_display.lower()}'s bearish flows..."):
-                        bearish_stocks = get_trending_bearish_stocks(days_back=1, min_flows=1)
+                        bearish_stocks = get_trending_bearish_stocks(days_back=1, min_flows=2)
                     
                     if not bearish_stocks.empty:
                         for idx, row in bearish_stocks.head(10).iterrows():
@@ -3414,8 +3739,15 @@ def main():
             )
             
             # Select and rename columns for display
-            display_df = display_df[['trade_date', 'order_type', 'symbol', 'strike', 'expiry', 'contracts', 'premium_formatted']]
-            display_df.columns = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts', 'Premium']
+            columns_to_show = ['trade_date', 'order_type', 'symbol', 'strike', 'expiry', 'contracts', 'premium_formatted']
+            column_names = ['Trade Date', 'Order Type', 'Symbol', 'Strike', 'Expiry', 'Contracts', 'Premium']
+            
+            if 'Technicals' in display_df.columns:
+                columns_to_show.append('Technicals')
+                column_names.append('Technicals')
+            
+            display_df = display_df[columns_to_show]
+            display_df.columns = column_names
             
             # Apply styling based on bullish vs bearish sentiment (not just bought vs sold)
             def style_order_type(val):
