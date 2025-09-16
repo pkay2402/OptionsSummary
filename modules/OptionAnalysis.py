@@ -53,7 +53,7 @@ TOP_STOCKS = list(dict.fromkeys([
     # Energy & Industrials
     'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'DVN', 'MRO', 'GE', 'BA', 'CAT', 'DE', 'HON', 'MMM', 'LMT',
     # ETFs & Index proxies
-    'SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'VIX', 'UVXY', 'VXX', 'SVXY', 'IBIT', 'ETHA',
+    'SPY', 'QQQ', 'IWM', 'DIA', 'SMH','UVXY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'VIX', 'UVXY', 'VXX', 'SVXY', 'IBIT', 'ETHA',
     # Autos & EV
     'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'BYD', 'VFS',
     # China/Asia
