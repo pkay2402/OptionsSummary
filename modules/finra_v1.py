@@ -242,15 +242,69 @@ def get_trend_direction(historical_ratios: List[float]) -> str:
     else:
         return "→ Flat"
 
-def calculate_anomaly_score(current_bought: float, current_sold: float, 
-                          avg_bought: float, avg_sold: float) -> float:
-    """Calculate anomaly score for unusual activity"""
-    if avg_bought <= 0 or avg_sold <= 0:
+def calculate_momentum_score(historical_data: List[dict]) -> float:
+    """Calculate momentum score based on recent ratio trends"""
+    if len(historical_data) < 3:
         return 0.0
     
-    bought_anomaly = abs(current_bought - avg_bought) / avg_bought
-    sold_anomaly = abs(current_sold - avg_sold) / avg_sold
-    return round((bought_anomaly + sold_anomaly) / 2, 2)
+    recent_ratios = [entry['buy_to_sell_ratio'] for entry in historical_data[-3:]]
+    if len(recent_ratios) >= 3:
+        # Simple trend calculation: +1 for each day ratio increases
+        momentum = 0
+        for i in range(1, len(recent_ratios)):
+            if recent_ratios[i] > recent_ratios[i-1]:
+                momentum += 1
+        return momentum / (len(recent_ratios) - 1)  # Normalize to 0-1
+    return 0.0
+
+def get_volume_percentile(current_volume: float, historical_volumes: List[float]) -> int:
+    """Calculate what percentile current volume represents vs historical"""
+    if not historical_volumes:
+        return 50
+    
+    sorted_volumes = sorted(historical_volumes)
+    if current_volume <= sorted_volumes[0]:
+        return 0
+    if current_volume >= sorted_volumes[-1]:
+        return 100
+    
+    position = sum(1 for v in sorted_volumes if v < current_volume)
+    return int((position / len(sorted_volumes)) * 100)
+
+def calculate_consistency_score(historical_ratios: List[float], threshold: float = 1.2) -> tuple[int, int]:
+    """Calculate how many days in last N had bullish/bearish ratios"""
+    if not historical_ratios:
+        return 0, 0
+    
+    bullish_days = sum(1 for ratio in historical_ratios if ratio > threshold)
+    bearish_days = sum(1 for ratio in historical_ratios if ratio < (1/threshold))
+    return bullish_days, bearish_days
+
+def get_market_cap_category(market_cap: float) -> str:
+    """Categorize stocks by market cap"""
+    if market_cap >= 200_000_000_000:  # 200B+
+        return "Mega Cap"
+    elif market_cap >= 10_000_000_000:  # 10B+
+        return "Large Cap"
+    elif market_cap >= 2_000_000_000:   # 2B+
+        return "Mid Cap"
+    elif market_cap >= 300_000_000:     # 300M+
+        return "Small Cap"
+    else:
+        return "Micro Cap"
+
+def calculate_risk_reward_ratio(current_price: float, support_level: float, resistance_level: float) -> str:
+    """Calculate basic risk/reward based on price levels"""
+    if support_level <= 0 or resistance_level <= 0:
+        return "N/A"
+    
+    risk = abs(current_price - support_level)
+    reward = abs(resistance_level - current_price)
+    
+    if risk > 0:
+        ratio = reward / risk
+        return f"{ratio:.1f}:1"
+    return "N/A"
 
 def update_stock_database(symbols: List[str]) -> None:
     conn = sqlite3.connect('stock_data.db')
@@ -440,13 +494,27 @@ def generate_stock_summary() -> tuple[pd.DataFrame, pd.DataFrame, Optional[str]]
                 
                 metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
                 metrics['trend_3d'] = get_trend_direction(historical_ratios)
-                metrics['anomaly_score'] = calculate_anomaly_score(
-                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
-                )
+                
+                # Calculate momentum score (0-1 scale) using past data
+                metrics['momentum_score'] = calculate_momentum_score(past[-3:]) if len(past) >= 3 else 0.0
+                
+                # Calculate volume percentile over 10 days
+                ten_day_volumes = [p['total_volume'] for p in past[-10:] if p.get('total_volume')]
+                metrics['volume_percentile'] = get_volume_percentile(metrics['total_volume'], ten_day_volumes)
+                
+                # Calculate consistency score
+                past_10_days = [p for p in past[-10:]]
+                past_10_ratios = [p['buy_to_sell_ratio'] for p in past_10_days if 'buy_to_sell_ratio' in p]
+                bullish_days, bearish_days = calculate_consistency_score(past_10_ratios)
+                metrics['bullish_days_10'] = bullish_days
+                metrics['bearish_days_10'] = bearish_days
             else:
                 metrics['volume_strength'] = 1.0
                 metrics['trend_3d'] = "-"
-                metrics['anomaly_score'] = 0.0
+                metrics['momentum_score'] = 0.0
+                metrics['volume_percentile'] = 50.0
+                metrics['bullish_days_10'] = 0
+                metrics['bearish_days_10'] = 0
             
             # Add price data
             if symbol in price_data:
@@ -636,35 +704,105 @@ def style_ratio_dark(val):
         pass
     return 'background-color: #2d2d2d; color: #ffffff'
 
-def format_display_dataframe(df):
-    """Format dataframe for display with proper styling"""
+def format_enhanced_dataframe(df, focus_type="bought"):
+    """Format dataframe with enhanced trading insights"""
     display_df = df.copy()
+    
+    # Basic formatting
     display_df['Current Price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
     display_df['Price Change'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%")
     display_df['BOT %'] = (display_df['bought_volume'] / display_df['total_volume'] * 100).round(0).astype(int).apply(lambda x: f"{x}%")
     display_df['Signal'] = display_df['buy_to_sell_ratio'].apply(get_signal)
     display_df['Volume Strength'] = display_df['volume_strength'].apply(lambda x: f"{x:.1f}x")
-    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
-    display_df['Trend 3D'] = display_df['trend_3d']
-    display_df['Anomaly'] = display_df['anomaly_score'].round(2)
+    
+    # Enhanced metrics
+    display_df['Volume Rank'] = display_df['volume_percentile'].apply(lambda x: f"{x}th %ile")
+    display_df['Momentum'] = display_df['momentum_score'].apply(lambda x: 
+        "🚀 Strong" if x >= 0.8 else "📈 Good" if x >= 0.5 else "🔄 Mixed" if x >= 0.2 else "📉 Weak")
+    
+    # Consistency score
+    if focus_type == "bought":
+        display_df['Consistency'] = display_df['bullish_days_10'].apply(lambda x:
+            f"🟢 {x}/10" if x >= 7 else f"🟡 {x}/10" if x >= 4 else f"🔴 {x}/10")
+    else:
+        display_df['Consistency'] = display_df['bearish_days_10'].apply(lambda x:
+            f"🔴 {x}/10" if x >= 7 else f"🟡 {x}/10" if x >= 4 else f"🟢 {x}/10")
+    
+    # Volume formatting
     for col in ['bought_volume', 'sold_volume', 'total_volume']:
         display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+    
+    # Deviation formatting
+    display_df['Bought Dev 5d'] = display_df['dev_b_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    display_df['Sold Dev 5d'] = display_df['dev_s_5'].apply(lambda x: f"{x:+.0f}%" if pd.notnull(x) else "-")
+    
+    # Trend formatting
+    display_df['Trend 3D'] = display_df['trend_3d']
+    
     return display_df
 
-def create_dark_styled_dataframe(display_df, columns):
-    """Create styled dataframe with dark theme colors"""
-    return display_df[columns].style.applymap(
-        style_signal_dark, subset=['Signal']
-    ).applymap(
-        style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
-    ).applymap(
-        style_price_change_dark, subset=['Price Change']
-    ).applymap(
-        style_anomaly_dark, subset=['Anomaly']
-    ).applymap(
-        style_bot_percentage, subset=['BOT %']
-    ).set_table_styles([
+def style_momentum(val):
+    """Style momentum indicators"""
+    if "Strong" in val:
+        return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+    elif "Good" in val:
+        return 'background-color: #4ade80; color: #ffffff'
+    elif "Mixed" in val:
+        return 'background-color: #fbbf24; color: #000000'
+    elif "Weak" in val:
+        return 'background-color: #ef4444; color: #ffffff'
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_consistency(val):
+    """Style consistency indicators"""
+    if val.startswith("🟢"):
+        return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+    elif val.startswith("🟡"):
+        return 'background-color: #fbbf24; color: #000000; font-weight: bold'
+    elif val.startswith("🔴"):
+        return 'background-color: #ef4444; color: #ffffff; font-weight: bold'
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def style_volume_rank(val):
+    """Style volume percentile ranking"""
+    try:
+        percentile = int(val.split('th')[0])
+        if percentile >= 90:
+            return 'background-color: #22c55e; color: #ffffff; font-weight: bold'
+        elif percentile >= 75:
+            return 'background-color: #4ade80; color: #ffffff'
+        elif percentile >= 50:
+            return 'background-color: #fbbf24; color: #000000'
+        else:
+            return 'background-color: #6b7280; color: #ffffff'
+    except:
+        pass
+    return 'background-color: #2d2d2d; color: #ffffff'
+
+def create_enhanced_styled_dataframe(display_df, columns, focus_type="bought"):
+    """Create enhanced styled dataframe with new insights"""
+    # Filter columns to only those that exist in display_df
+    available_columns = [col for col in columns if col in display_df.columns]
+    
+    styled_df = display_df[available_columns].style
+    
+    # Apply styling only to columns that exist
+    if 'Signal' in available_columns:
+        styled_df = styled_df.applymap(style_signal_dark, subset=['Signal'])
+    if 'Bought Dev 5d' in available_columns and 'Sold Dev 5d' in available_columns:
+        styled_df = styled_df.applymap(style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d'])
+    if 'Price Change' in available_columns:
+        styled_df = styled_df.applymap(style_price_change_dark, subset=['Price Change'])
+    if 'Momentum' in available_columns:
+        styled_df = styled_df.applymap(style_momentum, subset=['Momentum'])
+    if 'Consistency' in available_columns:
+        styled_df = styled_df.applymap(style_consistency, subset=['Consistency'])
+    if 'Volume Rank' in available_columns:
+        styled_df = styled_df.applymap(style_volume_rank, subset=['Volume Rank'])
+    if 'BOT %' in available_columns:
+        styled_df = styled_df.applymap(style_bot_percentage, subset=['BOT %'])
+    
+    return styled_df.set_table_styles([
         {'selector': 'th', 'props': [
             ('background-color', '#2d2d2d'), 
             ('color', '#ffffff'), 
@@ -712,13 +850,27 @@ def create_theme_dataframe(symbols, historical, price_data, latest_date):
                 
                 metrics['volume_strength'] = calculate_volume_strength(metrics['total_volume'], historical_volumes)
                 metrics['trend_3d'] = get_trend_direction(historical_ratios)
-                metrics['anomaly_score'] = calculate_anomaly_score(
-                    metrics['bought_volume'], metrics['sold_volume'], avg_b_5, avg_s_5
-                )
+                
+                # Calculate momentum score (0-1 scale) using past data
+                metrics['momentum_score'] = calculate_momentum_score(past[-3:]) if len(past) >= 3 else 0.0
+                
+                # Calculate volume percentile over 10 days
+                ten_day_volumes = [p['total_volume'] for p in past[-10:] if p.get('total_volume')]
+                metrics['volume_percentile'] = get_volume_percentile(metrics['total_volume'], ten_day_volumes)
+                
+                # Calculate consistency score
+                past_10_days = [p for p in past[-10:]]
+                past_10_ratios = [p['buy_to_sell_ratio'] for p in past_10_days if 'buy_to_sell_ratio' in p]
+                bullish_days, bearish_days = calculate_consistency_score(past_10_ratios)
+                metrics['bullish_days_10'] = bullish_days
+                metrics['bearish_days_10'] = bearish_days
             else:
                 metrics['volume_strength'] = 1.0
                 metrics['trend_3d'] = "-"
-                metrics['anomaly_score'] = 0.0
+                metrics['momentum_score'] = 0.0
+                metrics['volume_percentile'] = 50.0
+                metrics['bullish_days_10'] = 0
+                metrics['bearish_days_10'] = 0
             
             # Add price data
             if symbol in price_data:
@@ -813,7 +965,7 @@ def run():
     #st.title("📊 Dark Pool Analysis")
     
     # Create tabs
-    tabs = st.tabs(["Single Stock", "Stock Summary", "Themes Overview", "Watchlist Summary"])
+    tabs = st.tabs(["Single Stock", "High Bought Stocks", "High Sold Stocks", "Watchlist Summary"])
     
     # Single Stock Tab
     with tabs[0]:
@@ -875,218 +1027,191 @@ def run():
                 else:
                     st.write(f"No data available for {symbol}.")
     
-    # Stock Summary Tab
+    # High Bought Stocks Tab
     with tabs[1]:
-        st.subheader("Stock Summary")
-        if st.button("Generate Stock Summary"):
-            with st.spinner("Analyzing stock volume data..."):
+        st.subheader("🟢 High Bought Stocks (Bought > 2x Sold)")
+        if st.button("Generate High Bought Analysis", key="high_bought"):
+            with st.spinner("Analyzing high bought stocks..."):
                 high_buy_df, high_sell_df, latest_date = generate_stock_summary()
                 if latest_date:
                     st.markdown(f"**📅 Data analyzed for:** `{latest_date}`")
                 
-                # Enhanced summary metrics
-                if not high_buy_df.empty or not high_sell_df.empty:
-                    all_data = pd.concat([high_buy_df, high_sell_df]) if not high_buy_df.empty and not high_sell_df.empty else (high_buy_df if not high_buy_df.empty else high_sell_df)
-                    
-                    st.subheader("📈 Market Overview")
-                    col1, col2, col3, col4, col5 = st.columns(5)
-                    col1.metric("Stocks Analyzed", len(all_data))
-                    col2.metric("Avg Price Change", f"{all_data['price_change_1d'].mean():.1f}%")
-                    col3.metric("High Volume Count", len(all_data[all_data['volume_strength'] > 1.5]))
-                    col4.metric("Bullish Signals", len(all_data[all_data['buy_to_sell_ratio'] > 1.5]))
-                    col5.metric("High Anomalies", len(all_data[all_data['anomaly_score'] > 1.0]))
-                
-                st.markdown("### 🟢 High Buy Stocks (Bought > 2x Sold)")
                 if not high_buy_df.empty:
+                    # Enhanced summary metrics for high bought stocks
+                    st.subheader("📈 High Bought Overview")
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    col1.metric("High Bought Stocks", len(high_buy_df))
+                    col2.metric("Avg Buy/Sell Ratio", f"{high_buy_df['buy_to_sell_ratio'].mean():.2f}")
+                    col3.metric("Avg Price Change", f"{high_buy_df['price_change_1d'].mean():.1f}%")
+                    col4.metric("High Volume (>75th %)", len(high_buy_df[high_buy_df['volume_percentile'] > 75]))
+                    col5.metric("Strong Momentum", len(high_buy_df[high_buy_df['momentum_score'] >= 0.5]))
+                    
                     # Add filters
-                    col1, col2, col3 = st.columns(3)
+                    st.subheader("🔍 Filters")
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        min_ratio = st.slider("Min Buy/Sell Ratio", 0.5, 5.0, 2.0)
+                        min_ratio = st.slider("Min Buy/Sell Ratio", 0.5, 5.0, 2.0, key="bought_ratio")
                     with col2:
-                        min_volume = st.number_input("Min Volume (M)", 0, 100, 1) * 1_000_000
+                        min_volume = st.number_input("Min Volume (M)", 0, 100, 1, key="bought_volume") * 1_000_000
                     with col3:
-                        show_anomalies_only = st.checkbox("Show High Anomalies Only")
+                        min_consistency = st.slider("Min Bullish Days (10d)", 0, 10, 3, key="bought_consistency")
+                    with col4:
+                        momentum_filter = st.selectbox("Momentum Filter", ["All", "Strong Only", "Good+"], key="bought_momentum")
                     
                     # Apply filters
                     filtered_df = high_buy_df.copy()
                     filtered_df = filtered_df[filtered_df['buy_to_sell_ratio'] >= min_ratio]
                     filtered_df = filtered_df[filtered_df['total_volume'] >= min_volume]
-                    if show_anomalies_only:
-                        filtered_df = filtered_df[filtered_df['anomaly_score'] > 1.0]
+                    filtered_df = filtered_df[filtered_df['bullish_days_10'] >= min_consistency]
                     
-                    display_df = format_display_dataframe(filtered_df)
-                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
+                    if momentum_filter == "Strong Only":
+                        filtered_df = filtered_df[filtered_df['momentum_score'] >= 0.8]
+                    elif momentum_filter == "Good+":
+                        filtered_df = filtered_df[filtered_df['momentum_score'] >= 0.5]
                     
-                    styled_df = create_dark_styled_dataframe(display_df, columns)
-                    st.dataframe(styled_df, use_container_width=True)
+                    st.subheader(f"📊 Results ({len(filtered_df)} stocks)")
+                    if not filtered_df.empty:
+                        display_df = format_enhanced_dataframe(filtered_df, focus_type="bought")
+                        columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Volume Rank', 'Momentum', 'Consistency', 'Trend 3D']
+                        
+                        styled_df = create_enhanced_styled_dataframe(display_df, columns, "bought")
+                        st.dataframe(styled_df, use_container_width=True)
+                        
+                        # Enhanced insights
+                        st.subheader("💡 Key Insights")
+                        
+                        # Top performers in different categories
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        top_ratio = filtered_df.nlargest(1, 'buy_to_sell_ratio')
+                        if not top_ratio.empty:
+                            col1.info(f"🏆 **Highest Ratio:** {top_ratio.iloc[0]['Symbol']} ({top_ratio.iloc[0]['buy_to_sell_ratio']:.2f})")
+                        
+                        top_momentum = filtered_df.nlargest(1, 'momentum_score')
+                        if not top_momentum.empty:
+                            col2.info(f"🚀 **Best Momentum:** {top_momentum.iloc[0]['Symbol']} ({top_momentum.iloc[0]['momentum_score']:.2f})")
+                            
+                        top_consistency = filtered_df.nlargest(1, 'bullish_days_10')
+                        if not top_consistency.empty:
+                            col3.info(f"� **Most Consistent:** {top_consistency.iloc[0]['Symbol']} ({top_consistency.iloc[0]['bullish_days_10']}/10)")
+                            
+                        top_volume_rank = filtered_df.nlargest(1, 'volume_percentile')
+                        if not top_volume_rank.empty:
+                            col4.info(f"📊 **Highest Volume Rank:** {top_volume_rank.iloc[0]['Symbol']} ({top_volume_rank.iloc[0]['volume_percentile']}th %ile)")
+                        
+                        # Additional trading insights
+                        st.subheader("🎯 Trading Insights")
+                        
+                        # Strong setups (high ratio + good momentum + consistency)
+                        strong_setups = filtered_df[
+                            (filtered_df['buy_to_sell_ratio'] > 3.0) & 
+                            (filtered_df['momentum_score'] >= 0.5) & 
+                            (filtered_df['bullish_days_10'] >= 5)
+                        ]
+                        
+                        # Momentum breakouts (recent momentum + high volume rank)
+                        momentum_breakouts = filtered_df[
+                            (filtered_df['momentum_score'] >= 0.8) & 
+                            (filtered_df['volume_percentile'] >= 80)
+                        ]
+                        
+                        # Consistent accumulation (high consistency but moderate ratio)
+                        steady_accumulation = filtered_df[
+                            (filtered_df['bullish_days_10'] >= 7) & 
+                            (filtered_df['buy_to_sell_ratio'].between(2.0, 4.0))
+                        ]
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.markdown("**� Strong Setups**")
+                            if not strong_setups.empty:
+                                for _, row in strong_setups.head(3).iterrows():
+                                    st.success(f"{row['Symbol']}: {row['buy_to_sell_ratio']:.1f}x ratio, {row['momentum_score']:.1f} momentum")
+                            else:
+                                st.info("No strong setups found")
+                        
+                        with col2:
+                            st.markdown("**🚀 Momentum Breakouts**")
+                            if not momentum_breakouts.empty:
+                                for _, row in momentum_breakouts.head(3).iterrows():
+                                    st.success(f"{row['Symbol']}: {row['volume_percentile']}th %ile volume, {row['momentum_score']:.1f} momentum")
+                            else:
+                                st.info("No momentum breakouts found")
+                        
+                        with col3:
+                            st.markdown("**📈 Steady Accumulation**")
+                            if not steady_accumulation.empty:
+                                for _, row in steady_accumulation.head(3).iterrows():
+                                    st.success(f"{row['Symbol']}: {row['bullish_days_10']}/10 days, {row['buy_to_sell_ratio']:.1f}x ratio")
+                            else:
+                                st.info("No steady accumulation found")
+                    else:
+                        st.info("No stocks match the current filters.")
                 else:
-                    st.info("No high buy stocks found.")
-                    
-                st.markdown("### 🔴 High Sell Stocks (Sold > 2x Bought)")
-                if not high_sell_df.empty:
-                    display_df = format_display_dataframe(high_sell_df)
-                    columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
-                    
-                    styled_df = create_dark_styled_dataframe(display_df, columns)
-                    st.dataframe(styled_df, use_container_width=True)
-                else:
-                    st.info("No high sell stocks found.")
-    
-    # Themes Overview Tab
+                    st.info("No high bought stocks found for this date.")
+
+    # High Sold Stocks Tab
     with tabs[2]:
-        st.subheader("Themes Overview")
-        if st.button("Generate Themes Summary"):
-            with st.spinner("Analyzing themes..."):
-                col1, col2 = st.columns(2)
+        st.subheader("🔴 High Sold Stocks (Sold > 2x Bought)")
+        if st.button("Generate High Sold Analysis", key="high_sold"):
+            with st.spinner("Analyzing high sold stocks..."):
+                high_buy_df, high_sell_df, latest_date = generate_stock_summary()
+                if latest_date:
+                    st.markdown(f"**📅 Data analyzed for:** `{latest_date}`")
                 
-                with col1:
-                    st.markdown("### 📅 Daily Best/Worst Themes")
-                    daily_themes, daily_dates = generate_themes_summary(1)
-                    if daily_dates:
-                        st.write(f"Date: {daily_dates[0].strftime('%Y-%m-%d')}")
+                if not high_sell_df.empty:
+                    # Enhanced summary metrics for high sold stocks
+                    st.subheader("� High Sold Overview")
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    col1.metric("High Sold Stocks", len(high_sell_df))
+                    col2.metric("Avg Buy/Sell Ratio", f"{high_sell_df['buy_to_sell_ratio'].mean():.2f}")
+                    col3.metric("Avg Price Change", f"{high_sell_df['price_change_1d'].mean():.1f}%")
+                    col4.metric("High Volume Count", len(high_sell_df[high_sell_df['volume_strength'] > 1.5]))
+                    col5.metric("High Momentum", len(high_sell_df[high_sell_df['momentum_score'] > 0.6]))
+                    
+                    # Add filters
+                    st.subheader("🔍 Filters")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        max_ratio = st.slider("Max Buy/Sell Ratio", 0.1, 1.0, 0.5, key="sold_ratio")
+                    with col2:
+                        min_volume_sold = st.number_input("Min Volume (M)", 0, 100, 1, key="sold_volume") * 1_000_000
+                    with col3:
+                        show_momentum_only_sold = st.checkbox("Show High Momentum Only", key="sold_momentum")
+                    
+                    # Apply filters
+                    filtered_df = high_sell_df.copy()
+                    filtered_df = filtered_df[filtered_df['buy_to_sell_ratio'] <= max_ratio]
+                    filtered_df = filtered_df[filtered_df['total_volume'] >= min_volume_sold]
+                    if show_momentum_only_sold:
+                        filtered_df = filtered_df[filtered_df['momentum_score'] > 0.6]
+                    
+                    st.subheader(f"📊 Results ({len(filtered_df)} stocks)")
+                    if not filtered_df.empty:
+                        display_df = format_enhanced_dataframe(filtered_df, focus_type="sold")
+                        columns = ['Symbol', 'Theme', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Momentum', 'Volume Rank', 'Consistency']
                         
-                        st.markdown("#### 🟢 Best Themes")
-                        best_themes_data = []
-                        for theme, data in daily_themes[:5]:
-                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
-                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
-                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
-                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
-                            best_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
-                        df_best = pd.DataFrame(best_themes_data)
-                        styled_best = df_best.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
-                            {'selector': 'th', 'props': [
-                                ('background-color', '#2d2d2d'), 
-                                ('color', '#ffffff'), 
-                                ('font-weight', 'bold'),
-                                ('text-align', 'center'),
-                                ('border', '1px solid #4d4d4d')
-                            ]},
-                            {'selector': 'td', 'props': [
-                                ('background-color', '#1e1e1e'), 
-                                ('color', '#ffffff'), 
-                                ('border', '1px solid #3d3d3d'),
-                                ('text-align', 'center')
-                            ]},
-                            {'selector': 'table', 'props': [
-                                ('border-collapse', 'collapse'),
-                                ('width', '100%')
-                            ]},
-                            {'selector': 'tr:hover td', 'props': [
-                                ('background-color', '#3f3f3f')
-                            ]}
-                        ])
-                        st.dataframe(styled_best, use_container_width=True)
+                        styled_df = create_enhanced_styled_dataframe(display_df, columns, focus_type="sold")
+                        st.dataframe(styled_df, use_container_width=True)
                         
-                        st.markdown("#### 🔴 Worst Themes")
-                        worst_themes_data = []
-                        for theme, data in daily_themes[-5:]:
-                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
-                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
-                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
-                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
-                            worst_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
-                        df_worst = pd.DataFrame(worst_themes_data)
-                        styled_worst = df_worst.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
-                            {'selector': 'th', 'props': [
-                                ('background-color', '#2d2d2d'), 
-                                ('color', '#ffffff'), 
-                                ('font-weight', 'bold'),
-                                ('text-align', 'center'),
-                                ('border', '1px solid #4d4d4d')
-                            ]},
-                            {'selector': 'td', 'props': [
-                                ('background-color', '#1e1e1e'), 
-                                ('color', '#ffffff'), 
-                                ('border', '1px solid #3d3d3d'),
-                                ('text-align', 'center')
-                            ]},
-                            {'selector': 'table', 'props': [
-                                ('border-collapse', 'collapse'),
-                                ('width', '100%')
-                            ]},
-                            {'selector': 'tr:hover td', 'props': [
-                                ('background-color', '#3f3f3f')
-                            ]}
-                        ])
-                        st.dataframe(styled_worst, use_container_width=True)
+                        # Additional insights
+                        st.subheader("💡 Key Insights")
+                        lowest_ratio = filtered_df.nsmallest(1, 'buy_to_sell_ratio')
+                        top_volume_sold = filtered_df.nlargest(1, 'total_volume')
+                        top_momentum_sold = filtered_df.nlargest(1, 'momentum_score')
+                        
+                        col1, col2, col3 = st.columns(3)
+                        if not lowest_ratio.empty:
+                            col1.info(f"📉 **Lowest Ratio:** {lowest_ratio.iloc[0]['Symbol']} ({lowest_ratio.iloc[0]['buy_to_sell_ratio']:.2f})")
+                        if not top_volume_sold.empty:
+                            col2.info(f"📊 **Highest Volume:** {top_volume_sold.iloc[0]['Symbol']} ({top_volume_sold.iloc[0]['total_volume']:,.0f})")
+                        if not top_momentum_sold.empty:
+                            col3.info(f"� **Highest Momentum:** {top_momentum_sold.iloc[0]['Symbol']} ({top_momentum_sold.iloc[0]['momentum_score']:.2f})")
                     else:
-                        st.info("No daily data available.")
-                
-                with col2:
-                    st.markdown("### 📅 Weekly Best/Worst Themes")
-                    weekly_themes, weekly_dates = generate_themes_summary(5)
-                    if weekly_dates:
-                        dates_str = ', '.join([d.strftime('%Y-%m-%d') for d in weekly_dates])
-                        st.write(f"Dates: {dates_str}")
-                        
-                        st.markdown("#### 🟢 Best Themes")
-                        best_themes_data = []
-                        for theme, data in weekly_themes[:5]:
-                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
-                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
-                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
-                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
-                            best_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
-                        df_best = pd.DataFrame(best_themes_data)
-                        styled_best = df_best.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
-                            {'selector': 'th', 'props': [
-                                ('background-color', '#2d2d2d'), 
-                                ('color', '#ffffff'), 
-                                ('font-weight', 'bold'),
-                                ('text-align', 'center'),
-                                ('border', '1px solid #4d4d4d')
-                            ]},
-                            {'selector': 'td', 'props': [
-                                ('background-color', '#1e1e1e'), 
-                                ('color', '#ffffff'), 
-                                ('border', '1px solid #3d3d3d'),
-                                ('text-align', 'center')
-                            ]},
-                            {'selector': 'table', 'props': [
-                                ('border-collapse', 'collapse'),
-                                ('width', '100%')
-                            ]},
-                            {'selector': 'tr:hover td', 'props': [
-                                ('background-color', '#3f3f3f')
-                            ]}
-                        ])
-                        st.dataframe(styled_best, use_container_width=True)
-                        
-                        st.markdown("#### 🔴 Worst Themes")
-                        worst_themes_data = []
-                        for theme, data in weekly_themes[-5:]:
-                            sorted_stocks = sorted(data['stock_ratios'].items(), key=lambda x: x[1], reverse=True)
-                            best_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[:3]])
-                            worst_stocks = ', '.join([f"{s} ({'∞' if r == float('inf') else f'{r:.2f}'})" for s, r in sorted_stocks[-3:]])
-                            ratio_str = "∞" if data['ratio'] == float('inf') else f"{data['ratio']:.2f}"
-                            worst_themes_data.append({'Theme': theme, 'Ratio': ratio_str, 'Best Stocks': best_stocks, 'Worst Stocks': worst_stocks})
-                        df_worst = pd.DataFrame(worst_themes_data)
-                        styled_worst = df_worst.style.applymap(style_ratio_dark, subset=['Ratio']).set_table_styles([
-                            {'selector': 'th', 'props': [
-                                ('background-color', '#2d2d2d'), 
-                                ('color', '#ffffff'), 
-                                ('font-weight', 'bold'),
-                                ('text-align', 'center'),
-                                ('border', '1px solid #4d4d4d')
-                            ]},
-                            {'selector': 'td', 'props': [
-                                ('background-color', '#1e1e1e'), 
-                                ('color', '#ffffff'), 
-                                ('border', '1px solid #3d3d3d'),
-                                ('text-align', 'center')
-                            ]},
-                            {'selector': 'table', 'props': [
-                                ('border-collapse', 'collapse'),
-                                ('width', '100%')
-                            ]},
-                            {'selector': 'tr:hover td', 'props': [
-                                ('background-color', '#3f3f3f')
-                            ]}
-                        ])
-                        st.dataframe(styled_worst, use_container_width=True)
-                    else:
-                        st.info("No weekly data available.")
+                        st.info("No stocks match the current filters.")
+                else:
+                    st.info("No high sold stocks found for this date.")
     
     # Watchlist Summary Tab
     with tabs[3]:
@@ -1116,12 +1241,12 @@ def run():
                         col2.metric("Total Sold", f"{total_sell:,.0f}")
                         col3.metric("Aggregate Ratio", f"{aggregate_ratio:.2f}")
                         col4.metric("Avg Price Change", f"{theme_df['price_change_1d'].mean():.1f}%")
-                        col5.metric("High Anomalies", len(theme_df[theme_df['anomaly_score'] > 1.0]))
+                        col5.metric("High Momentum", len(theme_df[theme_df['momentum_score'] > 0.6]))
                         
-                        display_df = format_display_dataframe(theme_df)
-                        columns = ['Symbol', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Anomaly']
+                        display_df = format_enhanced_dataframe(theme_df, focus_type="mixed")
+                        columns = ['Symbol', 'Current Price', 'Price Change', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Volume Strength', 'Bought Dev 5d', 'Sold Dev 5d', 'Trend 3D', 'Momentum', 'Volume Rank', 'Consistency']
                         
-                        styled_df = create_dark_styled_dataframe(display_df, columns)
+                        styled_df = create_enhanced_styled_dataframe(display_df, columns, focus_type="mixed")
                         st.dataframe(styled_df, use_container_width=True)
                 else:
                     st.warning(f"No data available for {selected_theme}.")
