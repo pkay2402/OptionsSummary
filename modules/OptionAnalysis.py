@@ -7,13 +7,213 @@ import sqlite3
 import hashlib
 import yfinance as yf
 import time
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+import finra
 
+# Ensure pytz and TIMEZONE_AVAILABLE are available globally
 try:
     import pytz
     TIMEZONE_AVAILABLE = True
 except ImportError:
     TIMEZONE_AVAILABLE = False
-    st.warning("⚠️ pytz not installed. Install with: pip install pytz for proper timezone handling")
+
+
+def load_global_styles():
+        """Inject global CSS to unify theme, spacing, and controls across the app."""
+        css = """
+        <style>
+        :root{
+            --bg:#071226; /* darker slate */
+            --panel:#08131b;
+            --muted:#9fbfd8; /* brighter muted */
+            --accent:#06b6d4; /* cyan */
+            --accent-2:#60a5fa; /* blue */
+            --accent-strong:#00c7e6;
+            --success:#16a34a;
+            --danger:#ef4444;
+            --card:#0b1320;
+            --text:#e6eef6;
+            --placeholder: rgba(230,238,246,0.45);
+        }
+
+        .stApp, .main, .block-container {
+            background: linear-gradient(180deg, var(--bg), #031128);
+            color: var(--text);
+            font-family: Inter, Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+        }
+
+        /* Header */
+        .app-header { display:flex; align-items:center; gap:12px; }
+        .app-logo { width:44px; height:44px; border-radius:8px; background:var(--accent); display:inline-block }
+        .app-title { font-size:20px; font-weight:700; margin:0; color:var(--text) }
+        .app-sub { color:var(--muted); margin:0; font-size:12px }
+
+        /* Buttons */
+        .stButton>button {
+            background: linear-gradient(90deg,var(--accent),var(--accent-2));
+            color: #042027;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(2,6,23,0.6);
+        }
+
+        /* Make input, textareas and placeholders more readable */
+        input, textarea, select, .stTextInput>div>input {
+            background: rgba(255,255,255,0.03) !important;
+            color: var(--text) !important;
+            border: 1px solid rgba(255,255,255,0.06) !important;
+            border-radius: 8px !important;
+            padding: 8px !important;
+        }
+        input::placeholder, textarea::placeholder { color: var(--placeholder) !important; }
+
+        /* Metric card / metric values should be high-contrast */
+        .stMetric, .stMetric > div, .stMetricValue, .stMetricDelta, .stMetricLabel {
+            color: var(--text) !important;
+        }
+        .stMetricValue {
+            font-weight:700 !important;
+            font-size:20px !important;
+        }
+
+        /* Card styling for quick metric containers */
+        .metric-container { background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; }
+
+        /* Tabs */
+        .stTabs [data-baseweb="tab"] {
+            background: rgba(255,255,255,0.02) !important;
+            color: var(--text) !important;
+            border-radius: 8px 8px 0 0 !important;
+            padding: 8px 12px !important;
+        }
+
+        /* Dataframe look */
+        .stDataFrame table {
+            border-collapse: collapse;
+            width: 100%;
+            color: var(--text);
+        }
+        .stDataFrame th { background: rgba(255,255,255,0.03); color: var(--muted); padding:6px }
+        .stDataFrame td { padding:6px }
+
+        /* Details tooltip readability */
+        details[open] { background: rgba(255,255,255,0.01); padding: 10px; border-radius:8px }
+        details summary { cursor: pointer; }
+        details div { color: var(--muted); }
+
+        /* Sentiment badge adjustments (ensure readable text) */
+        .sentiment-badge { color: #ffffff; padding:4px 8px; border-radius:8px; font-size:12px }
+
+        /* Make expanders subtle */
+        .stExpander>div[role="button"] { background: rgba(255,255,255,0.02); border-radius:6px }
+        </style>
+        """
+        st.markdown(css, unsafe_allow_html=True)
+
+
+def render_header_and_sidebar():
+    """Render a compact header and a helpful sidebar (legend + quick actions)."""
+    # Header
+    header_html = """
+    <div class="app-header">
+      <div class="app-logo"></div>
+      <div>
+        <div class="app-title">Flows and Pools</div>
+        <div class="app-sub">Consolidated flows, FINRA dark pool insights, and AI technicals</div>
+      </div>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
+
+    # Sidebar legend / quick actions
+    with st.sidebar:
+        st.markdown("### Legend & Quick Actions")
+        st.markdown("""
+        • 🟢 Calls Bought / Puts Sold = Bullish
+
+        • 🔴 Puts Bought / Calls Sold = Bearish
+
+        • 🟡 Mixed = Neutral / Hedging
+        """)
+
+        st.markdown("---")
+        st.markdown("### Quick Actions")
+        # Quick symbol entry prefill
+        if 'auto_symbol' not in st.session_state:
+            st.session_state['auto_symbol'] = ''
+
+        quick_symbol = st.text_input("Quick symbol to analyze", value=st.session_state.get('auto_symbol', ''), key='sidebar_quick_symbol')
+        if st.button("Analyze symbol"):
+            st.session_state['auto_symbol'] = quick_symbol.upper().strip()
+            # trigger a soft page rerun so the main dashboard picks it up
+            st.rerun()
+
+        if st.button("Refresh Notable Flows"):
+            # simple way to nudge caches to refresh
+            try:
+                get_latest_day_notable_flows.clear()
+            except Exception:
+                pass
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("Need help? Reach out in the README or open an issue.")
+
+
+def metric_card(label, value, delta=None, help_text=None):
+    """Render a compact metric card with consistent styling."""
+    cols = st.columns([3, 1])
+    with cols[0]:
+        if help_text:
+            st.caption(help_text)
+        st.markdown(f"**{label}**")
+    with cols[1]:
+        # Use custom HTML for value/delta to avoid empty-label warnings from st.metric
+        delta_html = f"<div style='font-size:12px;color:var(--muted);'>Δ {delta}</div>" if delta is not None else ""
+        value_html = f"<div style='font-size:20px;font-weight:700;color:var(--text);'>{value}</div>"
+        st.markdown(value_html + delta_html, unsafe_allow_html=True)
+
+
+def styled_sentiment_badge(sentiment_str):
+    """Return a small inline HTML badge for sentiment values."""
+    color = '#94a3b8'
+    if 'Bull' in sentiment_str or '🟢' in sentiment_str:
+        color = '#16a34a'
+    elif 'Bear' in sentiment_str or '🔴' in sentiment_str:
+        color = '#ef4444'
+    elif 'Mixed' in sentiment_str or '🟡' in sentiment_str:
+        color = '#f59e0b'
+
+    return f"<span style='background:{color};color:#001f1f;padding:4px 8px;border-radius:8px;font-size:12px;'>{sentiment_str}</span>"
+
+
+def render_flow_table(df, max_rows=100):
+    """Render a flow DataFrame with improved, compact styling and sentiment badges."""
+    if df is None or df.empty:
+        st.info("No flows to display")
+        return
+
+    df_display = df.copy()
+    # Shorten datetime and format numbers
+    if 'trade_date' in df_display.columns:
+        df_display['trade_date'] = df_display['trade_date'].astype(str).str.slice(0,19)
+    if 'premium' in df_display.columns:
+        df_display['premium'] = df_display['premium'].apply(lambda x: f"${x:,.0f}")
+    if 'contracts' in df_display.columns:
+        df_display['contracts'] = df_display['contracts'].apply(lambda x: f"{int(x):,}")
+
+    # Convert sentiment column if present
+    # pytz and TIMEZONE_AVAILABLE are now defined globally above
+
+    try:
+        import pytz
+        TIMEZONE_AVAILABLE = True
+    except ImportError:
+        TIMEZONE_AVAILABLE = False
+        st.warning("⚠️ pytz not installed. Install with: pip install pytz for proper timezone handling")
 
 def get_technical_indicators(symbol):
     """Get current price and key technical indicators for a symbol"""
@@ -39,6 +239,501 @@ def get_technical_indicators(symbol):
         
     except Exception as e:
         return "Error fetching data"
+
+def get_comprehensive_technical_data(symbol):
+    """Get comprehensive technical data for analysis and charting"""
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1y")  # Get 1 year of data
+        
+        if hist.empty:
+            return None
+        
+        # Calculate all moving averages
+        hist['SMA_5'] = hist['Close'].rolling(window=5).mean()
+        hist['EMA_8'] = hist['Close'].ewm(span=8).mean()
+        hist['EMA_21'] = hist['Close'].ewm(span=21).mean()
+        hist['SMA_50'] = hist['Close'].rolling(window=50).mean()
+        hist['SMA_200'] = hist['Close'].rolling(window=200).mean()
+        
+        # Calculate RSI
+        delta = hist['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        hist['RSI'] = 100 - (100 / (1 + rs))
+        
+        # Calculate MACD
+        ema_12 = hist['Close'].ewm(span=12).mean()
+        ema_26 = hist['Close'].ewm(span=26).mean()
+        hist['MACD'] = ema_12 - ema_26
+        hist['MACD_Signal'] = hist['MACD'].ewm(span=9).mean()
+        hist['MACD_Histogram'] = hist['MACD'] - hist['MACD_Signal']
+        
+        # Calculate Bollinger Bands
+        sma_20 = hist['Close'].rolling(window=20).mean()
+        std_20 = hist['Close'].rolling(window=20).std()
+        hist['BB_Upper'] = sma_20 + (std_20 * 2)
+        hist['BB_Lower'] = sma_20 - (std_20 * 2)
+        hist['BB_Middle'] = sma_20
+        
+        # Calculate volume moving average
+        hist['Volume_MA'] = hist['Volume'].rolling(window=20).mean()
+        
+        return hist
+        
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return None
+
+def generate_ai_technical_summary(symbol, data=None):
+    """Generate AI-powered technical analysis summary"""
+    if data is None:
+        data = get_comprehensive_technical_data(symbol)
+    
+    if data is None or data.empty:
+        return f"Unable to fetch data for {symbol}"
+    
+    # Get latest values
+    latest = data.iloc[-1]
+    prev = data.iloc[-2] if len(data) > 1 else latest
+    
+    current_price = latest['Close']
+    price_change = ((current_price - prev['Close']) / prev['Close']) * 100
+    
+    # Moving average analysis
+    sma_5 = latest['SMA_5']
+    ema_8 = latest['EMA_8']
+    ema_21 = latest['EMA_21']
+    sma_50 = latest['SMA_50']
+    sma_200 = latest['SMA_200']
+    
+    # Determine trend
+    if current_price > ema_8 > ema_21 > sma_50 > sma_200:
+        trend = "🟢 **STRONG BULLISH TREND**"
+        trend_desc = "All moving averages are stacked bullishly with price above all levels."
+    elif current_price > ema_8 > ema_21:
+        trend = "🟢 **BULLISH TREND**"
+        trend_desc = "Short-term momentum is positive with price above key short-term averages."
+    elif current_price < ema_8 < ema_21 < sma_50 < sma_200:
+        trend = "🔴 **STRONG BEARISH TREND**"
+        trend_desc = "All moving averages are stacked bearishly with price below all levels."
+    elif current_price < ema_8 < ema_21:
+        trend = "🔴 **BEARISH TREND**"
+        trend_desc = "Short-term momentum is negative with price below key short-term averages."
+    else:
+        trend = "🟡 **SIDEWAYS/MIXED TREND**"
+        trend_desc = "Moving averages are mixed, indicating consolidation or transition phase."
+    
+    # RSI analysis
+    rsi = latest['RSI']
+    if rsi > 70:
+        rsi_signal = "🔴 **OVERBOUGHT**"
+        rsi_desc = f"RSI at {rsi:.1f} suggests the stock may be overextended to the upside."
+    elif rsi < 30:
+        rsi_signal = "🟢 **OVERSOLD**"
+        rsi_desc = f"RSI at {rsi:.1f} suggests the stock may be oversold and due for a bounce."
+    else:
+        rsi_signal = "🟡 **NEUTRAL**"
+        rsi_desc = f"RSI at {rsi:.1f} indicates balanced momentum between buyers and sellers."
+    
+    # MACD analysis
+    macd = latest['MACD']
+    macd_signal = latest['MACD_Signal']
+    macd_hist = latest['MACD_Histogram']
+    
+    if macd > macd_signal and macd_hist > 0:
+        macd_analysis = "🟢 **BULLISH MOMENTUM**"
+        macd_desc = "MACD is above signal line with positive histogram, indicating upward momentum."
+    elif macd < macd_signal and macd_hist < 0:
+        macd_analysis = "🔴 **BEARISH MOMENTUM**"
+        macd_desc = "MACD is below signal line with negative histogram, indicating downward momentum."
+    else:
+        macd_analysis = "🟡 **MIXED MOMENTUM**"
+        macd_desc = "MACD signals are mixed, suggesting potential momentum shift."
+    
+    # Bollinger Bands analysis
+    bb_upper = latest['BB_Upper']
+    bb_lower = latest['BB_Lower']
+    bb_position = (current_price - bb_lower) / (bb_upper - bb_lower)
+    
+    if bb_position > 0.8:
+        bb_analysis = "🔴 **APPROACHING UPPER BAND**"
+        bb_desc = f"Price is at {bb_position*100:.1f}% of Bollinger Band range, suggesting potential resistance."
+    elif bb_position < 0.2:
+        bb_analysis = "🟢 **APPROACHING LOWER BAND**"
+        bb_desc = f"Price is at {bb_position*100:.1f}% of Bollinger Band range, suggesting potential support."
+    else:
+        bb_analysis = "🟡 **MID-RANGE**"
+        bb_desc = f"Price is at {bb_position*100:.1f}% of Bollinger Band range, indicating normal trading range."
+    
+    # Volume analysis
+    avg_volume = data['Volume'].tail(20).mean()
+    current_volume = latest['Volume']
+    volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
+    
+    if volume_ratio > 1.5:
+        volume_analysis = "🔥 **HIGH VOLUME**"
+        volume_desc = f"Volume is {volume_ratio:.1f}x above 20-day average, indicating strong interest."
+    elif volume_ratio < 0.5:
+        volume_analysis = "📉 **LOW VOLUME**"
+        volume_desc = f"Volume is {volume_ratio:.1f}x below 20-day average, indicating low participation."
+    else:
+        volume_analysis = "📊 **NORMAL VOLUME**"
+        volume_desc = f"Volume is {volume_ratio:.1f}x of 20-day average, indicating typical participation."
+    
+    # Support and resistance levels
+    recent_high = data['High'].tail(20).max()
+    recent_low = data['Low'].tail(20).min()
+    
+    # Generate summary
+    summary = f"""
+🎯 **AI TECHNICAL ANALYSIS - {symbol}**
+
+**💰 CURRENT PRICE:** ${current_price:.2f} ({price_change:+.2f}%)
+
+**📈 TREND ANALYSIS:**
+{trend}
+{trend_desc}
+
+**📊 KEY LEVELS:**
+• Resistance: ${recent_high:.2f} (20-day high)
+• Support: ${recent_low:.2f} (20-day low)
+• SMA 50: ${sma_50:.2f}
+• SMA 200: ${sma_200:.2f}
+
+**🔍 MOMENTUM INDICATORS:**
+{rsi_signal} - {rsi_desc}
+{macd_analysis} - {macd_desc}
+
+**📈 VOLATILITY:**
+{bb_analysis} - {bb_desc}
+
+**📊 VOLUME:**
+{volume_analysis} - {volume_desc}
+
+**🎯 MOVING AVERAGES:**
+• 5-day SMA: ${sma_5:.2f}
+• 8-day EMA: ${ema_8:.2f}
+• 21-day EMA: ${ema_21:.2f}
+• 50-day SMA: ${sma_50:.2f}
+• 200-day SMA: ${sma_200:.2f}
+"""
+    
+    return summary
+
+def create_advanced_chart(symbol, data=None):
+    """Create advanced interactive chart with multiple timeframes and indicators"""
+    if data is None:
+        data = get_comprehensive_technical_data(symbol)
+    
+    if data is None or data.empty:
+        return None
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=4, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        subplot_titles=(f'{symbol} - Price & Moving Averages', 'Volume', 'RSI', 'MACD'),
+        row_heights=[0.5, 0.2, 0.15, 0.15]
+    )
+    
+    # Candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name='Price',
+            increasing_line_color='green',
+            decreasing_line_color='red'
+        ),
+        row=1, col=1
+    )
+    
+    # Moving averages
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['SMA_5'], name='5-day SMA', 
+                  line=dict(color='orange', width=1)), row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['EMA_8'], name='8-day EMA', 
+                  line=dict(color='blue', width=2)), row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['EMA_21'], name='21-day EMA', 
+                  line=dict(color='purple', width=2)), row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['SMA_50'], name='50-day SMA', 
+                  line=dict(color='brown', width=2)), row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['SMA_200'], name='200-day SMA', 
+                  line=dict(color='black', width=3)), row=1, col=1
+    )
+    
+    # Bollinger Bands
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['BB_Upper'], name='BB Upper', 
+                  line=dict(color='gray', dash='dash', width=1)), row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['BB_Lower'], name='BB Lower', 
+                  line=dict(color='gray', dash='dash', width=1)), row=1, col=1
+    )
+    
+    # Volume
+    colors = ['green' if data['Close'].iloc[i] >= data['Open'].iloc[i] else 'red' 
+              for i in range(len(data))]
+    fig.add_trace(
+        go.Bar(x=data.index, y=data['Volume'], name='Volume', 
+               marker_color=colors, opacity=0.7), row=2, col=1
+    )
+    
+    # Volume MA
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['Volume_MA'], name='Volume MA', 
+                  line=dict(color='orange', width=2)), row=2, col=1
+    )
+    
+    # RSI
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['RSI'], name='RSI', 
+                  line=dict(color='purple', width=2)), row=3, col=1
+    )
+    
+    # RSI levels
+    fig.add_hline(y=70, line_dash="dash", line_color="red", 
+                  annotation_text="Overbought", row=3, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", 
+                  annotation_text="Oversold", row=3, col=1)
+    fig.add_hline(y=50, line_dash="dot", line_color="gray", row=3, col=1)
+    
+    # MACD
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['MACD'], name='MACD', 
+                  line=dict(color='blue', width=2)), row=4, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signal', 
+                  line=dict(color='red', width=2)), row=4, col=1
+    )
+    fig.add_trace(
+        go.Bar(x=data.index, y=data['MACD_Histogram'], name='Histogram', 
+               marker_color='gray', opacity=0.6), row=4, col=1
+    )
+    
+    # Update layout
+    fig.update_layout(
+        title=f'{symbol} - Comprehensive Technical Analysis',
+        xaxis_rangeslider_visible=False,
+        height=800,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Update y-axes
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    fig.update_yaxes(title_text="RSI", row=3, col=1, range=[0, 100])
+    fig.update_yaxes(title_text="MACD", row=4, col=1)
+    
+    return fig
+
+def get_flow_summary_for_symbol(symbol, days_back=5):
+    """Get flow summary for a specific symbol for latest day and last N days"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    # Get latest trading day
+    latest_day_query = "SELECT MAX(substr(trade_date, 1, 10)) as latest_day FROM flows WHERE symbol = ?"
+    latest_day_result = pd.read_sql_query(latest_day_query, conn, params=[symbol])
+    
+    if latest_day_result.empty or latest_day_result['latest_day'].iloc[0] is None:
+        conn.close()
+        return "No flow data available for this symbol"
+    
+    latest_day = latest_day_result['latest_day'].iloc[0]
+    
+    # Calculate date range for last N days
+    latest_date = datetime.strptime(latest_day, '%Y-%m-%d')
+    start_date = (latest_date - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    
+    # Get latest day flows
+    latest_query = """
+        SELECT order_type, COUNT(*) as flow_count, SUM(contracts) as total_contracts,
+               AVG(contracts) as avg_contracts, SUM(premium) as total_premium,
+               MIN(strike) as min_strike, MAX(strike) as max_strike
+        FROM flows 
+        WHERE symbol = ? AND substr(trade_date, 1, 10) = ?
+        GROUP BY order_type
+    """
+    
+    latest_flows = pd.read_sql_query(latest_query, conn, params=[symbol, latest_day])
+    
+    # Get last N days flows
+    period_query = """
+        SELECT order_type, COUNT(*) as flow_count, SUM(contracts) as total_contracts,
+               AVG(contracts) as avg_contracts, SUM(premium) as total_premium,
+               COUNT(DISTINCT substr(trade_date, 1, 10)) as trading_days
+        FROM flows 
+        WHERE symbol = ? AND substr(trade_date, 1, 10) >= ?
+        GROUP BY order_type
+    """
+    
+    period_flows = pd.read_sql_query(period_query, conn, params=[symbol, start_date])
+    
+    # Get overall stats for latest day
+    overall_latest_query = """
+        SELECT COUNT(*) as total_flows, SUM(contracts) as total_contracts,
+               SUM(premium) as total_premium, COUNT(DISTINCT strike) as unique_strikes,
+               MIN(strike) as min_strike, MAX(strike) as max_strike
+        FROM flows 
+        WHERE symbol = ? AND substr(trade_date, 1, 10) = ?
+    """
+    
+    overall_latest = pd.read_sql_query(overall_latest_query, conn, params=[symbol, latest_day])
+    
+    conn.close()
+    
+    # Format latest day summary
+    latest_summary = f"📊 **{symbol} - LATEST DAY FLOWS ({latest_day})**\n\n"
+    
+    if not overall_latest.empty and overall_latest['total_flows'].iloc[0] > 0:
+        stats = overall_latest.iloc[0]
+        latest_summary += f"**📈 OVERVIEW:**\n"
+        latest_summary += f"• Total Flows: {stats['total_flows']}\n"
+        latest_summary += f"• Total Contracts: {stats['total_contracts']:,}\n"
+        latest_summary += f"• Total Premium: ${stats['total_premium']:,.0f}\n"
+        latest_summary += f"• Strike Range: ${stats['min_strike']} - ${stats['max_strike']}\n\n"
+        
+        latest_summary += "**🎯 BY ORDER TYPE:**\n"
+        for _, row in latest_flows.iterrows():
+            order_type = row['order_type']
+            emoji = "🟢" if order_type in ['Calls Bought', 'Puts Sold'] else "🔴"
+            latest_summary += f"{emoji} **{order_type}**: {row['flow_count']} flows, "
+            latest_summary += f"{row['total_contracts']:,} contracts, ${row['total_premium']:,.0f}\n"
+    else:
+        latest_summary += "No flows found for latest trading day\n"
+    
+    # Format period summary
+    period_summary = f"\n📊 **{symbol} - LAST {days_back} DAYS SUMMARY**\n\n"
+    
+    if not period_flows.empty:
+        total_period_flows = period_flows['flow_count'].sum()
+        total_period_contracts = period_flows['total_contracts'].sum()
+        total_period_premium = period_flows['total_premium'].sum()
+        
+        period_summary += f"**📈 PERIOD OVERVIEW:**\n"
+        period_summary += f"• Total Flows: {total_period_flows}\n"
+        period_summary += f"• Total Contracts: {total_period_contracts:,}\n"
+        period_summary += f"• Total Premium: ${total_period_premium:,.0f}\n\n"
+        
+        period_summary += "**🎯 BY ORDER TYPE:**\n"
+        for _, row in period_flows.iterrows():
+            order_type = row['order_type']
+            emoji = "🟢" if order_type in ['Calls Bought', 'Puts Sold'] else "🔴"
+            avg_per_day = row['total_contracts'] / row['trading_days'] if row['trading_days'] > 0 else 0
+            period_summary += f"{emoji} **{order_type}**: {row['flow_count']} flows, "
+            period_summary += f"{row['total_contracts']:,} contracts (avg {avg_per_day:,.0f}/day)\n"
+    else:
+        period_summary += f"No flows found for the last {days_back} days\n"
+    
+    return latest_summary + period_summary
+
+def get_latest_day_notable_flows():
+    """Get the most notable flows from the latest trading day for dashboard overview"""
+    conn = sqlite3.connect('flow_database.db')
+    
+    try:
+        # Get the latest trading day
+        latest_day_query = "SELECT MAX(substr(trade_date, 1, 10)) as latest_day FROM flows"
+        latest_day_result = pd.read_sql_query(latest_day_query, conn)
+        
+        if latest_day_result.empty or latest_day_result['latest_day'].iloc[0] is None:
+            return None, "No flow data available in database"
+        
+        latest_day = latest_day_result['latest_day'].iloc[0]
+        
+        # Get notable flows from latest day (top flows by premium and contracts)
+        notable_flows_query = """
+            SELECT symbol, order_type, strike, expiry, contracts, premium,
+                   COUNT(*) OVER (PARTITION BY symbol) as symbol_flow_count,
+                   SUM(contracts) OVER (PARTITION BY symbol) as symbol_total_contracts,
+                   SUM(premium) OVER (PARTITION BY symbol) as symbol_total_premium
+            FROM flows 
+            WHERE substr(trade_date, 1, 10) = ?
+            AND (premium >= 500000 OR contracts >= 2000)
+            ORDER BY premium DESC
+            LIMIT 50
+        """
+        
+        flows_df = pd.read_sql_query(notable_flows_query, conn, params=[latest_day])
+        
+        if flows_df.empty:
+            return latest_day, "No notable flows found for the latest trading day"
+        
+        # Group by symbol and calculate metrics
+        symbol_summary = flows_df.groupby('symbol').agg({
+            'contracts': 'sum',
+            'premium': 'sum',
+            'order_type': 'count'
+        }).rename(columns={'order_type': 'flow_count'})
+        
+        # Calculate sentiment for each symbol
+        sentiment_data = []
+        for symbol in symbol_summary.index:
+            symbol_flows = flows_df[flows_df['symbol'] == symbol]
+            
+            # Calculate bullish vs bearish activity
+            call_bought = symbol_flows[symbol_flows['order_type'] == 'Calls Bought']['contracts'].sum()
+            call_sold = symbol_flows[symbol_flows['order_type'] == 'Calls Sold']['contracts'].sum()
+            put_bought = symbol_flows[symbol_flows['order_type'] == 'Puts Bought']['contracts'].sum()
+            put_sold = symbol_flows[symbol_flows['order_type'] == 'Puts Sold']['contracts'].sum()
+            
+            bullish_activity = call_bought + put_sold
+            bearish_activity = put_bought + call_sold
+            total_activity = bullish_activity + bearish_activity
+            
+            if total_activity > 0:
+                bullish_pct = (bullish_activity / total_activity) * 100
+                if bullish_pct > 60:
+                    sentiment = "🟢 Bullish"
+                elif bullish_pct < 40:
+                    sentiment = "🔴 Bearish"
+                else:
+                    sentiment = "🟡 Mixed"
+            else:
+                sentiment = "🟡 Neutral"
+            
+            sentiment_data.append({
+                'symbol': symbol,
+                'sentiment': sentiment,
+                'bullish_pct': bullish_pct if total_activity > 0 else 50
+            })
+        
+        # Add sentiment to summary
+        sentiment_df = pd.DataFrame(sentiment_data).set_index('symbol')
+        symbol_summary = symbol_summary.join(sentiment_df)
+        
+        # Sort by total premium (most significant flows first)
+        symbol_summary = symbol_summary.sort_values('premium', ascending=False)
+        
+        return latest_day, symbol_summary.head(15)  # Top 15 most notable symbols
+        
+    except Exception as e:
+        return None, f"Error fetching notable flows: {str(e)}"
+    finally:
+        conn.close()
 
 # Top stocks to track in database
 TOP_STOCKS = list(dict.fromkeys([
@@ -1701,11 +2396,11 @@ def display_repeat_flows(df, min_premium=30000):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Total Repeat Contracts", len(repeat_flows))
+        metric_card("Total Repeat Contracts", f"{len(repeat_flows)}", help_text="Number of repeated flow clusters detected")
     
     with col2:
         total_premium = repeat_flows['Total_Premium'].sum()
-        st.metric("Total Premium", f"${total_premium/1000000:.1f}M")
+        metric_card("Total Premium", f"${total_premium/1000000:.1f}M", help_text="Aggregated premium in millions")
     
     with col3:
         avg_flows_per_contract = repeat_flows['Flow_Count'].mean()
@@ -3179,12 +3874,14 @@ def generate_repeat_flows_summary(repeat_flows):
 
 # Main Streamlit app
 def main():
-    st.set_page_config(page_title="Options Flow Analyzer", page_icon="📊", layout="wide")
-    st.title("🔍 Options Flow Analyzer")
-    st.markdown("Generate a newsletter or view OTM option flows for the next 2 weeks.")
+    st.set_page_config(page_title="Flows and Pools", page_icon="📊", layout="wide")
+    # Load global CSS styles and render a compact header and sidebar
+    load_global_styles()
+    render_header_and_sidebar()
+    #st.markdown("Generate a newsletter or view OTM option flows for the next 2 weeks.")
     
     # Main tabs (always available)
-    main_tab1, main_tab2 = st.tabs(["📊 Flow Analysis", "🗄️ Flow Database"])
+    main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs(["📊 Flow Analysis", "🗄️ Flow Database", "📈 Stock Analysis Dashboard", "📡 FINRA / Dark Pool"])
     
     with main_tab1:
         st.markdown("### 📤 Upload CSV for Analysis")
@@ -3647,10 +4344,10 @@ def main():
             # Summary stats with premium
             stats_cols = st.columns(5)
             with stats_cols[0]:
-                st.metric("Total Flows", len(flows_df))
+                metric_card("Total Flows", f"{len(flows_df)}")
             with stats_cols[1]:
                 unique_symbols = flows_df['symbol'].nunique()
-                st.metric("Unique Symbols", unique_symbols)
+                metric_card("Unique Symbols", f"{unique_symbols}")
             with stats_cols[2]:
                 # Format premium display
                 if total_premium >= 1000000:
@@ -3660,10 +4357,10 @@ def main():
                 st.metric("Total Premium", premium_display)
             with stats_cols[3]:
                 calls_count = flows_df[flows_df['order_type'].str.contains('Calls')].shape[0]
-                st.metric("Call Flows", calls_count)
+                metric_card("Call Flows", f"{calls_count}")
             with stats_cols[4]:
                 puts_count = flows_df[flows_df['order_type'].str.contains('Puts')].shape[0]
-                st.metric("Put Flows", puts_count)
+                metric_card("Put Flows", f"{puts_count}")
             
             # Add trending sections if showing all symbols
             if symbol_filter == "All":
@@ -3776,6 +4473,544 @@ def main():
             
         else:
             st.info("No flows found matching the current filters.")
+    
+    with main_tab3:
+        st.markdown("# 📈 Stock Analysis Dashboard")
+        st.markdown("**AI-Powered Technical Analysis + Options Flow Intelligence + Interactive Charts**")
+        
+        # Initialize database to ensure it exists
+        init_flow_database()
+        
+        # Show notable flows from latest trading day
+        st.markdown("---")
+        with st.expander("🔥 **Today's Most Notable Flows** - Quick Analysis Suggestions", expanded=True):
+            latest_day, notable_data = get_latest_day_notable_flows()
+            
+            if latest_day and isinstance(notable_data, pd.DataFrame) and not notable_data.empty:
+                st.markdown(f"### 📊 Top Flow Activity - {latest_day}")
+                st.markdown("*Click on any stock below to quickly analyze it*")
+                
+                # Create clickable buttons for each notable stock
+                cols_per_row = 4
+                rows_needed = (len(notable_data) + cols_per_row - 1) // cols_per_row
+                
+                for row in range(rows_needed):
+                    cols = st.columns(cols_per_row)
+                    
+                    for col_idx in range(cols_per_row):
+                        stock_idx = row * cols_per_row + col_idx
+                        if stock_idx < len(notable_data):
+                            symbol = notable_data.index[stock_idx]
+                            data = notable_data.iloc[stock_idx]
+                            
+                            with cols[col_idx]:
+                                # Format premium display
+                                premium_display = f"${data['premium']/1000000:.1f}M" if data['premium'] >= 1000000 else f"${data['premium']/1000:.0f}K"
+                                
+                                # Create button with stock info
+                                button_text = f"**{symbol}** {data['sentiment']}\n{premium_display} | {data['contracts']:,} contracts"
+                                
+                                if st.button(button_text, key=f"notable_{symbol}", use_container_width=True):
+                                    # Auto-fill the symbol input and trigger analysis
+                                    st.session_state.auto_symbol = symbol
+                                    st.session_state.analyze_symbol = symbol
+                                    st.session_state.show_analysis = True
+                                    st.rerun()
+                
+                # Summary stats
+                st.markdown("---")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_premium = notable_data['premium'].sum()
+                    metric_card("Total Notable Premium", f"${total_premium/1000000:.1f}M")
+                
+                with col2:
+                    total_contracts = notable_data['contracts'].sum()
+                    metric_card("Total Contracts", f"{total_contracts:,}")
+                
+                with col3:
+                    bullish_count = sum(1 for sentiment in notable_data['sentiment'] if '🟢' in sentiment)
+                    metric_card("Bullish Stocks", f"{bullish_count}")
+                
+                with col4:
+                    bearish_count = sum(1 for sentiment in notable_data['sentiment'] if '🔴' in sentiment)
+                    metric_card("Bearish Stocks", f"{bearish_count}")
+                
+                st.markdown("💡 **Tip**: These are the most significant flows from the latest trading day. Click any stock above to instantly analyze it!")
+                
+            elif latest_day:
+                st.info(f"📅 Latest trading day: {latest_day}")
+                st.warning("No notable flows found for the latest trading day (flows with $500K+ premium or 2000+ contracts)")
+                st.markdown("""
+                **To see notable flows:**
+                1. Upload your options flow CSV in the 'Flow Analysis' tab
+                2. Store flows in the database via 'Flow Database' tab
+                3. Return here to see the most significant flows automatically
+                """)
+            else:
+                st.info("No flow data available in database")
+                st.markdown("""
+                **Get started:**
+                1. Go to 'Flow Analysis' tab and upload your CSV file
+                2. Go to 'Flow Database' tab and store flows
+                3. Return here to see notable flows and AI suggestions
+                """)
+        
+        st.markdown("---")
+        
+        # Symbol input section
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Check if we have an auto-selected symbol
+            default_symbol = ""
+            if hasattr(st.session_state, 'auto_symbol'):
+                default_symbol = st.session_state.auto_symbol
+                # Clear the auto symbol after using it
+                if 'auto_symbol' in st.session_state:
+                    del st.session_state.auto_symbol
+            
+            symbol_input = st.text_input(
+                "🎯 Enter Stock Symbol", 
+                value=default_symbol,
+                placeholder="e.g., AAPL, NVDA, TSLA, QQQ",
+                help="Enter any stock symbol to get comprehensive analysis"
+            ).upper()
+        
+        with col2:
+            if symbol_input:
+                if st.button("🚀 Analyze Stock", type="primary", use_container_width=True):
+                    st.session_state.analyze_symbol = symbol_input
+                    st.session_state.show_analysis = True
+        
+        # Show analysis if symbol is provided and button clicked
+        if symbol_input and hasattr(st.session_state, 'show_analysis') and st.session_state.show_analysis:
+            if st.session_state.analyze_symbol == symbol_input:
+                
+                # Create tabs for different analysis sections
+                analysis_tabs = st.tabs(["🧠 AI Technical Summary", "📊 Interactive Chart", "🎯 Options Flow Analysis", "📈 Combined View"])
+                
+                with analysis_tabs[0]:
+                    st.markdown(f"### 🧠 AI Technical Analysis - {symbol_input}")
+                    
+                    with st.spinner(f"Generating AI analysis for {symbol_input}..."):
+                        # Get comprehensive technical data
+                        tech_data = get_comprehensive_technical_data(symbol_input)
+                        
+                        if tech_data is not None:
+                            # Generate AI summary
+                            ai_summary = generate_ai_technical_summary(symbol_input, tech_data)
+                            
+                            # Display the summary
+                            st.markdown(ai_summary)
+                            
+                            # Additional insights
+                            st.markdown("---")
+                            st.markdown("### 📊 Quick Stats")
+                            
+                            # Create metrics
+                            latest = tech_data.iloc[-1]
+                            prev = tech_data.iloc[-2] if len(tech_data) > 1 else latest
+                            
+                            metric_cols = st.columns(5)
+                            
+                            with metric_cols[0]:
+                                price_change = latest['Close'] - prev['Close']
+                                price_change_pct = (price_change / prev['Close']) * 100
+                                st.metric("Current Price", f"${latest['Close']:.2f}", f"{price_change:+.2f} ({price_change_pct:+.2f}%)")
+                            
+                            with metric_cols[1]:
+                                st.metric("RSI", f"{latest['RSI']:.1f}", 
+                                         "Overbought" if latest['RSI'] > 70 else "Oversold" if latest['RSI'] < 30 else "Neutral")
+                            
+                            with metric_cols[2]:
+                                volume_ratio = latest['Volume'] / tech_data['Volume'].tail(20).mean()
+                                st.metric("Volume vs Avg", f"{volume_ratio:.2f}x", 
+                                         "High" if volume_ratio > 1.5 else "Low" if volume_ratio < 0.5 else "Normal")
+                            
+                            with metric_cols[3]:
+                                # Distance from 200 SMA
+                                sma_200_distance = ((latest['Close'] - latest['SMA_200']) / latest['SMA_200']) * 100
+                                st.metric("vs 200 SMA", f"{sma_200_distance:+.1f}%", 
+                                         "Above" if sma_200_distance > 0 else "Below")
+                            
+                            with metric_cols[4]:
+                                # Bollinger Band position
+                                bb_position = (latest['Close'] - latest['BB_Lower']) / (latest['BB_Upper'] - latest['BB_Lower'])
+                                st.metric("BB Position", f"{bb_position*100:.0f}%",
+                                         "Upper" if bb_position > 0.8 else "Lower" if bb_position < 0.2 else "Mid")
+                        
+                        else:
+                            st.error(f"Unable to fetch technical data for {symbol_input}")
+                
+                with analysis_tabs[1]:
+                    st.markdown(f"### 📊 Interactive Chart - {symbol_input}")
+                    
+                    with st.spinner(f"Creating advanced chart for {symbol_input}..."):
+                        # Get technical data if not already available
+                        if 'tech_data' not in locals() or tech_data is None:
+                            tech_data = get_comprehensive_technical_data(symbol_input)
+                        
+                        if tech_data is not None:
+                            # Create advanced chart
+                            chart = create_advanced_chart(symbol_input, tech_data)
+                            
+                            if chart is not None:
+                                st.plotly_chart(chart, use_container_width=True)
+                                
+                                # Chart controls and information
+                                with st.expander("📊 Chart Information", expanded=False):
+                                    st.markdown("""
+                                    **Chart Components:**
+                                    - **Candlestick Chart**: Shows OHLC price action with green (up) and red (down) candles
+                                    - **Moving Averages**: 5 SMA (orange), 8 EMA (blue), 21 EMA (purple), 50 SMA (brown), 200 SMA (black)
+                                    - **Bollinger Bands**: Gray dashed lines showing volatility bands
+                                    - **Volume**: Color-coded bars with moving average overlay
+                                    - **RSI**: Momentum oscillator with overbought (70) and oversold (30) levels
+                                    - **MACD**: Trend-following momentum indicator with histogram
+                                    
+                                    **How to Use:**
+                                    - Zoom in/out using the toolbar or mouse wheel
+                                    - Pan by clicking and dragging
+                                    - Toggle indicators on/off by clicking legend items
+                                    - Hover over data points for detailed information
+                                    """)
+                            else:
+                                st.error("Unable to create chart")
+                        else:
+                            st.error(f"Unable to fetch data for charting {symbol_input}")
+                
+                with analysis_tabs[2]:
+                    st.markdown(f"### 🎯 Options Flow Analysis - {symbol_input}")
+                    
+                    with st.spinner(f"Analyzing options flows for {symbol_input}..."):
+                        # Get flow analysis for the symbol
+                        flow_summary = get_flow_summary_for_symbol(symbol_input, days_back=5)
+                        
+                        if "No flow data available" not in flow_summary:
+                            st.markdown(flow_summary)
+                            
+                            # Add detailed flow interpretation
+                            st.markdown("---")
+                            st.markdown("### 🧠 Flow Interpretation")
+                            
+                            # Initialize database and get flows
+                            init_flow_database()
+                            flows_df = get_flows_from_database(
+                                symbol_filter=symbol_input,
+                                date_from=datetime.now() - timedelta(days=5),
+                                date_to=datetime.now(),
+                                include_technicals=False
+                            )
+                            
+                            if not flows_df.empty:
+                                interpretation = generate_symbol_interpretation(flows_df, symbol_input)
+                                st.markdown(interpretation)
+                                
+                                # Show detailed flows table
+                                st.markdown("### 📋 Recent Flow Details")
+                                
+                                # Format for display
+                                display_flows = flows_df.copy()
+                                display_flows['premium_formatted'] = display_flows['premium'].apply(
+                                    lambda x: f"${x/1000000:.2f}M" if x >= 1000000 else f"${x/1000:.0f}K"
+                                )
+                                
+                                # Select columns
+                                display_cols = ['trade_date', 'order_type', 'strike', 'expiry', 'contracts', 'premium_formatted']
+                                col_names = ['Date', 'Order Type', 'Strike', 'Expiry', 'Contracts', 'Premium']
+                                
+                                display_flows = display_flows[display_cols]
+                                display_flows.columns = col_names
+                                
+                                # Apply styling
+                                def style_flow_type(val):
+                                    if val in ['Calls Bought', 'Puts Sold']:
+                                        return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+                                    elif val in ['Calls Sold', 'Puts Bought']:
+                                        return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+                                    return ''
+                                
+                                styled_flows = display_flows.style.applymap(style_flow_type, subset=['Order Type'])
+                                st.dataframe(styled_flows, use_container_width=True, height=300)
+                                
+                            else:
+                                st.info(f"No recent flow data found for {symbol_input}")
+                                st.markdown("""
+                                **To see flow analysis:**
+                                1. Go to the 'Flow Analysis' tab
+                                2. Upload your options flow CSV file
+                                3. Go to the 'Flow Database' tab
+                                4. Store flows in the database
+                                5. Return here for flow analysis
+                                """)
+                        
+                        else:
+                            st.info(f"No options flow data available for {symbol_input}")
+                            st.markdown("""
+                            **To enable flow analysis:**
+                            1. Upload options flow data in the 'Flow Analysis' tab
+                            2. Store flows in database via 'Flow Database' tab
+                            3. Return here for comprehensive flow analysis
+                            """)
+                
+                with analysis_tabs[3]:
+                    st.markdown(f"### 📈 Combined Analysis Dashboard - {symbol_input}")
+                    
+                    # Create a comprehensive dashboard view
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.markdown("#### 📊 Price Chart & Indicators")
+                        
+                        with st.spinner("Loading chart..."):
+                            if 'tech_data' not in locals() or tech_data is None:
+                                tech_data = get_comprehensive_technical_data(symbol_input)
+                            
+                            if tech_data is not None:
+                                # Create a simplified chart for the dashboard
+                                fig = make_subplots(
+                                    rows=2, cols=1,
+                                    shared_xaxes=True,
+                                    vertical_spacing=0.05,
+                                    subplot_titles=(f'{symbol_input} - Price Action', 'Volume'),
+                                    row_heights=[0.7, 0.3]
+                                )
+                                
+                                # Price and moving averages
+                                fig.add_trace(
+                                    go.Candlestick(
+                                        x=tech_data.index,
+                                        open=tech_data['Open'],
+                                        high=tech_data['High'],
+                                        low=tech_data['Low'],
+                                        close=tech_data['Close'],
+                                        name='Price'
+                                    ), row=1, col=1
+                                )
+                                
+                                # Key moving averages
+                                fig.add_trace(
+                                    go.Scatter(x=tech_data.index, y=tech_data['EMA_8'], 
+                                              name='8 EMA', line=dict(color='blue', width=2)), row=1, col=1
+                                )
+                                fig.add_trace(
+                                    go.Scatter(x=tech_data.index, y=tech_data['EMA_21'], 
+                                              name='21 EMA', line=dict(color='purple', width=2)), row=1, col=1
+                                )
+                                fig.add_trace(
+                                    go.Scatter(x=tech_data.index, y=tech_data['SMA_50'], 
+                                              name='50 SMA', line=dict(color='brown', width=2)), row=1, col=1
+                                )
+                                fig.add_trace(
+                                    go.Scatter(x=tech_data.index, y=tech_data['SMA_200'], 
+                                              name='200 SMA', line=dict(color='black', width=3)), row=1, col=1
+                                )
+                                
+                                # Volume
+                                colors = ['green' if tech_data['Close'].iloc[i] >= tech_data['Open'].iloc[i] else 'red' 
+                                         for i in range(len(tech_data))]
+                                fig.add_trace(
+                                    go.Bar(x=tech_data.index, y=tech_data['Volume'], 
+                                           name='Volume', marker_color=colors, opacity=0.7), row=2, col=1
+                                )
+                                
+                                fig.update_layout(height=500, showlegend=True)
+                                fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+                                fig.update_yaxes(title_text="Volume", row=2, col=1)
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        st.markdown("#### 🧠 Quick Analysis")
+                        
+                        if tech_data is not None:
+                            latest = tech_data.iloc[-1]
+                            
+                            # Current price and change
+                            prev_close = tech_data['Close'].iloc[-2] if len(tech_data) > 1 else latest['Close']
+                            price_change = latest['Close'] - prev_close
+                            price_change_pct = (price_change / prev_close) * 100
+                            
+                            st.metric("Current Price", f"${latest['Close']:.2f}", 
+                                     f"{price_change:+.2f} ({price_change_pct:+.2f}%)")
+                            
+                            # Key levels
+                            st.markdown("**🎯 Key Levels:**")
+                            st.write(f"• 8 EMA: ${latest['EMA_8']:.2f}")
+                            st.write(f"• 21 EMA: ${latest['EMA_21']:.2f}")
+                            st.write(f"• 50 SMA: ${latest['SMA_50']:.2f}")
+                            st.write(f"• 200 SMA: ${latest['SMA_200']:.2f}")
+                            
+                            # Trend assessment
+                            st.markdown("**📈 Trend Assessment:**")
+                            if latest['Close'] > latest['EMA_8'] > latest['EMA_21']:
+                                st.write("🟢 Short-term: Bullish")
+                            elif latest['Close'] < latest['EMA_8'] < latest['EMA_21']:
+                                st.write("🔴 Short-term: Bearish")
+                            else:
+                                st.write("🟡 Short-term: Mixed")
+                            
+                            if latest['Close'] > latest['SMA_200']:
+                                st.write("🟢 Long-term: Above 200 SMA")
+                            else:
+                                st.write("🔴 Long-term: Below 200 SMA")
+                            
+                            # RSI
+                            rsi = latest['RSI']
+                            if rsi > 70:
+                                st.write(f"🔴 RSI: {rsi:.1f} (Overbought)")
+                            elif rsi < 30:
+                                st.write(f"🟢 RSI: {rsi:.1f} (Oversold)")
+                            else:
+                                st.write(f"🟡 RSI: {rsi:.1f} (Neutral)")
+                        
+                        # Flow summary (if available)
+                        st.markdown("#### 🎯 Flow Summary")
+                        flow_summary_short = get_flow_summary_for_symbol(symbol_input, days_back=1)
+                        
+                        if "No flow data available" not in flow_summary_short:
+                            # Extract key info from flow summary
+                            lines = flow_summary_short.split('\n')
+                            for line in lines[:8]:  # Show first few lines
+                                if line.strip() and not line.startswith('📊'):
+                                    st.write(line)
+                        else:
+                            st.info("No recent flow data")
+                    
+                    # Additional dashboard sections
+                    st.markdown("---")
+                    
+                    # Side-by-side comparison
+                    dash_col1, dash_col2 = st.columns(2)
+                    
+                    with dash_col1:
+                        st.markdown("#### 📊 Technical Signals Summary")
+                        if tech_data is not None:
+                            latest = tech_data.iloc[-1]
+                            
+                            signals = []
+                            
+                            # Moving average signals
+                            if latest['Close'] > latest['SMA_200']:
+                                signals.append("🟢 Above 200-day SMA (Bullish)")
+                            else:
+                                signals.append("🔴 Below 200-day SMA (Bearish)")
+                            
+                            if latest['EMA_8'] > latest['EMA_21']:
+                                signals.append("🟢 8 EMA > 21 EMA (Bullish)")
+                            else:
+                                signals.append("🔴 8 EMA < 21 EMA (Bearish)")
+                            
+                            # RSI signal
+                            if latest['RSI'] > 70:
+                                signals.append("⚠️ RSI Overbought (Caution)")
+                            elif latest['RSI'] < 30:
+                                signals.append("✅ RSI Oversold (Opportunity)")
+                            else:
+                                signals.append("🟡 RSI Neutral")
+                            
+                            # MACD signal
+                            if latest['MACD'] > latest['MACD_Signal']:
+                                signals.append("🟢 MACD Bullish")
+                            else:
+                                signals.append("🔴 MACD Bearish")
+                            
+                            for signal in signals:
+                                st.write(signal)
+                    
+                    with dash_col2:
+                        st.markdown("#### 🎯 Options Flow Signals")
+                        
+                        # Try to get flow data
+                        init_flow_database()
+                        flows_df = get_flows_from_database(
+                            symbol_filter=symbol_input,
+                            date_from=datetime.now() - timedelta(days=2),
+                            date_to=datetime.now(),
+                            include_technicals=False
+                        )
+                        
+                        if not flows_df.empty:
+                            # Calculate flow sentiment
+                            call_bought = flows_df[flows_df['order_type'] == 'Calls Bought']['contracts'].sum()
+                            call_sold = flows_df[flows_df['order_type'] == 'Calls Sold']['contracts'].sum()
+                            put_bought = flows_df[flows_df['order_type'] == 'Puts Bought']['contracts'].sum()
+                            put_sold = flows_df[flows_df['order_type'] == 'Puts Sold']['contracts'].sum()
+                            
+                            bullish_activity = call_bought + put_sold
+                            bearish_activity = put_bought + call_sold
+                            total_activity = bullish_activity + bearish_activity
+                            
+                            if total_activity > 0:
+                                bullish_pct = (bullish_activity / total_activity) * 100
+                                
+                                if bullish_pct > 65:
+                                    st.write("🟢 Strong Bullish Flow Bias")
+                                elif bullish_pct > 55:
+                                    st.write("🟢 Bullish Flow Bias")
+                                elif bullish_pct < 35:
+                                    st.write("🔴 Strong Bearish Flow Bias")
+                                elif bullish_pct < 45:
+                                    st.write("🔴 Bearish Flow Bias")
+                                else:
+                                    st.write("🟡 Neutral Flow Bias")
+                                
+                                st.write(f"📊 Bullish: {bullish_pct:.1f}% | Bearish: {100-bullish_pct:.1f}%")
+                                st.write(f"📈 Total Flows: {len(flows_df)}")
+                                st.write(f"💰 Total Premium: ${flows_df['premium'].sum():,.0f}")
+                            else:
+                                st.write("🟡 No clear flow bias")
+                        else:
+                            st.info("No recent flow data")
+                            st.write("📝 Upload flow data to see")
+                            st.write("   options sentiment analysis")
+            else:
+                st.session_state.show_analysis = False
+        
+                # Instructions when no symbol is entered — compact tooltip instead of long text
+                if not symbol_input:
+                        st.markdown("---")
+                        # Small info tooltip in place of the long help content
+                        tooltip_html = """
+                        <details style='background: rgba(255,255,255,0.02); padding:10px; border-radius:8px;'>
+                            <summary style='font-size:18px; font-weight:700;'>🚀 How to Use This Dashboard (click to expand)</summary>
+                            <div style='margin-top:8px; color: #cfefff;'>
+                                <strong>AI Technical Analysis</strong>
+                                <ul>
+                                    <li>Advanced technical indicator analysis (RSI, MACD, Bollinger Bands)</li>
+                                    <li>Trend identification & momentum</li>
+                                    <li>Support/resistance levels and moving averages</li>
+                                </ul>
+                                <strong>Interactive Charts</strong>
+                                <ul>
+                                    <li>Full-year price history with SMA/EMA overlays</li>
+                                    <li>Volume and momentum indicators; pan & zoom</li>
+                                </ul>
+                                <strong>Options Flow Intelligence</strong>
+                                <ul>
+                                    <li>Latest-day and 5-day flow summaries</li>
+                                    <li>Bullish vs bearish sentiment and premium/volume metrics</li>
+                                </ul>
+                                <strong>Supported Indicators</strong>
+                                <ul>
+                                    <li>5/50/200 SMA, 8/21 EMA, RSI(14), MACD, Bollinger Bands (20,2)</li>
+                                </ul>
+                            </div>
+                        </details>
+                        """
+                        st.markdown(tooltip_html, unsafe_allow_html=True)
+
+    # FINRA / Dark Pool tab integration
+    with main_tab4:
+        st.markdown("# 📡 FINRA / Dark Pool Analysis")
+        st.markdown("This section embeds the FINRA dark-pool and short-sale analysis module.")
+        # Call the finra.run() UI; it contains its own tabs and controls
+        try:
+            finra.run()
+        except Exception as e:
+            st.error(f"Error running FINRA module: {e}")
 
 if __name__ == "__main__":
     main()
