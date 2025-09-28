@@ -3881,7 +3881,7 @@ def main():
     #st.markdown("Generate a newsletter or view OTM option flows for the next 2 weeks.")
     
     # Main tabs (always available)
-    main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs(["📊 Flow Analysis", "🗄️ Flow Database", "📈 Stock Analysis Dashboard", "📡 FINRA / Dark Pool"])
+    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs(["📊 Flow Analysis", "🗄️ Flow Database", "📈 Stock Analysis Dashboard", "🗓️ Catalysts", "📡 FINRA / Dark Pool"])
     
     with main_tab1:
         st.markdown("### 📤 Upload CSV for Analysis")
@@ -4459,7 +4459,7 @@ def main():
             # Display with enhanced formatting
             st.markdown("### 📊 Flow Database Results")
             
-            styled_df = display_df.style.applymap(style_order_type, subset=['Order Type'])
+            styled_df = display_df.style.map(style_order_type, subset=['Order Type'])
             st.dataframe(styled_df, use_container_width=True, height=400)
             
             # Export option
@@ -4732,7 +4732,7 @@ def main():
                                         return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
                                     return ''
                                 
-                                styled_flows = display_flows.style.applymap(style_flow_type, subset=['Order Type'])
+                                styled_flows = display_flows.style.map(style_flow_type, subset=['Order Type'])
                                 st.dataframe(styled_flows, use_container_width=True, height=300)
                                 
                             else:
@@ -5002,8 +5002,209 @@ def main():
                         """
                         st.markdown(tooltip_html, unsafe_allow_html=True)
 
-    # FINRA / Dark Pool tab integration
+    # NEW TAB - Catalysts (earnings, conferences, splits, dividends)
     with main_tab4:
+        st.markdown("# � calendar - Upcoming Catalysts")
+        st.markdown("Use this tab to surface upcoming corporate catalysts (earnings, dividends, conferences) and get quick AI-style summaries with technical context.")
+
+        # Controls
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            symbols_input = st.text_input("Symbols (comma-separated) or leave blank to use tracked list:", value=",")
+            lookahead_days = st.number_input("Lookahead days", min_value=1, max_value=90, value=30)
+            include_dividends = st.checkbox("Include dividends & splits", value=False)
+        with col2:
+            st.markdown("### Quick Picks")
+            if st.button("Use Top Stocks"):
+                symbols_input = ",".join(TOP_STOCKS[:40])
+
+        # Helper: fetch upcoming earnings/calendar via yfinance
+        @st.cache_data(ttl=3600)
+        def fetch_catalyst_calendar(symbols, days=30, include_divs=False):
+            results = []
+            end_date = datetime.now() + timedelta(days=days)
+            for sym in symbols:
+                try:
+                    tk = yf.Ticker(sym)
+                    # Earnings calendar: yfinance provides upcoming earnings via calendar or earnings_dates
+                    try:
+                        cal = tk.get_calendar() if hasattr(tk, 'get_calendar') else {}
+                    except Exception:
+                        cal = {}
+
+                    # yfinance also exposes calendar via .calendar or earnings_dates
+                    upcoming = []
+                    # Earnings date
+                    try:
+                        ed = tk.calendar
+                        if isinstance(ed, dict) and 'Earnings Date' in ed:
+                            # pandas Timestamp or list
+                            ed_val = ed.get('Earnings Date')
+                            if hasattr(ed_val, 'item'):
+                                ed_val = ed_val.item()
+                            if isinstance(ed_val, (list, tuple)) and ed_val:
+                                ed_date = pd.to_datetime(ed_val[0])
+                            else:
+                                ed_date = pd.to_datetime(ed_val)
+                            upcoming.append({'type': 'Earnings', 'date': ed_date})
+                    except Exception:
+                        pass
+
+                    # Use earnings_dates as fallback
+                    try:
+                        eds = tk.earnings_dates if hasattr(tk, 'earnings_dates') else None
+                        if eds is not None and isinstance(eds, pd.DataFrame) and not eds.empty:
+                            # Filter for future dates
+                            for idx, row in eds.iterrows():
+                                ed_date = pd.to_datetime(row['Earnings Date']) if 'Earnings Date' in row else pd.to_datetime(idx)
+                                if ed_date <= end_date:
+                                    upcoming.append({'type': 'Earnings', 'date': ed_date})
+                    except Exception:
+                        pass
+
+                    # Dividends / splits info (optional)
+                    if include_divs:
+                        try:
+                            divs = tk.dividends
+                            if isinstance(divs, pd.Series) and not divs.empty:
+                                # Find next dividend date in series index
+                                next_div_idx = divs.index[divs.index > pd.Timestamp.now()]
+                                if len(next_div_idx) > 0:
+                                    upcoming.append({'type': 'Dividend', 'date': next_div_idx[0]})
+                        except Exception:
+                            pass
+
+                    # Conferences / events: try to use info.get('nextEvent') or recommendations via .info
+                    try:
+                        info = tk.info if hasattr(tk, 'info') else {}
+                        # Some tickers expose nextEvent or shortName variations
+                        next_event = info.get('nextEvent') if isinstance(info, dict) else None
+                        if next_event:
+                            # best-effort parse
+                            upcoming.append({'type': 'Event', 'date': pd.to_datetime(next_event)})
+                    except Exception:
+                        pass
+
+                    # Normalize and dedupe upcoming items
+                    normalized = []
+                    for item in upcoming:
+                        try:
+                            d = item['date']
+                            if pd.isna(d):
+                                continue
+                            d = pd.to_datetime(d)
+                            if d.date() >= datetime.now().date() and d <= end_date:
+                                normalized.append({'symbol': sym, 'type': item.get('type', 'Event'), 'date': d.date()})
+                        except Exception:
+                            continue
+
+                    # If nothing found, still include next earnings via fast info
+                    if not normalized:
+                        # attempt to use Yahoo 'earnings' method
+                        try:
+                            edf = tk.earnings if hasattr(tk, 'earnings') else None
+                            if isinstance(edf, pd.DataFrame) and not edf.empty:
+                                # earnings usually contains historical earnings; skip
+                                pass
+                        except Exception:
+                            pass
+
+                    results.extend(normalized)
+                except Exception:
+                    continue
+
+            # Convert to DataFrame
+            if not results:
+                return pd.DataFrame(columns=['symbol', 'type', 'date'])
+            df = pd.DataFrame(results)
+            df = df.drop_duplicates(subset=['symbol', 'type', 'date']).sort_values(['date', 'symbol'])
+            return df
+
+        # AI-style summarizer that combines catalyst with tech snapshot
+        def summarize_catalyst_row(row):
+            sym = row['symbol']
+            typ = row['type']
+            d = row['date']
+            # Get a quick technical snapshot
+            tech = get_stock_technicals(sym)
+            tech_text = tech if tech else 'Technical data unavailable'
+            # Build an optimistic short summary
+            return f"{sym} — {typ} on {d.isoformat()}: {tech_text}"
+
+        # Run fetch when user clicks
+        if st.button("Fetch Catalysts"):
+            with st.spinner("Fetching upcoming catalysts..."):
+                syms = [s.strip().upper() for s in symbols_input.split(',') if s.strip()] if symbols_input and symbols_input.strip(',') else TOP_STOCKS[:60]
+                catalysts_df = fetch_catalyst_calendar(syms, days=lookahead_days, include_divs=include_dividends)
+
+            if catalysts_df.empty:
+                st.info("No upcoming catalysts found in the selected window.")
+            else:
+                st.markdown(f"### 📅 Upcoming catalysts ({len(catalysts_df)})")
+                catalysts_df['summary'] = catalysts_df.apply(summarize_catalyst_row, axis=1)
+                # Show grouped view by date and include last-5-day flow sentiment from the DB
+                init_flow_database()
+
+                def get_recent_flow_sentiment(sym, days=5):
+                    try:
+                        end = datetime.now()
+                        start = end - timedelta(days=days)
+                        flows = get_flows_from_database(symbol_filter=sym, date_from=start, date_to=end, include_technicals=False)
+                        if flows is None or flows.empty:
+                            return None
+
+                        call_bought = flows[flows['order_type'] == 'Calls Bought']['contracts'].sum()
+                        call_sold = flows[flows['order_type'] == 'Calls Sold']['contracts'].sum()
+                        put_bought = flows[flows['order_type'] == 'Puts Bought']['contracts'].sum()
+                        put_sold = flows[flows['order_type'] == 'Puts Sold']['contracts'].sum()
+
+                        bullish = int(call_bought + put_sold)
+                        bearish = int(put_bought + call_sold)
+                        total = bullish + bearish
+
+                        bullish_pct = (bullish / total) * 100 if total > 0 else 0
+
+                        if total == 0:
+                            sentiment = '⚪ No directional flows'
+                        elif bullish_pct > 60:
+                            sentiment = '🟢 Bullish'
+                        elif bullish_pct < 40:
+                            sentiment = '🔴 Bearish'
+                        else:
+                            sentiment = '🟡 Mixed'
+
+                        return {
+                            'bullish_pct': bullish_pct,
+                            'bullish': bullish,
+                            'bearish': bearish,
+                            'total_contracts': int(flows['contracts'].sum()),
+                            'total_premium': float(flows['premium'].sum()),
+                            'sentiment': sentiment
+                        }
+                    except Exception:
+                        return None
+
+                # Group and print
+                for date, group in catalysts_df.groupby('date'):
+                    st.markdown(f"**{date.strftime('%Y-%m-%d')}**")
+                    for _, r in group.iterrows():
+                        sent = get_recent_flow_sentiment(r['symbol'])
+                        if sent:
+                            premium_display = f"${sent['total_premium']:,.0f}"
+                            contracts_display = f"{sent['total_contracts']:,}"
+                            st.markdown(f"- {r['summary']} — {sent['sentiment']} ({sent['bullish_pct']:.0f}% bullish) | {contracts_display} contracts | {premium_display}")
+                        else:
+                            st.markdown(f"- {r['summary']} — ⚪ No recent flows in last 5 days")
+
+                # Download option
+                csv_out = catalysts_df.to_csv(index=False)
+                st.download_button("📥 Download Catalysts CSV", data=csv_out, file_name=f"catalysts_{datetime.now().strftime('%Y%m%d')}.csv", mime='text/csv')
+
+        else:
+            st.info("Enter symbols (or use Top Stocks) and click 'Fetch Catalysts' to retrieve upcoming earnings and events.")
+
+    # FINRA / Dark Pool tab integration
+    with main_tab5:
         st.markdown("# 📡 FINRA / Dark Pool Analysis")
         st.markdown("This section embeds the FINRA dark-pool and short-sale analysis module.")
         # Call the finra.run() UI; it contains its own tabs and controls
