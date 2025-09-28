@@ -786,19 +786,19 @@ def create_enhanced_styled_dataframe(display_df, columns, focus_type="bought"):
     
     # Apply styling only to columns that exist
     if 'Signal' in available_columns:
-        styled_df = styled_df.applymap(style_signal_dark, subset=['Signal'])
+        styled_df = styled_df.map(style_signal_dark, subset=['Signal'])
     if 'Bought Dev 5d' in available_columns and 'Sold Dev 5d' in available_columns:
-        styled_df = styled_df.applymap(style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d'])
+        styled_df = styled_df.map(style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d'])
     if 'Price Change' in available_columns:
-        styled_df = styled_df.applymap(style_price_change_dark, subset=['Price Change'])
+        styled_df = styled_df.map(style_price_change_dark, subset=['Price Change'])
     if 'Momentum' in available_columns:
-        styled_df = styled_df.applymap(style_momentum, subset=['Momentum'])
+        styled_df = styled_df.map(style_momentum, subset=['Momentum'])
     if 'Consistency' in available_columns:
-        styled_df = styled_df.applymap(style_consistency, subset=['Consistency'])
+        styled_df = styled_df.map(style_consistency, subset=['Consistency'])
     if 'Volume Rank' in available_columns:
-        styled_df = styled_df.applymap(style_volume_rank, subset=['Volume Rank'])
+        styled_df = styled_df.map(style_volume_rank, subset=['Volume Rank'])
     if 'BOT %' in available_columns:
-        styled_df = styled_df.applymap(style_bot_percentage, subset=['BOT %'])
+        styled_df = styled_df.map(style_bot_percentage, subset=['BOT %'])
     
     return styled_df.set_table_styles([
         {'selector': 'th', 'props': [
@@ -1005,11 +1005,11 @@ def run():
                     display_df['date'] = display_df['date'].dt.strftime('%Y%m%d')
                     columns = ['date', 'bought_volume', 'sold_volume', 'BOT %', 'buy_to_sell_ratio', 'Signal', 'total_volume', 'Bought Dev 5d', 'Sold Dev 5d']
                     
-                    styled_df = display_df[columns].style.applymap(
+                    styled_df = display_df[columns].style.map(
                         style_signal_dark, subset=['Signal']
-                    ).applymap(
+                    ).map(
                         style_dev_dark, subset=['Bought Dev 5d', 'Sold Dev 5d']
-                    ).applymap(
+                    ).map(
                         style_bot_percentage, subset=['BOT %']
                     ).set_table_styles([
                         {'selector': 'th', 'props': [('background-color', '#2d2d2d'), 
