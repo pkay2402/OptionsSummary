@@ -92,7 +92,7 @@ theme_mapping = {
         "AIG", "PRU", "MET", "UNM", "LNC", "TRV", "CINF", "PGR", "ALL"
     ],
     "Technology": [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD",
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA", "AMD",
         "ORCL", "CRM", "ADBE", "INTC", "CSCO", "QCOM", "TXN", "IBM",
         "NOW", "AVGO", "INTU", "PANW", "SNOW"
     ],
@@ -129,7 +129,7 @@ theme_mapping = {
         "FSLY", "MIME", "KNBE"
     ],
     "Quantum Computing": [
-        "IBM", "GOOGL", "MSFT", "RGTI", "IONQ", "QUBT", "HON", "QCOM",
+        "IBM", "GOOG", "MSFT", "RGTI", "IONQ", "QUBT", "HON", "QCOM",
         "INTC", "AMAT", "MKSI", "NTNX", "XERI", "QTUM", "FORM",
         "LMT", "BA", "NOC", "ACN"
     ],
@@ -139,7 +139,7 @@ theme_mapping = {
         "EIX", "SRE"
     ],
     "Artificial Intelligence": [
-        "NVDA", "GOOGL", "MSFT", "AMD", "PLTR", "SNOW", "AI", "CRM", "IBM",
+        "NVDA", "GOOG", "MSFT", "AMD", "PLTR", "SNOW", "AI", "CRM", "IBM",
         "AAPL", "ADBE", "MSCI", "DELL", "BIDU", "UPST", "AI", "PATH",
         "SOUN", "VRNT", "ANSS"
     ],
@@ -891,32 +891,42 @@ def create_theme_dataframe(symbols, historical, price_data, latest_date):
 def run():
     st.markdown("""
         <style>
-        /* Dark theme styling */
+        /* Fix main app background */
         .stApp {
-            background-color: #1e1e1e;
-            color: #ffffff;
+            background-color: #0e1117 !important;
+            color: #fafafa !important;
+        }
+        
+        /* Fix main content area */
+        .main .block-container {
+            background-color: #0e1117 !important;
+            color: #fafafa !important;
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
         }
         
         /* Button styling */
         .stButton>button {
             background-color: #22c55e;
             color: white;
-            border-radius: 5px;
-            padding: 8px 16px;
+            border-radius: 4px;
+            padding: 4px 8px;
             border: none;
+            font-size: 12px;
+            height: 32px;
         }
         
         /* Tab styling */
         .stTabs [data-baseweb="tab-list"] {
-            background-color: #2d2d2d;
+            background-color: #262730;
         }
         
         .stTabs [data-baseweb="tab"] {
-            background-color: #2d2d2d;
-            color: #ffffff;
-            font-size: 16px;
-            padding: 10px;
-            border-radius: 5px 5px 0 0;
+            background-color: #262730;
+            color: #fafafa;
+            font-size: 13px;
+            padding: 6px 10px;
+            border-radius: 4px 4px 0 0;
         }
         
         .stTabs [data-baseweb="tab"]:hover {
@@ -925,38 +935,78 @@ def run():
         
         /* Input styling */
         .stSelectbox > div > div {
-            background-color: #2d2d2d;
-            color: #ffffff;
+            background-color: #262730;
+            color: #fafafa;
         }
         
         .stTextInput > div > div > input {
-            background-color: #2d2d2d;
-            color: #ffffff;
+            background-color: #262730;
+            color: #fafafa;
             border: 1px solid #4d4d4d;
         }
         
-        /* Dataframe styling */
-        .stDataFrame {
-            font-size: 13px;
-            background-color: #1e1e1e;
-        }
-        
-        /* Metric styling */
+        /* Ultra compact metrics */
         .metric-container {
-            background-color: #2d2d2d;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 5px;
+            background-color: #262730;
+            padding: 4px;
+            border-radius: 4px;
+            margin: 2px;
         }
         
-        /* Header styling */
-        h1, h2, h3 {
-            color: #ffffff !important;
+        /* Container styling - ultra compact */
+        .stContainer {
+            background-color: #0e1117 !important;
+            color: #fafafa !important;
         }
         
-        /* Sidebar styling */
-        .css-1d391kg {
-            background-color: #2d2d2d;
+        /* Markdown text color and compact sizing */
+        .stMarkdown {
+            color: #fafafa !important;
+        }
+        
+        .stMarkdown p {
+            margin-bottom: 0.25rem !important;
+        }
+        
+        /* Headers - smaller */
+        h1, h2, h3, h4, h5, h6 {
+            color: #fafafa !important;
+            margin-bottom: 0.5rem !important;
+        }
+        
+        h2 {
+            font-size: 1.2rem !important;
+        }
+        
+        h3 {
+            font-size: 1.1rem !important;
+        }
+        
+        h4 {
+            font-size: 1rem !important;
+        }
+        
+        /* Ultra compact spacing */
+        .element-container {
+            margin-bottom: 0.25rem !important;
+        }
+        
+        /* Divider styling - minimal */
+        hr {
+            margin: 0.25rem 0 !important;
+            border-color: #333 !important;
+            border-width: 0.5px !important;
+        }
+        
+        /* Compact columns */
+        .stColumns {
+            gap: 0.5rem !important;
+        }
+        
+        /* Small text for metrics */
+        .small-text {
+            font-size: 0.8rem !important;
+            line-height: 1.2 !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -965,7 +1015,7 @@ def run():
     #st.title("📊 Dark Pool Analysis")
     
     # Create tabs
-    tabs = st.tabs(["Single Stock", "High Bought Stocks", "High Sold Stocks", "Watchlist Summary"])
+    tabs = st.tabs(["Single Stock", "High Bought Stocks", "High Sold Stocks", "Watchlist Summary", "Market Dashboard"])
     
     # Single Stock Tab
     with tabs[0]:
@@ -1212,6 +1262,285 @@ def run():
                         st.info("No stocks match the current filters.")
                 else:
                     st.info("No high sold stocks found for this date.")
+    
+    # Market Dashboard Tab
+    with tabs[4]:
+        st.subheader("📈 Market Dashboard")
+        st.markdown("*Real-time analysis of key market indices and MAG7 stocks*")
+        
+        # Define our focus symbols
+        index_etfs = ["SPY", "QQQ", "DIA", "IWM", "SMH", "IBIT", "VXX", "GLD", "SLV", "USO", "XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLE", "XLU"]
+        mag7_stocks = ["AAPL", "MSFT", "NVDA", "GOOG", "AMZN", "META", "TSLA"]
+        # Add other notable stocks here as the list grows
+        other_stocks = ["AMD", "CRM", "NFLX", "ADBE", "ORCL", "INTC", "QCOM", "TXN",
+                        "CRWV","NBIS","PLTR","SNOW","UBER","GEV","AVGO","JNJ","LLY","UNH",
+                        "PFE","MRNA","BNTX","XOM","CVX","COP","TSM","ASML","LRCX","AMAT",
+                        "NOW","ALAB","DOCU","RDDT","PANW","ZS","CRWD","NET","CRCL","OKTA","DDOG"]
+        all_dashboard_symbols = index_etfs + mag7_stocks + other_stocks
+        
+        if st.button("🔄 Refresh Market Data", key="dashboard_refresh"):
+            with st.spinner("Loading market dashboard..."):
+                # Get price data for all symbols
+                price_data = get_price_data(all_dashboard_symbols)
+                historical = get_historical_metrics(all_dashboard_symbols, max_days=8)  # Get 8 days for 7-day analysis
+                
+                # Get latest date
+                latest_date = None
+                for hist in historical.values():
+                    if hist:
+                        latest_date = max(latest_date, hist[-1]['date'].strftime('%Y%m%d')) if latest_date else hist[-1]['date'].strftime('%Y%m%d')
+                
+                if latest_date:
+                    st.markdown(f"**📅 Market Data as of:** `{latest_date}`")
+                    
+                    # Create dashboard data
+                    dashboard_data = {}
+                    for symbol in all_dashboard_symbols:
+                        hist = historical[symbol]
+                        if hist:
+                            # Latest day data
+                            latest = hist[-1] if hist else None
+                            # 7-day summary
+                            last_7_days = hist[-7:] if len(hist) >= 7 else hist
+                            
+                            if latest:
+                                # Calculate 7-day metrics
+                                total_bought_7d = sum([d['bought_volume'] for d in last_7_days])
+                                total_sold_7d = sum([d['sold_volume'] for d in last_7_days])
+                                total_volume_7d = sum([d['total_volume'] for d in last_7_days])
+                                avg_ratio_7d = sum([d['buy_to_sell_ratio'] for d in last_7_days]) / len(last_7_days)
+                                
+                                # Calculate trend (comparing first 3 days vs last 3 days of the 7-day period)
+                                if len(last_7_days) >= 6:
+                                    early_avg = sum([d['buy_to_sell_ratio'] for d in last_7_days[:3]]) / 3
+                                    recent_avg = sum([d['buy_to_sell_ratio'] for d in last_7_days[-3:]]) / 3
+                                    trend_direction = "📈 Bullish" if recent_avg > early_avg * 1.1 else "📉 Bearish" if recent_avg < early_avg * 0.9 else "➡️ Neutral"
+                                else:
+                                    trend_direction = "➡️ Neutral"
+                                
+                                # Get price data
+                                current_price = price_data.get(symbol, {}).get('current_price', 0)
+                                price_change = price_data.get(symbol, {}).get('change_1d', 0)
+                                
+                                dashboard_data[symbol] = {
+                                    'latest_day': latest,
+                                    'current_price': current_price,
+                                    'price_change_1d': price_change,
+                                    'total_bought_7d': total_bought_7d,
+                                    'total_sold_7d': total_sold_7d,
+                                    'total_volume_7d': total_volume_7d,
+                                    'avg_ratio_7d': avg_ratio_7d,
+                                    'trend_7d': trend_direction,
+                                    'bullish_days_7d': sum([1 for d in last_7_days if d['buy_to_sell_ratio'] > 1.2])
+                                }
+                    
+                    # Display Index ETFs Section
+                    st.markdown("## 📊 **Index ETFs**")
+                    
+                    # Create 4 columns instead of 3 for more compact layout
+                    cols = st.columns(4)
+                    for i, symbol in enumerate(index_etfs):
+                        col_idx = i % 4
+                        if symbol in dashboard_data:
+                            data = dashboard_data[symbol]
+                            latest = data['latest_day']
+                            
+                            with cols[col_idx]:
+                                # Get ratio and determine color
+                                ratio = latest['buy_to_sell_ratio']
+                                
+                                # Color coding based on ratio
+                                if ratio > 1.8:
+                                    ratio_color = "#ff4444"  # Red for extremely high
+                                    ratio_display = f"🔥{ratio:.2f}"
+                                elif ratio > 1.2:
+                                    ratio_color = "#22c55e"  # Green for bullish
+                                    ratio_display = f"📈{ratio:.2f}"
+                                elif ratio < 0.8:
+                                    ratio_color = "#ef4444"  # Red for bearish
+                                    ratio_display = f"📉{ratio:.2f}"
+                                else:
+                                    ratio_color = "#fbbf24"  # Yellow for neutral
+                                    ratio_display = f"➡️{ratio:.2f}"
+                                
+                                # Ultra compact container
+                                price_color = "green" if data['price_change_1d'] > 0 else "red"
+                                st.markdown(f"**{symbol}** ${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
+                                st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span> 🎯{get_signal(latest['buy_to_sell_ratio'])} 📊{(latest['bought_volume'] / latest['total_volume'] * 100):.0f}%</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='small-text'>{data['trend_7d']} • {data['bullish_days_7d']}/7 bullish</div>", unsafe_allow_html=True)
+                    
+                    # Display MAG7 Section
+                    st.markdown("## 🚀 **Magnificent 7**")
+                    
+                    # Create 7 columns for ultra compact MAG7 layout
+                    mag7_cols = st.columns(7)
+                    for i, symbol in enumerate(mag7_stocks):
+                        if symbol in dashboard_data:
+                            data = dashboard_data[symbol]
+                            latest = data['latest_day']
+                            
+                            with mag7_cols[i]:
+                                # Special emoji for each stock
+                                stock_emojis = {
+                                    "AAPL": "🍎", "MSFT": "🪟", "NVDA": "🔥", "GOOG": "🔍",
+                                    "AMZN": "📦", "META": "📘", "TSLA": "⚡"
+                                }
+                                
+                                # Get ratio and determine color
+                                ratio = latest['buy_to_sell_ratio']
+                                
+                                # Color coding based on ratio
+                                if ratio > 1.8:
+                                    ratio_color = "#ff4444"  # Red for extremely high
+                                    ratio_display = f"🔥{ratio:.2f}"
+                                elif ratio > 1.2:
+                                    ratio_color = "#22c55e"  # Green for bullish
+                                    ratio_display = f"📈{ratio:.2f}"
+                                elif ratio < 0.8:
+                                    ratio_color = "#ef4444"  # Red for bearish
+                                    ratio_display = f"📉{ratio:.2f}"
+                                else:
+                                    ratio_color = "#fbbf24"  # Yellow for neutral
+                                    ratio_display = f"➡️{ratio:.2f}"
+                                
+                                # Ultra compact display
+                                price_color = "green" if data['price_change_1d'] > 0 else "red"
+                                st.markdown(f"**{stock_emojis.get(symbol, '�')} {symbol}**")
+                                st.markdown(f"${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
+                                st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='small-text'>🎯{get_signal(latest['buy_to_sell_ratio'])}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='small-text'>{data['bullish_days_7d']}/7</div>", unsafe_allow_html=True)
+                    
+                    # Display Other Stocks Section - more compact
+                    with st.expander("� **Other Stocks** (Click to expand)", expanded=False):
+                        # Create 6 columns for other stocks
+                        other_cols = st.columns(6)
+                        for i, symbol in enumerate(other_stocks):
+                            col_idx = i % 6
+                            if symbol in dashboard_data:
+                                data = dashboard_data[symbol]
+                                latest = data['latest_day']
+                                
+                                with other_cols[col_idx]:
+                                    # Get ratio and determine color
+                                    ratio = latest['buy_to_sell_ratio']
+                                    
+                                    # Color coding based on ratio
+                                    if ratio > 1.8:
+                                        ratio_color = "#ff4444"  # Red for extremely high
+                                        ratio_display = f"🔥{ratio:.2f}"
+                                    elif ratio > 1.2:
+                                        ratio_color = "#22c55e"  # Green for bullish
+                                        ratio_display = f"📈{ratio:.2f}"
+                                    elif ratio < 0.8:
+                                        ratio_color = "#ef4444"  # Red for bearish
+                                        ratio_display = f"📉{ratio:.2f}"
+                                    else:
+                                        ratio_color = "#fbbf24"  # Yellow for neutral
+                                        ratio_display = f"➡️{ratio:.2f}"
+                                    
+                                    # Ultra compact display
+                                    price_color = "green" if data['price_change_1d'] > 0 else "red"
+                                    st.markdown(f"**{symbol}**")
+                                    st.markdown(f"${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
+                                    st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span> 🎯{get_signal(latest['buy_to_sell_ratio'])}</div>", unsafe_allow_html=True)
+                    
+                    # Market Summary Section - compact
+                    st.markdown("## 📈 **Market Summary**")
+                    
+                    # Calculate overall market metrics
+                    index_ratios = [dashboard_data[s]['latest_day']['buy_to_sell_ratio'] for s in index_etfs if s in dashboard_data]
+                    mag7_ratios = [dashboard_data[s]['latest_day']['buy_to_sell_ratio'] for s in mag7_stocks if s in dashboard_data]
+                    other_ratios = [dashboard_data[s]['latest_day']['buy_to_sell_ratio'] for s in other_stocks if s in dashboard_data]
+                    all_ratios = index_ratios + mag7_ratios + other_ratios
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        avg_index_ratio = sum(index_ratios) / len(index_ratios) if index_ratios else 0
+                        st.metric("📊 ETFs", f"{avg_index_ratio:.2f}")
+                        
+                    with col2:
+                        avg_mag7_ratio = sum(mag7_ratios) / len(mag7_ratios) if mag7_ratios else 0
+                        st.metric("🚀 MAG7", f"{avg_mag7_ratio:.2f}")
+                        
+                    with col3:
+                        avg_other_ratio = sum(other_ratios) / len(other_ratios) if other_ratios else 0
+                        st.metric("💼 Others", f"{avg_other_ratio:.2f}")
+                        
+                    with col4:
+                        bullish_count = sum([1 for r in all_ratios if r > 1.2])
+                        st.metric("🟢 Bullish", f"{bullish_count}/{len(all_ratios)}")
+                        
+                    with col5:
+                        strong_buy_count = sum([1 for r in all_ratios if r > 1.5])
+                        st.metric("💪 Strong", f"{strong_buy_count}/{len(all_ratios)}")
+                    
+                    # Top Performers Section - ultra compact
+                    st.markdown("## 🏆 **Top Performers**")
+                    
+                    # Sort by ratio for top performers
+                    all_symbols_sorted = sorted(
+                        [(s, dashboard_data[s]) for s in all_dashboard_symbols if s in dashboard_data],
+                        key=lambda x: x[1]['latest_day']['buy_to_sell_ratio'],
+                        reverse=True
+                    )
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**🥇 Top Ratios**")
+                        for i, (symbol, data) in enumerate(all_symbols_sorted[:5]):
+                            ratio = data['latest_day']['buy_to_sell_ratio']
+                            price_change = data['price_change_1d']
+                            
+                            # Color coding for ratio
+                            if ratio > 1.8:
+                                ratio_color = "#ff4444"  # Red for extremely high
+                                ratio_display = f"🔥{ratio:.2f}"
+                            elif ratio > 1.2:
+                                ratio_color = "#22c55e"  # Green for bullish
+                                ratio_display = f"📈{ratio:.2f}"
+                            elif ratio < 0.8:
+                                ratio_color = "#ef4444"  # Red for bearish
+                                ratio_display = f"📉{ratio:.2f}"
+                            else:
+                                ratio_color = "#fbbf24"  # Yellow for neutral
+                                ratio_display = f"➡️{ratio:.2f}"
+                            
+                            st.markdown(f"<div class='small-text'>{i+1}. **{symbol}** <span style='color:{ratio_color}'>{ratio_display}</span> {price_change:+.1f}% {get_signal(ratio)}</div>", unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown("**📈 Price Winners**")
+                        price_sorted = sorted(
+                            [(s, dashboard_data[s]) for s in all_dashboard_symbols if s in dashboard_data],
+                            key=lambda x: x[1]['price_change_1d'],
+                            reverse=True
+                        )
+                        
+                        for i, (symbol, data) in enumerate(price_sorted[:5]):
+                            price_change = data['price_change_1d']
+                            ratio = data['latest_day']['buy_to_sell_ratio']
+                            
+                            # Color coding for ratio
+                            if ratio > 1.8:
+                                ratio_color = "#ff4444"  # Red for extremely high
+                                ratio_display = f"🔥{ratio:.2f}"
+                            elif ratio > 1.2:
+                                ratio_color = "#22c55e"  # Green for bullish
+                                ratio_display = f"📈{ratio:.2f}"
+                            elif ratio < 0.8:
+                                ratio_color = "#ef4444"  # Red for bearish
+                                ratio_display = f"📉{ratio:.2f}"
+                            else:
+                                ratio_color = "#fbbf24"  # Yellow for neutral
+                                ratio_display = f"➡️{ratio:.2f}"
+                            
+                            price_color = "green" if price_change > 0 else "red"
+                            st.markdown(f"<div class='small-text'>{i+1}. **{symbol}** ::{price_color}[{price_change:+.1f}%] <span style='color:{ratio_color}'>{ratio_display}</span> ${data['current_price']:.2f}</div>", unsafe_allow_html=True)
+                
+                else:
+                    st.error("No market data available for dashboard.")
     
     # Watchlist Summary Tab
     with tabs[3]:
