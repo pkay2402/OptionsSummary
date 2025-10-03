@@ -1337,113 +1337,132 @@ def run():
                     # Display Index ETFs Section
                     st.markdown("## 📊 **Index ETFs**")
                     
-                    # Create 4 columns instead of 3 for more compact layout
-                    cols = st.columns(4)
-                    for i, symbol in enumerate(index_etfs):
-                        col_idx = i % 4
+                    # Create table data for Index ETFs
+                    index_table_data = []
+                    for symbol in index_etfs:
                         if symbol in dashboard_data:
                             data = dashboard_data[symbol]
                             latest = data['latest_day']
                             
-                            with cols[col_idx]:
-                                # Get ratio and determine color
-                                ratio = latest['buy_to_sell_ratio']
-                                
-                                # Color coding based on ratio
-                                if ratio > 1.8:
-                                    ratio_color = "#ff4444"  # Red for extremely high
-                                    ratio_display = f"🔥{ratio:.2f}"
-                                elif ratio > 1.2:
-                                    ratio_color = "#22c55e"  # Green for bullish
-                                    ratio_display = f"📈{ratio:.2f}"
-                                elif ratio < 0.8:
-                                    ratio_color = "#ef4444"  # Red for bearish
-                                    ratio_display = f"📉{ratio:.2f}"
-                                else:
-                                    ratio_color = "#fbbf24"  # Yellow for neutral
-                                    ratio_display = f"➡️{ratio:.2f}"
-                                
-                                # Ultra compact container
-                                price_color = "green" if data['price_change_1d'] > 0 else "red"
-                                st.markdown(f"**{symbol}** ${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
-                                st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span> 🎯{get_signal(latest['buy_to_sell_ratio'])} 📊{(latest['bought_volume'] / latest['total_volume'] * 100):.0f}%</div>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='small-text'>{data['trend_7d']} • {data['bullish_days_7d']}/7 bullish</div>", unsafe_allow_html=True)
+                            # Get signal and styling info
+                            signal = get_signal(latest['buy_to_sell_ratio'])
+                            price_change = data['price_change_1d']
+                            
+                            index_table_data.append({
+                                'Symbol': symbol,
+                                'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                'Change': f"{price_change:+.1f}%" if price_change != 0 else "0.0%",
+                                'Buy/Sell': f"{latest['buy_to_sell_ratio']:.2f}" if latest['buy_to_sell_ratio'] != float('inf') else "∞",
+                                'BOT %': f"{(latest['bought_volume']/(latest['bought_volume']+latest['sold_volume'])*100):.0f}%" if (latest['bought_volume']+latest['sold_volume']) > 0 else "0%",
+                                'Volume': f"{latest['total_volume']:,.0f}",
+                                'Signal': signal,
+                                '7d Trend': data['trend_7d'],
+                                'Bull Days': f"{data['bullish_days_7d']}/7"
+                            })
+                    
+                    if index_table_data:
+                        index_df = pd.DataFrame(index_table_data)
+                        styled_index = index_df.style.applymap(
+                            style_signal_dark, subset=['Signal']
+                        ).applymap(
+                            style_price_change_dark, subset=['Change']
+                        ).applymap(
+                            style_ratio_dark, subset=['Buy/Sell']
+                        ).applymap(
+                            style_bot_percentage, subset=['BOT %']
+                        ).set_table_styles([
+                            {'selector': 'th', 'props': [('background-color', '#2d2d2d'), ('color', '#ffffff'), ('font-weight', 'bold'), ('text-align', 'center'), ('font-size', '12px')]},
+                            {'selector': 'td', 'props': [('background-color', '#1e1e1e'), ('color', '#ffffff'), ('text-align', 'center'), ('font-size', '11px')]},
+                            {'selector': 'table', 'props': [('border-collapse', 'collapse'), ('width', '100%')]}
+                        ])
+                        st.dataframe(styled_index, use_container_width=True)
                     
                     # Display MAG7 Section
                     st.markdown("## 🚀 **Magnificent 7**")
                     
-                    # Create 7 columns for ultra compact MAG7 layout
-                    mag7_cols = st.columns(7)
-                    for i, symbol in enumerate(mag7_stocks):
+                    # Create table data for MAG7
+                    mag7_table_data = []
+                    stock_emojis = {
+                        "AAPL": "🍎", "MSFT": "🪟", "NVDA": "🔥", "GOOG": "🔍",
+                        "AMZN": "📦", "META": "📘", "TSLA": "⚡"
+                    }
+                    
+                    for symbol in mag7_stocks:
                         if symbol in dashboard_data:
                             data = dashboard_data[symbol]
                             latest = data['latest_day']
                             
-                            with mag7_cols[i]:
-                                # Special emoji for each stock
-                                stock_emojis = {
-                                    "AAPL": "🍎", "MSFT": "🪟", "NVDA": "🔥", "GOOG": "🔍",
-                                    "AMZN": "📦", "META": "📘", "TSLA": "⚡"
-                                }
-                                
-                                # Get ratio and determine color
-                                ratio = latest['buy_to_sell_ratio']
-                                
-                                # Color coding based on ratio
-                                if ratio > 1.8:
-                                    ratio_color = "#ff4444"  # Red for extremely high
-                                    ratio_display = f"🔥{ratio:.2f}"
-                                elif ratio > 1.2:
-                                    ratio_color = "#22c55e"  # Green for bullish
-                                    ratio_display = f"📈{ratio:.2f}"
-                                elif ratio < 0.8:
-                                    ratio_color = "#ef4444"  # Red for bearish
-                                    ratio_display = f"📉{ratio:.2f}"
-                                else:
-                                    ratio_color = "#fbbf24"  # Yellow for neutral
-                                    ratio_display = f"➡️{ratio:.2f}"
-                                
-                                # Ultra compact display
-                                price_color = "green" if data['price_change_1d'] > 0 else "red"
-                                st.markdown(f"**{stock_emojis.get(symbol, '�')} {symbol}**")
-                                st.markdown(f"${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
-                                st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span></div>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='small-text'>🎯{get_signal(latest['buy_to_sell_ratio'])}</div>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='small-text'>{data['bullish_days_7d']}/7</div>", unsafe_allow_html=True)
+                            signal = get_signal(latest['buy_to_sell_ratio'])
+                            price_change = data['price_change_1d']
+                            
+                            mag7_table_data.append({
+                                'Stock': f"{stock_emojis.get(symbol, '�')} {symbol}",
+                                'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                'Change': f"{price_change:+.1f}%" if price_change != 0 else "0.0%",
+                                'Buy/Sell': f"{latest['buy_to_sell_ratio']:.2f}" if latest['buy_to_sell_ratio'] != float('inf') else "∞",
+                                'BOT %': f"{(latest['bought_volume']/(latest['bought_volume']+latest['sold_volume'])*100):.0f}%" if (latest['bought_volume']+latest['sold_volume']) > 0 else "0%",
+                                'Volume': f"{latest['total_volume']:,.0f}",
+                                'Signal': signal,
+                                '7d Trend': data['trend_7d'],
+                                'Bull Days': f"{data['bullish_days_7d']}/7"
+                            })
                     
-                    # Display Other Stocks Section - more compact
-                    with st.expander("� **Other Stocks** (Click to expand)", expanded=False):
-                        # Create 6 columns for other stocks
-                        other_cols = st.columns(6)
-                        for i, symbol in enumerate(other_stocks):
-                            col_idx = i % 6
+                    if mag7_table_data:
+                        mag7_df = pd.DataFrame(mag7_table_data)
+                        styled_mag7 = mag7_df.style.applymap(
+                            style_signal_dark, subset=['Signal']
+                        ).applymap(
+                            style_price_change_dark, subset=['Change']
+                        ).applymap(
+                            style_ratio_dark, subset=['Buy/Sell']
+                        ).applymap(
+                            style_bot_percentage, subset=['BOT %']
+                        ).set_table_styles([
+                            {'selector': 'th', 'props': [('background-color', '#2d2d2d'), ('color', '#ffffff'), ('font-weight', 'bold'), ('text-align', 'center'), ('font-size', '12px')]},
+                            {'selector': 'td', 'props': [('background-color', '#1e1e1e'), ('color', '#ffffff'), ('text-align', 'center'), ('font-size', '11px')]},
+                            {'selector': 'table', 'props': [('border-collapse', 'collapse'), ('width', '100%')]}
+                        ])
+                        st.dataframe(styled_mag7, use_container_width=True)
+                    
+                    # Display Other Stocks Section - in expandable table
+                    with st.expander("💼 **Other Stocks** (Click to expand)", expanded=True):
+                        other_table_data = []
+                        for symbol in other_stocks:
                             if symbol in dashboard_data:
                                 data = dashboard_data[symbol]
                                 latest = data['latest_day']
                                 
-                                with other_cols[col_idx]:
-                                    # Get ratio and determine color
-                                    ratio = latest['buy_to_sell_ratio']
-                                    
-                                    # Color coding based on ratio
-                                    if ratio > 1.8:
-                                        ratio_color = "#ff4444"  # Red for extremely high
-                                        ratio_display = f"🔥{ratio:.2f}"
-                                    elif ratio > 1.2:
-                                        ratio_color = "#22c55e"  # Green for bullish
-                                        ratio_display = f"📈{ratio:.2f}"
-                                    elif ratio < 0.8:
-                                        ratio_color = "#ef4444"  # Red for bearish
-                                        ratio_display = f"📉{ratio:.2f}"
-                                    else:
-                                        ratio_color = "#fbbf24"  # Yellow for neutral
-                                        ratio_display = f"➡️{ratio:.2f}"
-                                    
-                                    # Ultra compact display
-                                    price_color = "green" if data['price_change_1d'] > 0 else "red"
-                                    st.markdown(f"**{symbol}**")
-                                    st.markdown(f"${data['current_price']:.2f} ::{price_color}[{data['price_change_1d']:+.1f}%]")
-                                    st.markdown(f"<div class='small-text'><span style='color:{ratio_color}'>{ratio_display}</span> 🎯{get_signal(latest['buy_to_sell_ratio'])}</div>", unsafe_allow_html=True)
+                                signal = get_signal(latest['buy_to_sell_ratio'])
+                                price_change = data['price_change_1d']
+                                
+                                other_table_data.append({
+                                    'Symbol': symbol,
+                                    'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                    'Change': f"{price_change:+.1f}%" if price_change != 0 else "0.0%",
+                                    'Buy/Sell': f"{latest['buy_to_sell_ratio']:.2f}" if latest['buy_to_sell_ratio'] != float('inf') else "∞",
+                                    'BOT %': f"{(latest['bought_volume']/(latest['bought_volume']+latest['sold_volume'])*100):.0f}%" if (latest['bought_volume']+latest['sold_volume']) > 0 else "0%",
+                                    'Volume': f"{latest['total_volume']:,.0f}",
+                                    'Signal': signal,
+                                    '7d Trend': data['trend_7d'],
+                                    'Bull Days': f"{data['bullish_days_7d']}/7"
+                                })
+                        
+                        if other_table_data:
+                            other_df = pd.DataFrame(other_table_data)
+                            styled_other = other_df.style.applymap(
+                                style_signal_dark, subset=['Signal']
+                            ).applymap(
+                                style_price_change_dark, subset=['Change']
+                            ).applymap(
+                                style_ratio_dark, subset=['Buy/Sell']
+                            ).applymap(
+                                style_bot_percentage, subset=['BOT %']
+                            ).set_table_styles([
+                                {'selector': 'th', 'props': [('background-color', '#2d2d2d'), ('color', '#ffffff'), ('font-weight', 'bold'), ('text-align', 'center'), ('font-size', '11px')]},
+                                {'selector': 'td', 'props': [('background-color', '#1e1e1e'), ('color', '#ffffff'), ('text-align', 'center'), ('font-size', '10px')]},
+                                {'selector': 'table', 'props': [('border-collapse', 'collapse'), ('width', '100%')]}
+                            ])
+                            st.dataframe(styled_other, use_container_width=True)
                     
                     # Market Summary Section - compact
                     st.markdown("## 📈 **Market Summary**")
