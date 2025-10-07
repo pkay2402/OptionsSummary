@@ -27,11 +27,53 @@ theme_mapping = {
     "Indexes": [
         "SPY", "QQQ", "IWM", "DIA", "SMH"
     ],
+    "Apple (AAPL) Leverage": [
+        "AAPU", "AAPD"
+    ],
+    "NVIDIA (NVDA) Leverage": [
+        "NVDU", "NVDD", "NVDG", "NVDO", "NVDS"
+    ],
+    "Tesla (TSLA) Leverage": [
+        "TSLL", "TSLS", "TSLG", "TSLO", "TSLQ"
+    ],
+    "Microsoft (MSFT) Leverage": [
+        "MSFU", "MSFD"
+    ],
+    "Amazon (AMZN) Leverage": [
+        "AMZU", "AMZD"
+    ],
+    "Meta (META) Leverage": [
+        "METU", "METD"
+    ],
+    "Google (GOOGL) Leverage": [
+        "GGLL", "GGLS"
+    ],
+    "AMD Leverage": [
+        "AMUU", "AMDD", "AMDG"
+    ],
+    "Taiwan Semi (TSM) Leverage": [
+        "TSMX", "TSMZ", "TSMG"
+    ],
+    "Palantir (PLTR) Leverage": [
+        "PLTU", "PLTD", "PLTG", "PLOO"
+    ],
+    "Broadcom (AVGO) Leverage": [
+        "AVL", "AVS", "AVGG"
+    ],
+    "Coinbase (COIN) Leverage": [
+        "COIG", "COIO", "CONL"
+    ],
+    "MicroStrategy (MSTR) Leverage": [
+        "MSOO"
+    ],
+    "Netflix (NFLX) Leverage": [
+        "NFXL", "NFXS"
+    ],
     "Bull Leverage ETF": [
-        "SPXL", "UPRO", "TQQQ", "SOXL", "UDOW", "FAS", "SPUU", "TNA"
+        "SPXL", "UPRO", "TQQQ", "SOXL", "UDOW", "FAS", "SPUU", "TNA", "TECL", "LABU", "CURE", "WANT", "WEBL", "DPST", "RETL", "NAIL", "DRN", "GUSH", "NUGT", "JNUG", "ERX", "DUSL", "UTSL", "TPOR", "DFEN", "PILL", "HIBL", "FNGG", "QQQU", "UBOT", "URAA", "LMBO", "AIBU", "EVAV", "BRZU", "INDL", "CHAU", "CWEB", "XXCH", "MIDU", "TYD", "TMF", "YINN", "EURL", "EDC", "MEXX", "KORU"
     ],
     "Bear Leverage ETF": [
-        "SQQQ", "SPXS", "SOXS", "SDOW", "FAZ","SPDN", "TZA", "SPXU"
+        "SQQQ", "SPXS", "SOXS", "SDOW", "FAZ", "SPDN", "TZA", "SPXU", "TECS", "LABD", "WEBS", "DRV", "DRIP", "DUST", "JDST", "ERY", "HIBS", "QQQD", "REKT", "TMV", "TYO", "YANG", "EDZ", "SARK", "AIBD"
     ],
     "Volatility": [
         "VXX", "VIXY", "UVXY"
@@ -83,6 +125,78 @@ theme_mapping = {
     ],
     "Pharmaceuticals": [
         "PFE", "MRK", "JNJ", "ABBV", "BMY", "GILD", "AMGN", "LLY", "VRTX"
+    ],
+    "Boeing (BA) Leverage": [
+        "BOEU", "BOED", "BOEG"
+    ],
+    "Berkshire (BRKB) Leverage": [
+        "BRKU", "BRKD"
+    ],
+    "Cisco (CSCO) Leverage": [
+        "CSCL", "CSCS"
+    ],
+    "Ford (F) Leverage": [
+        "FRDU", "FRDD"
+    ],
+    "Eli Lilly (LLY) Leverage": [
+        "ELIL", "ELIS"
+    ],
+    "Lockheed Martin (LMT) Leverage": [
+        "LMTL", "LMTS"
+    ],
+    "Micron (MU) Leverage": [
+        "MUU", "MUD"
+    ],
+    "Palo Alto (PANW) Leverage": [
+        "PALU", "PALD", "PANG"
+    ],
+    "Qualcomm (QCOM) Leverage": [
+        "QCMU", "QCMD"
+    ],
+    "Shopify (SHOP) Leverage": [
+        "SHPU", "SHPD"
+    ],
+    "Exxon (XOM) Leverage": [
+        "XOMX", "XOMZ"
+    ],
+    "ARM Holdings Leverage": [
+        "ARMG"
+    ],
+    "ASML Leverage": [
+        "ASMG"
+    ],
+    "Adobe (ADBE) Leverage": [
+        "ADBG"
+    ],
+    "PayPal (PYPL) Leverage": [
+        "PYPG"
+    ],
+    "Salesforce (CRM) Leverage": [
+        "CRMG"
+    ],
+    "Robinhood (HOOD) Leverage": [
+        "HOOG"
+    ],
+    "UnitedHealth (UNH) Leverage": [
+        "UNHG"
+    ],
+    "RTX Leverage": [
+        "RTXG"
+    ],
+    "American Airlines (AAL) Leverage": [
+        "AALG"
+    ],
+    "Innovation/ARK Leverage": [
+        "TARK", "SARK", "MQQQ", "QQQP"
+    ],
+    "Nuclear/Uranium Leverage": [
+        "CEGX", "SMU", "URAA"
+    ],
+    "Quantum Computing Leverage": [
+        "QUBX", "RGTU", "QBTX"
+    ],
+    "Space/Aerospace Leverage": [
+        "ARCX", "ASTX", "JOBX"
     ],
     "Biotechnology": [
         "AMGN", "REGN", "ILMN", "VRTX", "CRSP", "MRNA", "BMRN", "ALNY",
@@ -151,6 +265,49 @@ theme_mapping = {
 }
 
 all_symbols = list(set([symbol for symbols in theme_mapping.values() for symbol in symbols]))
+
+# Additional leverage ETF symbols for comprehensive analysis
+leveraged_etf_symbols = [
+    # Individual stock leverage ETFs
+    "NVDU", "NVDD", "NVDG", "NVDO", "NVDS", "TSLL", "TSLS", "TSLG", "TSLO", "TSLQ",
+    "AAPU", "AAPD", "MSFU", "MSFD", "AMZU", "AMZD", "METU", "METD", "GGLL", "GGLS",
+    "AMUU", "AMDD", "AMDG", "TSMX", "TSMZ", "TSMG", "PLTU", "PLTD", "PLTG", "PLOO",
+    "AVL", "AVS", "AVGG", "COIG", "COIO", "MSOO", "NFXL", "NFXS",
+    # Broad market leverage
+    "SPXL", "UPRO", "TQQQ", "SOXL", "SPUU", "TNA", "SQQQ", "SPXS", "SOXS", "SPDN", "TZA", "SPXU",
+    # Sector leverage
+    "TECL", "TECS", "FAS", "FAZ", "LABU", "LABD", "ERX", "ERY", "DRN", "DRV", "CURE", "WANT",
+    "WEBL", "WEBS", "DPST", "RETL", "NAIL", "GUSH", "DRIP", "NUGT", "DUST", "JNUG", "JDST",
+    "DUSL", "UTSL", "TPOR", "DFEN", "PILL", "HIBL", "HIBS",
+    # Thematic leverage
+    "FNGG", "QQQU", "QQQD", "UBOT", "URAA", "LMBO", "REKT", "AIBU", "AIBD", "EVAV",
+    # Additional individual stocks
+    "BOEU", "BOED", "BOEG", "BRKU", "BRKD", "CSCL", "CSCS", "FRDU", "FRDD", "ELIL", "ELIS",
+    "LMTL", "LMTS", "MUU", "MUD", "PALU", "PALD", "PANG", "QCMU", "QCMD", "SHPU", "SHPD",
+    "XOMX", "XOMZ", "ARMG", "ASMG", "ADBG", "PYPG", "CRMG", "HOOG", "UNHG", "RTXG", "AALG",
+    "QUBX", "RGTU", "QBTX", "TARK", "SARK"
+]
+
+# Separate list for leverage ETFs (used in Leverage ETF tab)
+leveraged_etf_symbols = [
+    # Major individual stock leverage ETFs
+    "NVDU", "NVDD", "NVDG", "NVDO", "NVDS", "TSLL", "TSLS", "TSLG", "TSLO", "TSLQ",
+    "AAPU", "AAPD", "MSFU", "MSFD", "AMZU", "AMZD", "METU", "METD", "GGLL", "GGLS",
+    "AMUU", "AMDD", "AMDG", "TSMX", "TSMZ", "TSMG", "PLTU", "PLTD", "PLTG", "PLOO",
+    "AVL", "AVS", "AVGG", "COIG", "COIO", "MSOO", "NFXL", "NFXS",
+    # Broad market leverage
+    "SPXL", "UPRO", "TQQQ", "SOXL", "SPUU", "TNA", "SQQQ", "SPXS", "SOXS", "SPDN", "TZA", "SPXU",
+    # Sector leverage
+    "TECL", "TECS", "FAS", "FAZ", "LABU", "LABD", "ERX", "ERY", "DRN", "DRV", "CURE", "WANT",
+    "WEBL", "WEBS", "DPST", "RETL", "NAIL", "GUSH", "DRIP", "NUGT", "DUST", "JNUG", "JDST",
+    "DUSL", "UTSL", "TPOR", "DFEN", "PILL", "HIBL", "HIBS",
+    # Thematic leverage
+    "FNGG", "QQQU", "QQQD", "UBOT", "URAA", "LMBO", "REKT", "AIBU", "AIBD", "EVAV",
+    # Additional individual stocks
+    "BOEU", "BOED", "BOEG", "BRKU", "BRKD", "CSCL", "CSCS", "FRDU", "FRDD", "ELIL", "ELIS",
+    "LMTL", "LMTS", "MUU", "MUD", "PALU", "PALD", "PANG", "QCMU", "QCMD", "SHPU", "SHPD",
+    "XOMX", "XOMZ", "ARMG", "ASMG", "ADBG", "PYPG", "CRMG", "HOOG", "UNHG", "RTXG", "AALG"
+]
 
 # Database functions
 def setup_stock_database() -> None:
@@ -642,6 +799,18 @@ def style_dev_dark(val):
         pass
     return 'background-color: #2d2d2d; color: #ffffff'
 
+def style_accumulation_dark(val):
+    """Style accumulation status with color coding"""
+    if "HIGH ACCUMULATION" in val:
+        return 'background-color: #dc2626; color: #ffffff; font-weight: bold'  # Red for high
+    elif "MODERATE ACCUMULATION" in val:
+        return 'background-color: #f59e0b; color: #ffffff; font-weight: bold'  # Orange for moderate
+    elif "EARLY SIGNS" in val:
+        return 'background-color: #10b981; color: #ffffff; font-weight: bold'  # Green for early
+    elif "QUIET" in val:
+        return 'background-color: #6b7280; color: #ffffff'  # Gray for quiet
+    return 'background-color: #2d2d2d; color: #ffffff'
+
 def style_price_change_dark(val):
     try:
         num = float(val.rstrip('%'))
@@ -1015,7 +1184,7 @@ def run():
     #st.title("📊 Dark Pool Analysis")
     
     # Create tabs
-    tabs = st.tabs(["Single Stock", "High Bought Stocks", "High Sold Stocks", "Watchlist Summary", "Market Dashboard"])
+    tabs = st.tabs(["Single Stock", "High Bought Stocks", "High Sold Stocks", "Watchlist Summary", "Market Dashboard", "Leverage ETF"])
     
     # Single Stock Tab
     with tabs[0]:
@@ -1392,8 +1561,22 @@ def run():
                             data = dashboard_data[symbol]
                             latest = data['latest_day']
                             
+                            # Get signal and styling info
                             signal = get_signal(latest['buy_to_sell_ratio'])
                             price_change = data['price_change_1d']
+                            emoji = stock_emojis.get(symbol, "📈")
+                            
+                            mag7_table_data.append({
+                                'Symbol': f"{emoji} {symbol}",
+                                'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                'Change': f"{price_change:+.1f}%" if price_change != 0 else "0.0%",
+                                'Buy/Sell': f"{latest['buy_to_sell_ratio']:.2f}" if latest['buy_to_sell_ratio'] != float('inf') else "∞",
+                                'BOT %': f"{(latest['bought_volume']/(latest['bought_volume']+latest['sold_volume'])*100):.0f}%" if (latest['bought_volume']+latest['sold_volume']) > 0 else "0%",
+                                'Volume': f"{latest['total_volume']:,.0f}",
+                                'Signal': signal,
+                                '7d Trend': data['trend_7d'],
+                                'Bull Days': f"{data['bullish_days_7d']}/7"
+                            })
                             
                             mag7_table_data.append({
                                 'Stock': f"{stock_emojis.get(symbol, '�')} {symbol}",
@@ -1560,6 +1743,456 @@ def run():
                 
                 else:
                     st.error("No market data available for dashboard.")
+    
+    # Leverage ETF Tab
+    with tabs[5]:
+        st.subheader("🚀 Leverage ETF Analysis")
+        st.markdown("*Comprehensive analysis of leveraged and inverse ETFs grouped by underlying assets*")
+        
+        # Define leverage ETF categories for analysis
+        leverage_categories = {
+            "Major Tech Leverage": {
+                "NVIDIA (NVDA)": ["NVDU", "NVDD", "NVDG", "NVDO", "NVDS"],
+                "Tesla (TSLA)": ["TSLL", "TSLS", "TSLG", "TSLO", "TSLQ"],
+                "Apple (AAPL)": ["AAPU", "AAPD"],
+                "Microsoft (MSFT)": ["MSFU", "MSFD"],
+                "Amazon (AMZN)": ["AMZU", "AMZD"],
+                "Meta (META)": ["METU", "METD","FBL"],
+                "Google (GOOGL)": ["GGLL", "GGLS"],
+                "Netflix (NFLX)": ["NFXL", "NFXS"]
+            },
+            "Semiconductor Leverage": {
+                "AMD": ["AMUU", "AMDD", "AMDG"],
+                "Taiwan Semi (TSM)": ["TSMX", "TSMZ", "TSMG"],
+                "Broadcom (AVGO)": ["AVL", "AVS", "AVGG"],
+                "ASML": ["ASMG"],
+                "ARM Holdings": ["ARMG"],
+                "Micron (MU)": ["MUU", "MUD"],
+                "Qualcomm (QCOM)": ["QCMU", "QCMD"],
+                "Lam Research (LRCX)": ["LRCU"]
+            },
+            "Broad Market Leverage": {
+                "S&P 500 Bull": ["SPXL", "UPRO", "SPUU"],
+                "S&P 500 Bear": ["SPXS", "SPDN", "SPXU"],
+                "NASDAQ Bull": ["TQQQ", "MQQQ"],
+                "NASDAQ Bear": ["SQQQ"],
+                "Russell 2000 Bull": ["TNA"],
+                "Russell 2000 Bear": ["TZA"],
+                "Mid Cap Bull": ["MIDU"],
+                "High Beta Bull": ["HIBL"],
+                "High Beta Bear": ["HIBS"]
+            },
+            "Sector Leverage": {
+                "Technology": ["TECL", "TECS"],
+                "Semiconductors": ["SOXL", "SOXS"],
+                "Financials": ["FAS", "FAZ"],
+                "Biotechnology": ["LABU", "LABD"],
+                "Energy": ["ERX", "ERY"],
+                "Real Estate": ["DRN", "DRV"],
+                "Internet": ["WEBL", "WEBS"],
+                "Healthcare": ["CURE"],
+                "Consumer Discretionary": ["WANT"],
+                "Retail": ["RETL"],
+                "Homebuilders": ["NAIL"],
+                "Regional Banks": ["DPST"],
+                "Utilities": ["UTSL"],
+                "Industrials": ["DUSL"],
+                "Transportation": ["TPOR"],
+                "Aerospace & Defense": ["DFEN"],
+                "Pharmaceuticals": ["PILL"]
+            },
+            "Crypto & FinTech Leverage": {
+                "Coinbase (COIN)": ["COIG", "COIO"],
+                "MicroStrategy (MSTR)": ["MSOO"],
+                "Robinhood (HOOD)": ["HOOG"],
+                "PayPal (PYPL)": ["PYPG"],
+                "Crypto Industry": ["LMBO", "REKT"]
+            },
+            "Individual Stock Leverage": {
+                "Boeing (BA)": ["BOEU", "BOED", "BOEG"],
+                "Berkshire (BRKB)": ["BRKU", "BRKD"],
+                "Cisco (CSCO)": ["CSCL", "CSCS"],
+                "Ford (F)": ["FRDU", "FRDD"],
+                "Eli Lilly (LLY)": ["ELIL", "ELIS"],
+                "Lockheed Martin (LMT)": ["LMTL", "LMTS"],
+                "Palo Alto (PANW)": ["PALU", "PALD", "PANG"],
+                "Shopify (SHOP)": ["SHPU", "SHPD"],
+                "Exxon (XOM)": ["XOMX", "XOMZ"],
+                "Adobe (ADBE)": ["ADBG"],
+                "Salesforce (CRM)": ["CRMG"],
+                "UnitedHealth (UNH)": ["UNHG"],
+                "RTX": ["RTXG"],
+                "American Airlines (AAL)": ["AALG"],
+                "Goldman Sachs (GS)": ["GSX"],
+                "Costco (COST)": ["COTG"]
+            },
+            "Thematic Leverage": {
+                "Nuclear/Uranium": ["URAA", "CEGX", "SMU"],
+                "AI & Big Data": ["AIBU", "AIBD", "UBOT"],
+                "Quantum Computing": ["QUBX", "RGTU", "QBTX"],
+                "Innovation/ARK": ["TARK", "SARK"],
+                "FANG+": ["FNGG"],
+                "Magnificent 7": ["QQQU", "QQQD"],
+                "Electric Vehicles": ["EVAV"],
+                "Robotics & AI": ["UBOT"],
+                "Clean Energy": ["ENPH - ENPX"],
+                "Space & Aerospace": ["ARCX", "ASTX", "JOBX"],
+                "Gaming & Esports": ["PONX"],
+                "Mining & Materials": ["LABX", "ALAB"]
+            },
+            "Commodities & Futures": {
+                "Gold Miners Bull": ["NUGT", "JNUG"],
+                "Gold Miners Bear": ["DUST", "JDST"],
+                "Oil & Gas Bull": ["GUSH"],
+                "Oil & Gas Bear": ["DRIP"],
+                "Treasury 20+ Bull": ["TMF"],
+                "Treasury 20+ Bear": ["TMV"],
+                "Treasury 7-10 Bull": ["TYD"],
+                "Treasury 7-10 Bear": ["TYO"]
+            },
+            "International Leverage": {
+                "China Bull": ["YINN", "CHAU", "CWEB"],
+                "China Bear": ["YANG"],
+                "Emerging Markets Bull": ["EDC"],
+                "Emerging Markets Bear": ["EDZ"],
+                "Europe Bull": ["EURL"],
+                "Brazil Bull": ["BRZU"],
+                "India Bull": ["INDL"],
+                "Mexico Bull": ["MEXX"],
+                "South Korea Bull": ["KORU"],
+                "Emerging Markets ex China": ["XXCH"]
+            },
+            "New Generation ETFs": {
+                "Tradr ETFs": ["TARK", "SARK", "MQQQ", "QQQP", "SPYQ", "TSLQ", "NVDS"],
+                "LeverageShares": ["NVDG", "TSLG", "TSMG", "ASMG", "ARMG", "AMDG", "COIG", "HOOG", "PANG", "ADBG", "PYPG", "CRMG", "PLTG", "AVGG", "RTXG", "BOEG", "AALG", "UNHG", "BAIG", "GLGG", "COTG"],
+                "GraniteShares Capped": ["NVDO", "TSLO", "COIO", "MSOO", "PLOO"],
+                "Daily Leveraged": ["APLX", "APPX", "ARCX", "ASTX", "CEGX", "CLSX", "CRDU", "CWVX", "DOGD", "ENPX", "GEVX", "GSX", "JOBX", "LABX", "LRCU", "MDBX", "NEBX", "NVTX", "PONX", "QBTX", "QUBX", "RGTU", "SMU", "TEMT", "UNX", "UPSX", "VOYX"]
+            }
+        }
+        
+        # Get all leverage ETF symbols
+        all_leverage_etfs = []
+        for category in leverage_categories.values():
+            for etf_list in category.values():
+                all_leverage_etfs.extend(etf_list)
+        
+        if st.button("🔄 Refresh Leverage ETF Data", key="leverage_refresh"):
+            with st.spinner("Loading leverage ETF analysis..."):
+                # Get price data for all leverage ETFs
+                leverage_price_data = get_price_data(all_leverage_etfs)
+                leverage_historical = get_historical_metrics(all_leverage_etfs, max_days=8)
+                
+                # Get latest date
+                latest_date = None
+                for hist in leverage_historical.values():
+                    if hist:
+                        latest_date = max(latest_date, hist[-1]['date'].strftime('%Y%m%d')) if latest_date else hist[-1]['date'].strftime('%Y%m%d')
+                
+                if latest_date:
+                    st.markdown(f"**📅 Leverage ETF Data as of:** `{latest_date}`")
+                    
+                    # Function to get ETF description from yfinance
+                    @st.cache_data(ttl=86400)  # Cache for 24 hours
+                    def get_etf_info(symbol):
+                        try:
+                            ticker = yf.Ticker(symbol)
+                            info = ticker.info
+                            return {
+                                'longName': info.get('longName', symbol),
+                                'description': info.get('longBusinessSummary', 'No description available'),
+                                'expense_ratio': info.get('annualReportExpenseRatio', 'N/A'),
+                                'aum': info.get('totalAssets', 'N/A'),
+                                'leverage': '2x' if '2X' in info.get('longName', '') or '2x' in info.get('longName', '') else '3x' if '3X' in info.get('longName', '') or '3x' in info.get('longName', '') else 'N/A'
+                            }
+                        except:
+                            return {
+                                'longName': symbol,
+                                'description': 'Information not available',
+                                'expense_ratio': 'N/A',
+                                'aum': 'N/A',
+                                'leverage': 'N/A'
+                            }
+                    
+                    # Create dashboard data for leverage ETFs
+                    leverage_dashboard_data = {}
+                    for symbol in all_leverage_etfs:
+                        hist = leverage_historical[symbol]
+                        if hist:
+                            latest = hist[-1] if hist else None
+                            last_7_days = hist[-7:] if len(hist) >= 7 else hist
+                            
+                            if latest:
+                                # Calculate 7-day metrics
+                                total_bought_7d = sum([d['bought_volume'] for d in last_7_days])
+                                total_sold_7d = sum([d['sold_volume'] for d in last_7_days])
+                                total_volume_7d = sum([d['total_volume'] for d in last_7_days])
+                                avg_ratio_7d = sum([d['buy_to_sell_ratio'] for d in last_7_days]) / len(last_7_days)
+                                
+                                # Calculate trend
+                                if len(last_7_days) >= 6:
+                                    early_avg = sum([d['buy_to_sell_ratio'] for d in last_7_days[:3]]) / 3
+                                    recent_avg = sum([d['buy_to_sell_ratio'] for d in last_7_days[-3:]]) / 3
+                                    trend_direction = "📈 Rising" if recent_avg > early_avg * 1.1 else "📉 Falling" if recent_avg < early_avg * 0.9 else "➡️ Stable"
+                                else:
+                                    trend_direction = "➡️ Stable"
+                                
+                                # ACCUMULATION DETECTION - NEW LOGIC
+                                accumulation_signals = []
+                                accumulation_score = 0
+                                
+                                # 1. Volume Acceleration (3-day vs 7-day average)
+                                if len(last_7_days) >= 7:
+                                    recent_3d_vol = sum([d['total_volume'] for d in last_7_days[-3:]]) / 3
+                                    early_4d_vol = sum([d['total_volume'] for d in last_7_days[:4]]) / 4
+                                    vol_acceleration = (recent_3d_vol / early_4d_vol) if early_4d_vol > 0 else 1
+                                    
+                                    if vol_acceleration > 1.5:
+                                        accumulation_signals.append("🚀 Volume Surge")
+                                        accumulation_score += 3
+                                    elif vol_acceleration > 1.2:
+                                        accumulation_signals.append("📈 Volume Rising")
+                                        accumulation_score += 2
+                                
+                                # 2. Consistent Buying Pressure (ratio improvement)
+                                if len(last_7_days) >= 5:
+                                    recent_ratios = [d['buy_to_sell_ratio'] for d in last_7_days[-3:]]
+                                    early_ratios = [d['buy_to_sell_ratio'] for d in last_7_days[:3]]
+                                    recent_avg_ratio = sum(recent_ratios) / len(recent_ratios)
+                                    early_avg_ratio = sum(early_ratios) / len(early_ratios)
+                                    
+                                    if recent_avg_ratio > early_avg_ratio * 1.3 and recent_avg_ratio > 1.0:
+                                        accumulation_signals.append("💪 Strong Accumulation")
+                                        accumulation_score += 3
+                                    elif recent_avg_ratio > early_avg_ratio * 1.1 and recent_avg_ratio > 0.8:
+                                        accumulation_signals.append("📊 Building Pressure")
+                                        accumulation_score += 2
+                                
+                                # 3. Volume Consistency (high volume for multiple days)
+                                if len(last_7_days) >= 5:
+                                    volumes = [d['total_volume'] for d in last_7_days]
+                                    avg_volume = sum(volumes) / len(volumes)
+                                    high_vol_days = sum([1 for v in volumes[-5:] if v > avg_volume * 1.2])
+                                    
+                                    if high_vol_days >= 4:
+                                        accumulation_signals.append("🔥 Sustained Interest")
+                                        accumulation_score += 2
+                                    elif high_vol_days >= 3:
+                                        accumulation_signals.append("📅 Multiple High Vol Days")
+                                        accumulation_score += 1
+                                
+                                # 4. Breakout Pattern (volume + ratio combination)
+                                current_vol = latest['total_volume']
+                                current_ratio = latest['buy_to_sell_ratio']
+                                if len(last_7_days) >= 3:
+                                    avg_vol_3d = sum([d['total_volume'] for d in last_7_days[-4:-1]]) / 3
+                                    if current_vol > avg_vol_3d * 1.8 and current_ratio > 1.3:
+                                        accumulation_signals.append("⚡ Breakout Alert")
+                                        accumulation_score += 4
+                                    elif current_vol > avg_vol_3d * 1.4 and current_ratio > 1.1:
+                                        accumulation_signals.append("🎯 Pre-Breakout")
+                                        accumulation_score += 2
+                                
+                                # 5. Dark Pool Strength (BOT % consistency)
+                                if len(last_7_days) >= 5:
+                                    bot_percentages = []
+                                    for d in last_7_days[-5:]:
+                                        if d['total_volume'] > 0:
+                                            bot_pct = (d['bought_volume'] / d['total_volume']) * 100
+                                            bot_percentages.append(bot_pct)
+                                    
+                                    if bot_percentages:
+                                        avg_bot = sum(bot_percentages) / len(bot_percentages)
+                                        consistent_high = sum([1 for pct in bot_percentages if pct > 55])
+                                        
+                                        if avg_bot > 60 and consistent_high >= 4:
+                                            accumulation_signals.append("🏛️ Institutional Loading")
+                                            accumulation_score += 3
+                                        elif avg_bot > 55 and consistent_high >= 3:
+                                            accumulation_signals.append("🏦 Smart Money Flow")
+                                            accumulation_score += 2
+                                
+                                # Determine accumulation status
+                                if accumulation_score >= 8:
+                                    accumulation_status = "🔥 HIGH ACCUMULATION"
+                                elif accumulation_score >= 5:
+                                    accumulation_status = "📈 MODERATE ACCUMULATION"
+                                elif accumulation_score >= 2:
+                                    accumulation_status = "👀 EARLY SIGNS"
+                                else:
+                                    accumulation_status = "😴 QUIET"
+                                
+                                # Get price data
+                                current_price = leverage_price_data.get(symbol, {}).get('current_price', 0)
+                                price_change = leverage_price_data.get(symbol, {}).get('change_1d', 0)
+                                
+                                # Get ETF info
+                                etf_info = get_etf_info(symbol)
+                                
+                                leverage_dashboard_data[symbol] = {
+                                    'latest_day': latest,
+                                    'current_price': current_price,
+                                    'price_change_1d': price_change,
+                                    'total_bought_7d': total_bought_7d,
+                                    'total_sold_7d': total_sold_7d,
+                                    'total_volume_7d': total_volume_7d,
+                                    'avg_ratio_7d': avg_ratio_7d,
+                                    'trend_7d': trend_direction,
+                                    'bullish_days_7d': sum([1 for d in last_7_days if d['buy_to_sell_ratio'] > 1.2]),
+                                    'etf_info': etf_info,
+                                    # New accumulation metrics
+                                    'accumulation_score': accumulation_score,
+                                    'accumulation_status': accumulation_status,
+                                    'accumulation_signals': accumulation_signals,
+                                    'vol_acceleration': vol_acceleration if len(last_7_days) >= 7 else 1.0
+                                }
+                    
+                    # Display each category
+                    for category_name, category_data in leverage_categories.items():
+                        with st.expander(f"📊 **{category_name}**", expanded=True):
+                            for stock_name, etf_symbols in category_data.items():
+                                st.markdown(f"### {stock_name}")
+                                
+                                stock_table_data = []
+                                for symbol in etf_symbols:
+                                    if symbol in leverage_dashboard_data:
+                                        data = leverage_dashboard_data[symbol]
+                                        latest = data['latest_day']
+                                        etf_info = data['etf_info']
+                                        
+                                        # Determine direction (Bull/Bear)
+                                        direction = "🐻 Bear" if any(x in etf_info['longName'].upper() for x in ['BEAR', 'SHORT', 'INVERSE']) else "🐂 Bull"
+                                        
+                                        # Get signal and styling info
+                                        signal = get_signal(latest['buy_to_sell_ratio'])
+                                        price_change = data['price_change_1d']
+                                        
+                                        stock_table_data.append({
+                                            'Symbol': symbol,
+                                            'Accumulation': data['accumulation_status'],
+                                            'Score': f"{data['accumulation_score']}/10",
+                                            'Vol Accel': f"{data['vol_acceleration']:.1f}x" if data['vol_acceleration'] != 1.0 else "1.0x",
+                                            'Signal': signal,
+                                            'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                            'Change': f"{price_change:+.1f}%" if price_change != 0 else "0.0%",
+                                            'Buy/Sell': f"{latest['buy_to_sell_ratio']:.2f}" if latest['buy_to_sell_ratio'] != float('inf') else "∞",
+                                            'BOT %': f"{(latest['bought_volume']/(latest['bought_volume']+latest['sold_volume'])*100):.0f}%" if (latest['bought_volume']+latest['sold_volume']) > 0 else "0%",
+                                            'Volume': f"{latest['total_volume']:,.0f}",
+                                            '7d Trend': data['trend_7d'],
+                                            'Bull Days': f"{data['bullish_days_7d']}/7",
+                                            'Name': etf_info['longName'][:35] + "..." if len(etf_info['longName']) > 35 else etf_info['longName'],
+                                            'Direction': direction,
+                                            'Leverage': etf_info['leverage'],
+                                            'Expense': f"{etf_info['expense_ratio']:.2f}%" if isinstance(etf_info['expense_ratio'], (int, float)) else "N/A"
+                                        })
+                                        
+                                        # Add accumulation signals as expandable detail
+                                        if data['accumulation_signals']:
+                                            signal_text = " | ".join(data['accumulation_signals'][:2])  # Show first 2 signals
+                                            stock_table_data[-1]['Signals'] = signal_text
+                                
+                                if stock_table_data:
+                                    stock_df = pd.DataFrame(stock_table_data)
+                                    styled_stock = stock_df.style.applymap(
+                                        style_signal_dark, subset=['Signal']
+                                    ).applymap(
+                                        style_price_change_dark, subset=['Change']
+                                    ).applymap(
+                                        style_ratio_dark, subset=['Buy/Sell']
+                                    ).applymap(
+                                        style_bot_percentage, subset=['BOT %']
+                                    ).applymap(
+                                        style_accumulation_dark, subset=['Accumulation']
+                                    ).set_table_styles([
+                                        {'selector': 'th', 'props': [('background-color', '#2d2d2d'), ('color', '#ffffff'), ('font-weight', 'bold'), ('text-align', 'center'), ('font-size', '10px')]},
+                                        {'selector': 'td', 'props': [('background-color', '#1e1e1e'), ('color', '#ffffff'), ('text-align', 'center'), ('font-size', '9px')]},
+                                        {'selector': 'table', 'props': [('border-collapse', 'collapse'), ('width', '100%')]}
+                                    ])
+                                    st.dataframe(styled_stock, use_container_width=True)
+                                
+                                st.markdown("---")
+                    
+                    # Summary insights
+                    st.markdown("## 💡 **Leverage ETF Insights**")
+                    
+                    # ACCUMULATION SUMMARY
+                    st.markdown("### 🔥 **Top Accumulation Candidates**")
+                    
+                    # Sort by accumulation score
+                    accumulation_candidates = []
+                    for symbol, data in leverage_dashboard_data.items():
+                        if data['accumulation_score'] >= 2:  # Only show meaningful accumulation
+                            accumulation_candidates.append({
+                                'Symbol': symbol,
+                                'Status': data['accumulation_status'],
+                                'Score': data['accumulation_score'],
+                                'Vol Accel': data['vol_acceleration'],
+                                'Signals': " | ".join(data['accumulation_signals'][:3]),
+                                'Price': f"${data['current_price']:.2f}" if data['current_price'] > 0 else "N/A",
+                                'Change': f"{data['price_change_1d']:+.1f}%" if data['price_change_1d'] != 0 else "0.0%"
+                            })
+                    
+                    if accumulation_candidates:
+                        # Sort by score descending
+                        accumulation_candidates.sort(key=lambda x: x['Score'], reverse=True)
+                        
+                        # Show top 10
+                        top_candidates = accumulation_candidates[:10]
+                        acc_df = pd.DataFrame(top_candidates)
+                        
+                        styled_acc = acc_df.style.applymap(
+                            style_accumulation_dark, subset=['Status']
+                        ).applymap(
+                            style_price_change_dark, subset=['Change']
+                        ).set_table_styles([
+                            {'selector': 'th', 'props': [('background-color', '#2d2d2d'), ('color', '#ffffff'), ('font-weight', 'bold'), ('text-align', 'center'), ('font-size', '11px')]},
+                            {'selector': 'td', 'props': [('background-color', '#1e1e1e'), ('color', '#ffffff'), ('text-align', 'center'), ('font-size', '10px')]},
+                            {'selector': 'table', 'props': [('border-collapse', 'collapse'), ('width', '100%')]}
+                        ])
+                        
+                        st.dataframe(styled_acc, use_container_width=True)
+                        
+                        # Quick stats
+                        high_acc = len([c for c in accumulation_candidates if c['Score'] >= 8])
+                        mod_acc = len([c for c in accumulation_candidates if 5 <= c['Score'] < 8])
+                        early_acc = len([c for c in accumulation_candidates if 2 <= c['Score'] < 5])
+                        
+                        col_acc1, col_acc2, col_acc3 = st.columns(3)
+                        col_acc1.metric("🔥 High Accumulation", high_acc)
+                        col_acc2.metric("📈 Moderate Accumulation", mod_acc)
+                        col_acc3.metric("👀 Early Signs", early_acc)
+                        
+                    else:
+                        st.info("No significant accumulation patterns detected in current data.")
+                    
+                    st.markdown("---")
+                    
+                    # Calculate some interesting metrics
+                    bull_etfs = [symbol for symbol in leverage_dashboard_data.keys() 
+                                if not any(x in leverage_dashboard_data[symbol]['etf_info']['longName'].upper() 
+                                         for x in ['BEAR', 'SHORT', 'INVERSE'])]
+                    bear_etfs = [symbol for symbol in leverage_dashboard_data.keys() 
+                                if any(x in leverage_dashboard_data[symbol]['etf_info']['longName'].upper() 
+                                      for x in ['BEAR', 'SHORT', 'INVERSE'])]
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Bull ETFs Analyzed", len(bull_etfs))
+                    col2.metric("Bear ETFs Analyzed", len(bear_etfs))
+                    
+                    # Find highest volume
+                    if leverage_dashboard_data:
+                        highest_volume = max(leverage_dashboard_data.items(), key=lambda x: x[1]['latest_day']['total_volume'])
+                        col3.metric("Highest Volume ETF", highest_volume[0])
+                        
+                        # Find highest ratio
+                        valid_ratios = [(k, v) for k, v in leverage_dashboard_data.items() if v['latest_day']['buy_to_sell_ratio'] != float('inf')]
+                        if valid_ratios:
+                            highest_ratio = max(valid_ratios, key=lambda x: x[1]['latest_day']['buy_to_sell_ratio'])
+                            col4.metric("Highest Buy/Sell Ratio", f"{highest_ratio[0]} ({highest_ratio[1]['latest_day']['buy_to_sell_ratio']:.2f})")
+                        else:
+                            col4.metric("Highest Buy/Sell Ratio", "N/A")
+                
+                else:
+                    st.info("No leverage ETF data available for this date.")
     
     # Watchlist Summary Tab
     with tabs[3]:
