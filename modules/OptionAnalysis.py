@@ -764,7 +764,7 @@ TOP_STOCKS = list(dict.fromkeys([
     # Crypto & Mining
     'MARA', 'RIOT',
     # Misc High Volume
-    'XYZ'
+    'XYZ','IONQ','RGTI','QUBT'
 ]))
 
 @st.cache_data(ttl=900)  # Cache for 15 minutes
