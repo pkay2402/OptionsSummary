@@ -309,27 +309,19 @@ def render_options_section(keyword, days_lookback):
     )
     
     new_count = get_new_symbols_count(keyword, symbols_df)
+    count = len(symbols_df) if not symbols_df.empty else 0
     
-    header = f"📊 {keyword}"
+    # Create header with count and new indicator
+    header = f"{keyword}"
+    if count > 0:
+        header += f" ({count})"
     if new_count > 0:
-        header = f"📊 {keyword} 🔴 {new_count} new"
+        header += f" 🔴 {new_count} new"
     
-    with st.expander(header, expanded=False):
-        info = KEYWORD_DEFINITIONS.get(keyword, {})
-        if info:
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-            with col1:
-                st.info(f"Desc: {info.get('description', 'N/A')}")
-            with col2:
-                st.info(f"Risk Level: {info.get('risk_level', 'N/A')}")
-            with col3:
-                st.info(f"Timeframe: {info.get('timeframe', 'N/A')}")
-            with col4:
-                st.info(f"Suggested Stop: {info.get('suggested_stop', 'N/A')}")
-        
+    with st.expander(header, expanded=True):
         if not symbols_df.empty:
             display_df = symbols_df.copy()
-            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
             
             # Ensure Volume and Open_Interest columns exist
             if 'Volume' not in display_df.columns:
@@ -338,78 +330,83 @@ def render_options_section(keyword, days_lookback):
                 display_df['Open_Interest'] = 'N/A'
             
             # Reorder columns to show most relevant info first
-            column_order = ['Readable_Symbol', 'Date', 'Signal', 'Volume', 'Open_Interest']
+            column_order = ['Readable_Symbol', 'Date', 'Volume', 'Open_Interest']
             display_df = display_df[column_order]
-            st.dataframe(display_df, width=True)
+            
+            # Display with better formatting
+            st.dataframe(
+                display_df, 
+                width=True,
+                hide_index=True,
+                column_config={
+                    "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
+                    "Date": st.column_config.TextColumn("Alert Time", width="medium"),
+                    "Volume": st.column_config.NumberColumn("Volume", format="%d"),
+                    "Open_Interest": st.column_config.NumberColumn("Open Interest", format="%d"),
+                }
+            )
             
             csv = symbols_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label=f"📥 Download {keyword} Data",
+                label="📥 Download CSV",
                 data=csv,
-                file_name=f"{keyword}_alerts_{datetime.date.today()}.csv",
+                file_name=f"{keyword}_{datetime.date.today()}.csv",
                 mime="text/csv",
+                key=f"download_{keyword}"
             )
         else:
-            st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
+            st.info(f"No signals in the last {days_lookback} day(s)")
 
 def run():
     """Main function to run the Streamlit application"""
     # Initialize session state first
     init_session_state()
     
-    # Add sidebar for settings
-    with st.sidebar:
-        st.header("Settings")
-        days_lookback = st.slider(
-            "Days to Look Back",
-            min_value=1,
-            max_value=3,
-            value=1,
-            help="Choose how many days of historical alerts to analyze"
+    # Page config
+    st.title("📈 Options Scanner")
+    
+    # Top bar with settings
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        days_lookback = st.selectbox(
+            "Lookback Period",
+            options=[1, 2, 3],
+            index=1,  # Default to 2 days
+            help="Number of days to analyze"
         )
-        
-        auto_refresh = st.checkbox("Enable Auto-refresh", value=False)
-        if auto_refresh:
-            refresh_interval = st.slider("Refresh Interval (minutes)", 1, 30, 10)
-        
-        st.markdown("---")
+    
+    with col2:
+        auto_refresh = st.checkbox("Auto-refresh (10 min)", value=False)
+    
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.session_state.cached_data.clear()
+            st.session_state.processed_email_ids.clear()
+            get_option_data.cache_clear()
+            st.rerun()
 
-    # Refresh button
-    if st.button("🔄 Refresh Data"):
-        st.session_state.cached_data.clear()
-        st.session_state.processed_email_ids.clear()
-        get_option_data.cache_clear()  # Clear the LRU cache for option data
-        st.rerun()
+    st.markdown("---")
 
     # Auto-refresh logic
     if auto_refresh:
         time_since_refresh = time.time() - st.session_state.last_refresh_time
-        if time_since_refresh >= refresh_interval * 60:
+        if time_since_refresh >= 600:  # 10 minutes
             st.session_state.cached_data.clear()
             st.session_state.processed_email_ids.clear()
             st.session_state.last_refresh_time = time.time()
             st.rerun()
 
     # Options view
-    st.subheader("Options Scans")
     for keyword in OPTION_KEYWORDS:
         render_options_section(keyword, days_lookback)
 
     # Update last refresh time
     st.session_state.last_refresh_time = time.time()
     
-    # Footer
+    # Compact footer
     st.markdown("---")
-    st.markdown("""
-        
-Disclaimer: This tool is for informational purposes only and does not constitute financial advice. 
-            Trade at your own risk.
-            
-Last updated: {}
-        
-        """.format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), 
-        unsafe_allow_html=True
-    )
+    st.caption(f"⚠️ For informational purposes only. Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     run()
