@@ -183,6 +183,76 @@ def get_stock_data(ticker):
         logger.warning(f"Could not fetch stock data for {ticker}: {e}")
         return None
 
+def calculate_gamma_exposure(ticker, expiry_date):
+    """Calculate gamma exposure for a specific ticker and expiration date."""
+    try:
+        stock = yf.Ticker(ticker)
+        current_price = stock.history(period="1d")['Close'].iloc[-1]
+        
+        # Get option chain for the specific date
+        option_chain = stock.option_chain(expiry_date)
+        
+        gamma_data = []
+        
+        # Process calls
+        for _, row in option_chain.calls.iterrows():
+            strike = row['strike']
+            oi = row['openInterest'] if pd.notna(row['openInterest']) else 0
+            volume = row['volume'] if pd.notna(row['volume']) else 0
+            
+            if oi > 0 or volume > 0:
+                # Simplified gamma calculation (actual gamma would require Black-Scholes)
+                # Using approximation: gamma is highest ATM and decreases as you move away
+                distance_from_price = abs(strike - current_price) / current_price
+                gamma_approx = max(0, 1 - distance_from_price * 5)  # Simple approximation
+                
+                gamma_exposure = oi * gamma_approx * 100  # 100 shares per contract
+                gamma_data.append({
+                    'strike': strike,
+                    'type': 'CALL',
+                    'oi': oi,
+                    'volume': volume,
+                    'gamma_exposure': gamma_exposure
+                })
+        
+        # Process puts (negative gamma exposure for dealers)
+        for _, row in option_chain.puts.iterrows():
+            strike = row['strike']
+            oi = row['openInterest'] if pd.notna(row['openInterest']) else 0
+            volume = row['volume'] if pd.notna(row['volume']) else 0
+            
+            if oi > 0 or volume > 0:
+                distance_from_price = abs(strike - current_price) / current_price
+                gamma_approx = max(0, 1 - distance_from_price * 5)
+                
+                gamma_exposure = -oi * gamma_approx * 100  # Negative for puts
+                gamma_data.append({
+                    'strike': strike,
+                    'type': 'PUT',
+                    'oi': oi,
+                    'volume': volume,
+                    'gamma_exposure': gamma_exposure
+                })
+        
+        if not gamma_data:
+            return None, current_price
+        
+        # Create dataframe and aggregate by strike
+        gamma_df = pd.DataFrame(gamma_data)
+        gamma_summary = gamma_df.groupby('strike').agg({
+            'gamma_exposure': 'sum',
+            'oi': 'sum',
+            'volume': 'sum'
+        }).reset_index()
+        
+        gamma_summary = gamma_summary.sort_values('strike')
+        
+        return gamma_summary, current_price
+        
+    except Exception as e:
+        logger.warning(f"Could not calculate gamma for {ticker} {expiry_date}: {e}")
+        return None, None
+
 @lru_cache(maxsize=100)
 def get_option_data(raw_symbol):
     """Fetch option data including volume and open interest."""
@@ -644,6 +714,91 @@ def run():
             🟢 7+ = Strong conviction | 🟡 5-6 = Good setup | ⚪ 3-4 = Standard flow | ⚫ 0-2 = Weak signal
             """)
             
+            # Gamma Analysis Section
+            st.markdown("---")
+            st.markdown("### 📊 Gamma Exposure Analysis")
+            
+            # Get unique ticker-expiry combinations
+            ticker_expiry_combos = []
+            for _, row in all_options_df.iterrows():
+                ticker = row['Ticker']
+                # Extract expiry from readable symbol
+                parts = row['Readable_Symbol'].split()
+                if len(parts) >= 4:
+                    day = parts[1]
+                    month = parts[2]
+                    year = parts[3]
+                    # Convert to YYYY-MM-DD format
+                    month_num = MONTH_NAMES.index(month) + 1
+                    expiry_date = f"{year}-{month_num:02d}-{int(day):02d}"
+                    combo = f"{ticker} - {day} {month} {year}"
+                    if combo not in [c[0] for c in ticker_expiry_combos]:
+                        ticker_expiry_combos.append((combo, ticker, expiry_date))
+            
+            if ticker_expiry_combos:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_combo = st.selectbox(
+                        "Select Ticker & Expiration",
+                        options=[combo[0] for combo in ticker_expiry_combos],
+                        help="View gamma exposure levels for support/resistance"
+                    )
+                
+                with col2:
+                    if st.button("📊 Show Gamma Analysis", use_container_width=True):
+                        # Find the selected combo details
+                        combo_details = next((c for c in ticker_expiry_combos if c[0] == selected_combo), None)
+                        
+                        if combo_details:
+                            ticker, expiry_date = combo_details[1], combo_details[2]
+                            
+                            with st.spinner(f"Analyzing gamma for {ticker}..."):
+                                gamma_df, current_price = calculate_gamma_exposure(ticker, expiry_date)
+                                
+                                if gamma_df is not None and not gamma_df.empty:
+                                    st.markdown(f"#### Gamma Exposure for {selected_combo}")
+                                    st.markdown(f"**Current Price:** ${current_price:.2f}")
+                                    
+                                    # Find key levels
+                                    max_gamma_strike = gamma_df.loc[gamma_df['gamma_exposure'].abs().idxmax(), 'strike']
+                                    net_gamma = gamma_df['gamma_exposure'].sum()
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Net Gamma Exposure", f"{net_gamma:,.0f}")
+                                    with col2:
+                                        st.metric("Max Gamma Strike", f"${max_gamma_strike:.2f}")
+                                    with col3:
+                                        gamma_status = "🟢 Bullish Support" if net_gamma > 0 else "🔴 Bearish Pressure"
+                                        st.metric("Market Bias", gamma_status)
+                                    
+                                    # Display table
+                                    display_gamma = gamma_df.copy()
+                                    display_gamma['Distance %'] = ((display_gamma['strike'] - current_price) / current_price * 100).round(2)
+                                    display_gamma = display_gamma.sort_values('gamma_exposure', ascending=False)
+                                    
+                                    st.dataframe(
+                                        display_gamma,
+                                        use_container_width=True,
+                                        height=400,
+                                        column_config={
+                                            "strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
+                                            "gamma_exposure": st.column_config.NumberColumn("Gamma Exposure", format="%,.0f"),
+                                            "oi": st.column_config.NumberColumn("Open Interest", format="%d"),
+                                            "volume": st.column_config.NumberColumn("Volume", format="%d"),
+                                            "Distance %": st.column_config.NumberColumn("Distance %", format="%.2f%%"),
+                                        }
+                                    )
+                                    
+                                    st.info("""
+                                    **Interpretation:**
+                                    - **Positive Gamma**: Dealers are long gamma, provide support (stabilizing)
+                                    - **Negative Gamma**: Dealers are short gamma, accelerate moves (volatility)
+                                    - **High Gamma Strikes**: Act as magnets - price tends to gravitate toward them
+                                    - **Current Price vs Max Gamma**: Shows if we're above/below key level
+                                    """)
+                                else:
+                                    st.warning(f"No gamma data available for {selected_combo}")
             
             # Download button
             csv = all_options_df.to_csv(index=False).encode('utf-8')
