@@ -154,7 +154,10 @@ def get_option_data(raw_symbol):
             logger.warning(f"Could not parse option symbol: {raw_symbol}")
             return None, None
         
-        ticker, year, month, day, opt_type, strike = match.groups()
+        ticker, year, month, day, opt_type, strike_str = match.groups()
+        
+        # Convert strike to float
+        strike_price = float(strike_str.replace('_', '.'))
         
         # Construct expiration date (YYYY-MM-DD format)
         expiry_date = f"20{year}-{month}-{day}"
@@ -166,7 +169,7 @@ def get_option_data(raw_symbol):
         expirations = stock.options
         
         if expiry_date not in expirations:
-            logger.warning(f"Expiration date {expiry_date} not found for {ticker}")
+            logger.warning(f"Expiration date {expiry_date} not found for {ticker}. Available: {expirations[:5] if len(expirations) > 0 else 'None'}")
             return None, None
         
         # Get option chain for the specific date
@@ -178,10 +181,20 @@ def get_option_data(raw_symbol):
         else:
             chain = option_chain.puts
         
-        # Search for matching contract symbol
+        # Try to match by contract symbol (with and without dot)
         matching_options = chain[chain['contractSymbol'] == raw_symbol]
         
+        if matching_options.empty:
+            # Try without the leading dot
+            matching_options = chain[chain['contractSymbol'] == symbol]
+        
+        # If still not found, try matching by strike price (with small tolerance for floating point)
+        if matching_options.empty:
+            strike_tolerance = 0.01
+            matching_options = chain[abs(chain['strike'] - strike_price) < strike_tolerance]
+        
         if not matching_options.empty:
+            # If multiple matches, take the first one (should be rare)
             volume = matching_options['volume'].values[0]
             open_interest = matching_options['openInterest'].values[0]
             
@@ -192,7 +205,7 @@ def get_option_data(raw_symbol):
             logger.info(f"Fetched data for {raw_symbol}: Volume={volume}, OI={open_interest}")
             return volume, open_interest
         else:
-            logger.warning(f"Contract {raw_symbol} not found in option chain")
+            logger.warning(f"Contract {raw_symbol} (strike={strike_price}) not found in option chain for {ticker} {expiry_date}")
             return None, None
         
     except Exception as e:
