@@ -365,7 +365,8 @@ def run():
         if st.button("🔄 Refresh", use_container_width=True):
             st.session_state.cached_data.clear()
             st.session_state.processed_email_ids.clear()
-            get_option_data.cache_clear()
+            st.session_state.previous_symbols.clear()
+            get_option_data.cache_clear()  # Clear yfinance data cache
             st.rerun()
 
     st.markdown("---")
@@ -391,11 +392,16 @@ def run():
             # Format date
             all_options_df['Date'] = all_options_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
             
-            # Ensure Volume and Open_Interest columns exist
+            # Ensure Volume and Open_Interest columns exist with proper defaults
             if 'Volume' not in all_options_df.columns:
                 all_options_df['Volume'] = 'N/A'
             if 'Open_Interest' not in all_options_df.columns:
                 all_options_df['Open_Interest'] = 'N/A'
+            
+            # Debug: Check what's in the columns
+            logger.info(f"Combined dataframe columns: {all_options_df.columns.tolist()}")
+            logger.info(f"Sample Volume values: {all_options_df['Volume'].head().tolist() if 'Volume' in all_options_df.columns else 'Column missing'}")
+            logger.info(f"Sample OI values: {all_options_df['Open_Interest'].head().tolist() if 'Open_Interest' in all_options_df.columns else 'Column missing'}")
             
             # Sort by ticker, then by date
             all_options_df = all_options_df.sort_values(['Ticker', 'Date'], ascending=[True, False])
