@@ -841,7 +841,7 @@ def run():
             top_flows = all_options_df.nlargest(20, 'Score')
             
             # Get most active tickers
-            ticker_counts = all_options_df['Ticker'].value_counts().head(5)
+            ticker_counts = all_options_df['Ticker'].value_counts().head(10)
             
             # Category breakdown
             category_counts = all_options_df['Category'].str.split(', ').explode().value_counts()
