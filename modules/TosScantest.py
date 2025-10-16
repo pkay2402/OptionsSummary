@@ -8,6 +8,8 @@ from dateutil import parser
 import time
 from bs4 import BeautifulSoup
 import logging
+import yfinance as yf
+from functools import lru_cache
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -140,6 +142,39 @@ def parse_option_symbol(option_symbol):
 
     return option_symbol
 
+@lru_cache(maxsize=100)
+def get_option_data(raw_symbol):
+    """Fetch option data including volume and open interest."""
+    try:
+        # Parse the raw symbol to get ticker and option details
+        symbol = raw_symbol.lstrip('.')
+        match = OPTION_PATTERN.match(symbol)
+        
+        if not match:
+            return None, None
+        
+        ticker = match.group(1)
+        
+        # Get option chain data
+        stock = yf.Ticker(ticker)
+        
+        # Try to get the option data
+        option_info = stock.option_chain()
+        
+        # Search in calls and puts
+        for chain in [option_info.calls, option_info.puts]:
+            matching_options = chain[chain['contractSymbol'] == raw_symbol]
+            if not matching_options.empty:
+                volume = matching_options['volume'].values[0] if 'volume' in matching_options else 0
+                open_interest = matching_options['openInterest'].values[0] if 'openInterest' in matching_options else 0
+                return volume, open_interest
+        
+        return None, None
+        
+    except Exception as e:
+        logger.warning(f"Could not fetch option data for {raw_symbol}: {e}")
+        return None, None
+
 def extract_option_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
     """Extract option symbols from email alerts."""
     if keyword in st.session_state.cached_data:
@@ -203,6 +238,19 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         if option_data:
             df = pd.DataFrame(option_data, columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
             df = df.sort_values(by=['Date', 'Raw_Symbol']).drop_duplicates(subset=['Raw_Symbol', 'Signal', 'Date'], keep='last')
+            
+            # Add volume and open interest data
+            volumes = []
+            open_interests = []
+            
+            for raw_symbol in df['Raw_Symbol']:
+                volume, oi = get_option_data(raw_symbol)
+                volumes.append(volume if volume is not None else 'N/A')
+                open_interests.append(oi if oi is not None else 'N/A')
+            
+            df['Volume'] = volumes
+            df['Open_Interest'] = open_interests
+            
             st.session_state.cached_data[keyword] = df
             return df
 
@@ -242,7 +290,9 @@ def render_options_section(keyword, days_lookback):
         if not symbols_df.empty:
             display_df = symbols_df.copy()
             display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            display_df = display_df.drop('Raw_Symbol', axis=1)
+            # Reorder columns to show most relevant info first
+            column_order = ['Readable_Symbol', 'Date', 'Signal', 'Volume', 'Open_Interest']
+            display_df = display_df[column_order]
             st.dataframe(display_df, use_container_width=True)
             
             csv = symbols_df.to_csv(index=False).encode('utf-8')
