@@ -162,6 +162,11 @@ def get_option_data(raw_symbol):
         # Construct expiration date (YYYY-MM-DD format)
         expiry_date = f"20{year}-{month}-{day}"
         
+        # Construct yfinance contract symbol format: TICKER + YYMMDD + C/P + strike*1000 padded to 8 digits
+        # Example: BAC251219C00057500 for BAC $57.5 Call expiring 12/19/2025
+        strike_int = int(strike_price * 1000)
+        yf_contract_symbol = f"{ticker}{year}{month}{day}{opt_type}{strike_int:08d}"
+        
         # Get option chain data for the specific expiration date
         stock = yf.Ticker(ticker)
         
@@ -181,15 +186,12 @@ def get_option_data(raw_symbol):
         else:
             chain = option_chain.puts
         
-        # Try to match by contract symbol (with and without dot)
-        matching_options = chain[chain['contractSymbol'] == raw_symbol]
-        
-        if matching_options.empty:
-            # Try without the leading dot
-            matching_options = chain[chain['contractSymbol'] == symbol]
+        # Try to match by yfinance contract symbol format
+        matching_options = chain[chain['contractSymbol'] == yf_contract_symbol]
         
         # If still not found, try matching by strike price (with small tolerance for floating point)
         if matching_options.empty:
+            logger.info(f"Exact match not found for {yf_contract_symbol}, trying strike price match")
             strike_tolerance = 0.01
             matching_options = chain[abs(chain['strike'] - strike_price) < strike_tolerance]
         
@@ -197,15 +199,16 @@ def get_option_data(raw_symbol):
             # If multiple matches, take the first one (should be rare)
             volume = matching_options['volume'].values[0]
             open_interest = matching_options['openInterest'].values[0]
+            contract_found = matching_options['contractSymbol'].values[0]
             
             # Handle NaN values
             volume = int(volume) if pd.notna(volume) else 0
             open_interest = int(open_interest) if pd.notna(open_interest) else 0
             
-            logger.info(f"Fetched data for {raw_symbol}: Volume={volume}, OI={open_interest}")
+            logger.info(f"Fetched data for {raw_symbol} -> {contract_found}: Volume={volume}, OI={open_interest}")
             return volume, open_interest
         else:
-            logger.warning(f"Contract {raw_symbol} (strike={strike_price}) not found in option chain for {ticker} {expiry_date}")
+            logger.warning(f"Contract {raw_symbol} -> {yf_contract_symbol} (strike={strike_price}) not found in option chain for {ticker} {expiry_date}")
             return None, None
         
     except Exception as e:
