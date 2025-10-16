@@ -838,7 +838,7 @@ def run():
             today_str = datetime.datetime.now().strftime('%B %d, %Y')
             
             # Get top flows by AI score
-            top_flows = all_options_df.nlargest(10, 'Score')
+            top_flows = all_options_df.nlargest(20, 'Score')
             
             # Get most active tickers
             ticker_counts = all_options_df['Ticker'].value_counts().head(5)
