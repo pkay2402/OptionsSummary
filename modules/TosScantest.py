@@ -11,6 +11,14 @@ import logging
 import yfinance as yf
 from functools import lru_cache
 
+# Page configuration - must be first Streamlit command
+st.set_page_config(
+    page_title="Options Scanner",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -302,71 +310,37 @@ def extract_option_symbols_from_email(email_address, password, sender_email, key
         st.error(f"Error processing emails: {str(e)}")
         return empty_df
 
-def render_options_section(keyword, days_lookback):
-    """Helper function to render options section content"""
-    symbols_df = extract_option_symbols_from_email(
-        EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
-    )
+def get_all_options_data(days_lookback):
+    """Fetch all options data from all keywords and combine into one dataframe."""
+    all_data = []
     
-    new_count = get_new_symbols_count(keyword, symbols_df)
-    count = len(symbols_df) if not symbols_df.empty else 0
-    
-    # Create header with count and new indicator
-    header = f"{keyword}"
-    if count > 0:
-        header += f" ({count})"
-    if new_count > 0:
-        header += f" 🔴 {new_count} new"
-    
-    with st.expander(header, expanded=True):
+    for keyword in OPTION_KEYWORDS:
+        symbols_df = extract_option_symbols_from_email(
+            EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
+        )
+        
         if not symbols_df.empty:
-            display_df = symbols_df.copy()
-            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
-            
-            # Ensure Volume and Open_Interest columns exist
-            if 'Volume' not in display_df.columns:
-                display_df['Volume'] = 'N/A'
-            if 'Open_Interest' not in display_df.columns:
-                display_df['Open_Interest'] = 'N/A'
-            
-            # Reorder columns to show most relevant info first
-            column_order = ['Readable_Symbol', 'Date', 'Volume', 'Open_Interest']
-            display_df = display_df[column_order]
-            
-            # Display with better formatting
-            st.dataframe(
-                display_df, 
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
-                    "Date": st.column_config.TextColumn("Alert Time", width="medium"),
-                    "Volume": st.column_config.NumberColumn("Volume", format="%d"),
-                    "Open_Interest": st.column_config.NumberColumn("Open Interest", format="%d"),
-                }
-            )
-            
-            csv = symbols_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"{keyword}_{datetime.date.today()}.csv",
-                mime="text/csv",
-                key=f"download_{keyword}"
-            )
-        else:
-            st.info(f"No signals in the last {days_lookback} day(s)")
+            # Add category column
+            df_copy = symbols_df.copy()
+            df_copy['Category'] = keyword
+            all_data.append(df_copy)
+    
+    if all_data:
+        combined_df = pd.concat(all_data, ignore_index=True)
+        return combined_df
+    else:
+        return pd.DataFrame()
 
 def run():
     """Main function to run the Streamlit application"""
     # Initialize session state first
     init_session_state()
     
-    # Page config
+    # Page header
     st.title("📈 Options Scanner")
     
     # Top bar with settings
-    col1, col2, col3 = st.columns([2, 2, 1])
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
     
     with col1:
         days_lookback = st.selectbox(
@@ -377,9 +351,17 @@ def run():
         )
     
     with col2:
-        auto_refresh = st.checkbox("Auto-refresh (10 min)", value=False)
+        view_mode = st.radio(
+            "View Mode",
+            options=["Combined", "By Category"],
+            horizontal=True,
+            help="View all options together or separated by category"
+        )
     
     with col3:
+        auto_refresh = st.checkbox("Auto-refresh (10 min)", value=False)
+    
+    with col4:
         if st.button("🔄 Refresh", use_container_width=True):
             st.session_state.cached_data.clear()
             st.session_state.processed_email_ids.clear()
@@ -397,9 +379,112 @@ def run():
             st.session_state.last_refresh_time = time.time()
             st.rerun()
 
-    # Options view
-    for keyword in OPTION_KEYWORDS:
-        render_options_section(keyword, days_lookback)
+    # Display options based on view mode
+    if view_mode == "Combined":
+        # Get all options data combined
+        all_options_df = get_all_options_data(days_lookback)
+        
+        if not all_options_df.empty:
+            # Extract ticker from readable symbol for grouping
+            all_options_df['Ticker'] = all_options_df['Readable_Symbol'].str.split().str[0]
+            
+            # Format date
+            all_options_df['Date'] = all_options_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Ensure Volume and Open_Interest columns exist
+            if 'Volume' not in all_options_df.columns:
+                all_options_df['Volume'] = 'N/A'
+            if 'Open_Interest' not in all_options_df.columns:
+                all_options_df['Open_Interest'] = 'N/A'
+            
+            # Sort by ticker, then by date
+            all_options_df = all_options_df.sort_values(['Ticker', 'Date'], ascending=[True, False])
+            
+            # Reorder columns
+            column_order = ['Ticker', 'Readable_Symbol', 'Category', 'Date', 'Volume', 'Open_Interest']
+            display_df = all_options_df[column_order]
+            
+            # Display metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Alerts", len(display_df))
+            with col2:
+                st.metric("Unique Tickers", display_df['Ticker'].nunique())
+            with col3:
+                st.metric("Categories", display_df['Category'].nunique())
+            
+            st.markdown("### All Options Flows")
+            
+            # Display with better formatting
+            st.dataframe(
+                display_df, 
+                use_container_width=True,
+                hide_index=True,
+                height=600,
+                column_config={
+                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                    "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
+                    "Category": st.column_config.TextColumn("Category", width="medium"),
+                    "Date": st.column_config.TextColumn("Alert Time", width="medium"),
+                    "Volume": st.column_config.NumberColumn("Volume", format="%d"),
+                    "Open_Interest": st.column_config.NumberColumn("Open Interest", format="%d"),
+                }
+            )
+            
+            # Download button
+            csv = all_options_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download All Data",
+                data=csv,
+                file_name=f"all_options_{datetime.date.today()}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info(f"No signals found in the last {days_lookback} day(s)")
+    
+    else:  # By Category view
+        for keyword in OPTION_KEYWORDS:
+            symbols_df = extract_option_symbols_from_email(
+                EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
+            )
+            
+            count = len(symbols_df) if not symbols_df.empty else 0
+            
+            with st.expander(f"{keyword} ({count})", expanded=False):
+                if not symbols_df.empty:
+                    display_df = symbols_df.copy()
+                    display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
+                    
+                    if 'Volume' not in display_df.columns:
+                        display_df['Volume'] = 'N/A'
+                    if 'Open_Interest' not in display_df.columns:
+                        display_df['Open_Interest'] = 'N/A'
+                    
+                    column_order = ['Readable_Symbol', 'Date', 'Volume', 'Open_Interest']
+                    display_df = display_df[column_order]
+                    
+                    st.dataframe(
+                        display_df, 
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
+                            "Date": st.column_config.TextColumn("Alert Time", width="medium"),
+                            "Volume": st.column_config.NumberColumn("Volume", format="%d"),
+                            "Open_Interest": st.column_config.NumberColumn("Open Interest", format="%d"),
+                        }
+                    )
+                    
+                    csv = symbols_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"{keyword}_{datetime.date.today()}.csv",
+                        mime="text/csv",
+                        key=f"download_{keyword}"
+                    )
+                else:
+                    st.info(f"No signals in the last {days_lookback} day(s)")
 
     # Update last refresh time
     st.session_state.last_refresh_time = time.time()
