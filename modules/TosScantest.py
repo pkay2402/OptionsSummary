@@ -5,13 +5,12 @@ import re
 import datetime
 import pandas as pd
 from dateutil import parser
+import yfinance as yf
 import time
 from bs4 import BeautifulSoup
 from functools import lru_cache
 import logging
 from concurrent.futures import ThreadPoolExecutor
-import yfinance as yf
-import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,14 +37,159 @@ SENDER_EMAIL = "alerts@thinkorswim.com"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
-# Define keywords for different scan types with their signal types
-Lower_timeframe_KEYWORDS = ["tmo_long", "tmo_Short"]
-DAILY_KEYWORDS = ["Long_IT_volume", "Short_IT_volume","vpb_buy","vpb_sell", "demark13_buy", "demark13_sell","bull_Daily_sqz", 
+# Define keywords for different scan types
+Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "sqz_30", "tmo_long", "tmo_Short"]
+DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "demark13_buy", "demark13_sell","bull_Daily_sqz", 
 "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short","StockReversalLong","StockReversalShort"]
+OPTION_KEYWORDS = ["ETF_options", "UOP_Call","call_swing","put_swing"]
 
-# Define signal types
-LONG_SIGNALS = ["tmo_long", "Long_IT_volume", "vpb_buy", "demark13_buy", "bull_Daily_sqz", "LSMHG_Long", "StockReversalLong"]
-SHORT_SIGNALS = ["tmo_Short", "Short_IT_volume", "vpb_sell", "demark13_sell", "bear_Daily_sqz", "LSMHG_Short", "StockReversalShort"]
+# Keyword definitions with added risk levels and descriptions
+KEYWORD_DEFINITIONS = {
+    "Long_VP": {
+        "description": "Volume Profile based long signal.",
+        "risk_level": "Medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below the volume node"
+    },
+    "Short_VP": {
+        "description": "Volume Profile based short signal.",
+        "risk_level": "Medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above the volume node"
+    },
+    "orb_bull": {
+        "description": "10 mins 9 ema crossed above opening range high of 30mins",
+        "risk_level": "high",
+        "timeframe": "Intraday",
+        "suggested_stop": "Below the ORB high"
+    },
+    "orb_bear": {
+        "description": "10 mins 9 ema crossed below opening range low of 30mins",
+        "risk_level": "high",
+        "timeframe": "Intraday",
+        "suggested_stop": "Above the ORB low"
+    },
+    "volume_scan": {
+        "description": "high intrday volume and stock atleast 2% up",
+        "risk_level": "high",
+        "timeframe": "Intraday. Enter at vwap test/and trading above 9 ema on 10mins",
+        "suggested_stop": "below vwap"
+    },
+    "tmo_long": {
+        "description": "oversold stocks entering bullish momentum on 60mins",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "below recent low/support"
+    },
+    "tmo_Short": {
+        "description": "overbought stocks entering losing bullish momentum on 60mins",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above recent high/resistance"
+    },
+    "HighVolumeSymbols": {
+        "description": "On Daily TF stocks consistently trading above high volume. High volumes leads to change in trends. This can be bullish or bearish",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below high volume node"
+    },
+    "Long_IT_volume": {
+        "description": "On Daily TF stocks breaking out 9ema above high volume node",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below high volume node"
+    },
+    "Short_IT_volume": {
+        "description": "On Daily TF stocks breaking down 9ema below low volume node",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above low volume node"
+    },
+    "bull_Daily_sqz": {
+        "description": "On Daily TF stocks breaking out of large squeeze",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Below low of previous day"
+    },
+    "bear_Daily_sqz": {
+        "description": "On Daily TF stocks breaking down of large squeeze",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above high of previous day"
+    },
+    "LSMHG_Long": {
+        "description": "On Daily TF stocks being bought on 1 yr low area and macd has crossed over",
+        "risk_level": "medium",
+        "timeframe": "1-2 months",
+        "suggested_stop": "Below low of previous day"
+    },
+    "LSMHG_Short": {
+        "description": "On Daily TF stocks being sold on 1 yr high area and macd has crossed under",
+        "risk_level": "medium",
+        "timeframe": "2 weeks",
+        "suggested_stop": "Above high of previous day"
+    },
+    "StockReversalLong": {
+        "description": "On Daily TF stocks now showing signs of bull reversal",
+        "risk_level": "medium",
+        "timeframe": "2 weeks-1 month",
+        "suggested_stop": "Below low of previous day"
+    },
+    "StockReversalShort": {
+        "description": "On Daily TF stocks now showing signs of bear reversal",
+        "risk_level": "medium",
+        "timeframe": "2 weeks-1 month",
+        "suggested_stop": "Above high of previous day"
+    },
+    "ETF_options": {
+        "description": "ETF options showing potential momentum setups",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "UOP_Call": {
+        "description": "Unusual options activity scanner for calls",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "call_swing": {
+        "description": "stock options showing potential momentum setups",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    },
+    "put_swing": {
+        "description": "stock options showing potential bearish setups",
+        "risk_level": "High",
+        "timeframe": "As per expiry date",
+        "suggested_stop": "Based on risk apetite"
+    }
+}
+
+@lru_cache(maxsize=2)
+def get_spy_qqq_prices():
+    """Fetch the latest closing prices and daily changes for SPY and QQQ with caching."""
+    try:
+        spy = yf.Ticker("SPY")
+        qqq = yf.Ticker("QQQ")
+        
+        spy_hist = spy.history(period="2d")
+        qqq_hist = qqq.history(period="2d")
+        
+        spy_price = round(spy_hist['Close'].iloc[-1], 2)
+        qqq_price = round(qqq_hist['Close'].iloc[-1], 2)
+        
+        spy_prev_close = spy_hist['Close'].iloc[-2]
+        qqq_prev_close = qqq_hist['Close'].iloc[-2]
+        
+        spy_change = round(((spy_price - spy_prev_close) / spy_prev_close) * 100, 2)
+        qqq_change = round(((qqq_price - qqq_prev_close) / qqq_prev_close) * 100, 2)
+        
+        return spy_price, qqq_price, spy_change, qqq_change
+    except Exception as e:
+        logger.error(f"Error fetching market prices: {e}")
+        return None, None, None, None
 
 def connect_to_email(retries=MAX_RETRIES):
     """Establish email connection with retry logic."""
@@ -80,150 +224,6 @@ def parse_email_body(msg):
     except Exception as e:
         logger.error(f"Error parsing email body: {e}")
         return ""
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_stock_data(symbol):
-    """Get stock data from yfinance with caching."""
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="3mo")  # 3 months of data
-        info = ticker.info
-        
-        if hist.empty:
-            return None
-            
-        current_price = hist['Close'].iloc[-1]
-        volume = hist['Volume'].iloc[-1]
-        avg_volume = hist['Volume'].rolling(20).mean().iloc[-1]
-        
-        # Technical indicators
-        sma_20 = hist['Close'].rolling(20).mean().iloc[-1]
-        sma_50 = hist['Close'].rolling(50).mean().iloc[-1]
-        
-        # Price momentum
-        price_change_1d = ((current_price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
-        price_change_5d = ((current_price - hist['Close'].iloc[-6]) / hist['Close'].iloc[-6]) * 100
-        price_change_20d = ((current_price - hist['Close'].iloc[-21]) / hist['Close'].iloc[-21]) * 100
-        
-        # Volatility
-        volatility = hist['Close'].pct_change().std() * np.sqrt(252) * 100
-        
-        # 52-week high/low
-        high_52w = hist['High'].max()
-        low_52w = hist['Low'].min()
-        
-        return {
-            'symbol': symbol,
-            'current_price': current_price,
-            'volume': volume,
-            'avg_volume': avg_volume,
-            'volume_ratio': volume / avg_volume if avg_volume > 0 else 0,
-            'sma_20': sma_20,
-            'sma_50': sma_50,
-            'price_vs_sma20': ((current_price - sma_20) / sma_20) * 100,
-            'price_vs_sma50': ((current_price - sma_50) / sma_50) * 100,
-            'price_change_1d': price_change_1d,
-            'price_change_5d': price_change_5d,
-            'price_change_20d': price_change_20d,
-            'volatility': volatility,
-            'high_52w': high_52w,
-            'low_52w': low_52w,
-            'distance_from_52w_high': ((current_price - high_52w) / high_52w) * 100,
-            'distance_from_52w_low': ((current_price - low_52w) / low_52w) * 100,
-            'market_cap': info.get('marketCap', 0),
-            'sector': info.get('sector', 'Unknown')
-        }
-    except Exception as e:
-        logger.error(f"Error getting data for {symbol}: {e}")
-        return None
-
-def calculate_stock_score(stock_data, signal_type):
-    """Calculate a score for stock based on technical indicators."""
-    if not stock_data:
-        return 0
-    
-    score = 0
-    
-    # Volume scoring (higher is better)
-    if stock_data['volume_ratio'] > 2:
-        score += 20
-    elif stock_data['volume_ratio'] > 1.5:
-        score += 15
-    elif stock_data['volume_ratio'] > 1.2:
-        score += 10
-    
-    # Price momentum scoring
-    if signal_type == 'long':
-        # For long signals, positive momentum is better
-        if stock_data['price_change_1d'] > 2:
-            score += 15
-        elif stock_data['price_change_1d'] > 0:
-            score += 10
-        elif stock_data['price_change_1d'] < -2:
-            score -= 10
-            
-        if stock_data['price_change_5d'] > 5:
-            score += 15
-        elif stock_data['price_change_5d'] > 0:
-            score += 10
-        elif stock_data['price_change_5d'] < -5:
-            score -= 10
-            
-        # Price vs moving averages (above is better for long)
-        if stock_data['price_vs_sma20'] > 0:
-            score += 10
-        if stock_data['price_vs_sma50'] > 0:
-            score += 10
-            
-    else:  # short signals
-        # For short signals, negative momentum is better
-        if stock_data['price_change_1d'] < -2:
-            score += 15
-        elif stock_data['price_change_1d'] < 0:
-            score += 10
-        elif stock_data['price_change_1d'] > 2:
-            score -= 10
-            
-        if stock_data['price_change_5d'] < -5:
-            score += 15
-        elif stock_data['price_change_5d'] < 0:
-            score += 10
-        elif stock_data['price_change_5d'] > 5:
-            score -= 10
-            
-        # Price vs moving averages (below is better for short)
-        if stock_data['price_vs_sma20'] < 0:
-            score += 10
-        if stock_data['price_vs_sma50'] < 0:
-            score += 10
-    
-    # Volatility scoring (moderate volatility is preferred)
-    if 20 <= stock_data['volatility'] <= 40:
-        score += 10
-    elif stock_data['volatility'] > 60:
-        score -= 10
-    
-    # Distance from 52-week highs/lows
-    if signal_type == 'long':
-        # For long, being closer to 52w low is better (more upside potential)
-        if stock_data['distance_from_52w_low'] < 20:
-            score += 15
-        elif stock_data['distance_from_52w_low'] < 50:
-            score += 10
-    else:  # short signals
-        # For short, being closer to 52w high is better (more downside potential)
-        if stock_data['distance_from_52w_high'] > -20:
-            score += 15
-        elif stock_data['distance_from_52w_high'] > -50:
-            score += 10
-    
-    # Market cap scoring (prefer liquid stocks)
-    if stock_data['market_cap'] > 10_000_000_000:  # > $10B
-        score += 10
-    elif stock_data['market_cap'] > 1_000_000_000:  # > $1B
-        score += 5
-    
-    return max(0, score)  # Ensure non-negative score
 
 def extract_stock_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
     """Extract stock symbols from email alerts with proper date filtering."""
@@ -308,6 +308,90 @@ def get_new_symbols_count(keyword, current_df):
     
     return len(new_symbols)
 
+def parse_option_symbol(option_symbol):
+    """Parse option symbol into readable format."""
+    try:
+        symbol = option_symbol.lstrip('.')
+        pattern = r'([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])([\d_]+)'
+        match = re.match(pattern, symbol)
+        
+        if match:
+            Ticker, year, month, day, opt_type, strike = match.groups()
+            month_name = datetime.datetime.strptime(month, '%m').strftime('%b').upper()
+            strike = strike.replace('_', '.')
+            option_type = 'CALL' if opt_type == 'C' else 'PUT'
+            return f"{Ticker} {day} {month_name} 20{year} {strike} {option_type}"
+    
+    except Exception as e:
+        logger.error(f"Error parsing option symbol {option_symbol}: {e}")
+
+    return option_symbol
+
+def extract_option_symbols_from_email(email_address, password, sender_email, keyword, days_lookback):
+    """Extract option symbols from email alerts."""
+    if keyword in st.session_state.cached_data:
+        return st.session_state.cached_data[keyword]
+
+    try:
+        mail = connect_to_email()
+        mail.select('inbox')
+
+        today = datetime.date.today()
+        start_date = today
+        if days_lookback > 1:
+            start_date = today - datetime.timedelta(days=days_lookback-1)
+            
+        date_since = start_date.strftime("%d-%b-%Y")
+        search_criteria = f'(FROM "{sender_email}" SUBJECT "{keyword}" SINCE "{date_since}")'
+        _, data = mail.search(None, search_criteria)
+
+        option_data = []
+        
+        for num in data[0].split():
+            if num in st.session_state.processed_email_ids:
+                continue
+
+            _, data = mail.fetch(num, '(RFC822)')
+            msg = email.message_from_bytes(data[0][1])
+            
+            email_datetime = parser.parse(msg['Date'])
+            email_date = email_datetime.date()
+            
+            if email_date < start_date or email_datetime.weekday() >= 5:
+                continue
+
+            body = parse_email_body(msg)
+            symbols = re.findall(r'New symbols:\s*([\.\w,\s]+)\s*were added to\s*(' + re.escape(keyword) + ')', body)
+            
+            if symbols:
+                for symbol_group in symbols:
+                    extracted_symbols = symbol_group[0].replace(" ", "").split(",")
+                    signal_type = symbol_group[1]
+                    for symbol in extracted_symbols:
+                        if symbol:
+                            readable_symbol = parse_option_symbol(symbol)
+                            option_data.append([symbol, readable_symbol, email_datetime, signal_type])
+            
+            st.session_state.processed_email_ids.add(num)
+
+        mail.close()
+        mail.logout()
+
+        if option_data:
+            df = pd.DataFrame(option_data, columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+            df = df.sort_values(by=['Date', 'Raw_Symbol']).drop_duplicates(subset=['Raw_Symbol', 'Signal', 'Date'], keep='last')
+            st.session_state.cached_data[keyword] = df
+            return df
+
+        empty_df = pd.DataFrame(columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+        st.session_state.cached_data[keyword] = empty_df
+        return empty_df
+
+    except Exception as e:
+        logger.error(f"Error in extract_option_symbols_from_email: {e}")
+        st.error(f"Error processing emails: {str(e)}")
+        return pd.DataFrame(columns=['Raw_Symbol', 'Readable_Symbol', 'Date', 'Signal'])
+
 def high_conviction_stocks(dataframes, ignore_keywords=None):
     """Find stocks with high conviction - at least two unique keyword matches on the same date."""
     if ignore_keywords is None:
@@ -322,57 +406,46 @@ def high_conviction_stocks(dataframes, ignore_keywords=None):
     
     return grouped[grouped['Count'] >= 2][['Date', 'Ticker', 'Signal']]
 
-def analyze_stocks_with_prices(df, signal_type):
-    """Analyze stocks with price data and scoring."""
-    if df.empty:
-        return pd.DataFrame()
+def render_options_section(keyword, days_lookback):
+    """Helper function to render options section content"""
+    symbols_df = extract_option_symbols_from_email(
+        EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
+    )
     
-    analyzed_stocks = []
+    new_count = get_new_symbols_count(keyword, symbols_df)
     
-    # Get unique symbols
-    symbols = df['Ticker'].unique()
+    header = f"📊 {keyword}"
+    if new_count > 0:
+        header = f"📊 {keyword} 🔴 {new_count} new"
     
-    # Use progress bar for stock analysis
-    progress_bar = st.progress(0)
-    
-    for i, symbol in enumerate(symbols):
-        progress_bar.progress((i + 1) / len(symbols))
+    with st.expander(header, expanded=False):
+        info = KEYWORD_DEFINITIONS.get(keyword, {})
+        if info:
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+            with col1:
+                st.info(f"Desc: {info.get('description', 'N/A')}")
+            with col2:
+                st.info(f"Risk Level: {info.get('risk_level', 'N/A')}")
+            with col3:
+                st.info(f"Timeframe: {info.get('timeframe', 'N/A')}")
+            with col4:
+                st.info(f"Suggested Stop: {info.get('suggested_stop', 'N/A')}")
         
-        stock_data = get_stock_data(symbol)
-        if stock_data:
-            # Calculate score
-            score = calculate_stock_score(stock_data, signal_type)
+        if not symbols_df.empty:
+            display_df = symbols_df.copy()
+            display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            display_df = display_df.drop('Raw_Symbol', axis=1)
+            st.dataframe(display_df, use_container_width=True)
             
-            # Get signal info
-            symbol_signals = df[df['Ticker'] == symbol]
-            latest_signal = symbol_signals.iloc[-1]
-            
-            analyzed_stocks.append({
-                'Ticker': symbol,
-                'Current_Price': stock_data['current_price'],
-                'Score': score,
-                'Volume_Ratio': stock_data['volume_ratio'],
-                'Price_Change_1D': stock_data['price_change_1d'],
-                'Price_Change_5D': stock_data['price_change_5d'],
-                'Price_vs_SMA20': stock_data['price_vs_sma20'],
-                'Price_vs_SMA50': stock_data['price_vs_sma50'],
-                'Volatility': stock_data['volatility'],
-                'Distance_52W_High': stock_data['distance_from_52w_high'],
-                'Distance_52W_Low': stock_data['distance_from_52w_low'],
-                'Market_Cap': stock_data['market_cap'],
-                'Sector': stock_data['sector'],
-                'Signal': latest_signal['Signal'],
-                'Signal_Date': latest_signal['Date']
-            })
-    
-    progress_bar.empty()
-    
-    if analyzed_stocks:
-        result_df = pd.DataFrame(analyzed_stocks)
-        result_df = result_df.sort_values('Score', ascending=False)
-        return result_df
-    
-    return pd.DataFrame()
+            csv = symbols_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Download {keyword} Data",
+                data=csv,
+                file_name=f"{keyword}_alerts_{datetime.date.today()}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
 
 def render_stock_section(keyword, days_lookback):
     """Helper function to render stock section content"""
@@ -387,6 +460,18 @@ def render_stock_section(keyword, days_lookback):
         header = f"📊 {keyword} 🔴 {new_count} new"
     
     with st.expander(header, expanded=False):
+        info = KEYWORD_DEFINITIONS.get(keyword, {})
+        if info:
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+            with col1:
+                st.info(f"Desc: {info.get('description', 'N/A')}")
+            with col2:
+                st.info(f"Risk Level: {info.get('risk_level', 'N/A')}")
+            with col3:
+                st.info(f"Timeframe: {info.get('timeframe', 'N/A')}")
+            with col4:
+                st.info(f"Suggested Stop: {info.get('suggested_stop', 'N/A')}")
+        
         if not symbols_df.empty:
             display_df = symbols_df.copy()
             display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -401,117 +486,6 @@ def render_stock_section(keyword, days_lookback):
             )
         else:
             st.warning(f"No signals found for {keyword} in the last {days_lookback} day(s).")
-
-def render_recommendations_section(days_lookback):
-    """Render the stock recommendations section."""
-    st.subheader("📈 Stock Recommendations")
-    
-    # Collect all long and short signals
-    long_signals_df = []
-    short_signals_df = []
-    
-    for keyword in Lower_timeframe_KEYWORDS + DAILY_KEYWORDS:
-        df = extract_stock_symbols_from_email(
-            EMAIL_ADDRESS, EMAIL_PASSWORD, SENDER_EMAIL, keyword, days_lookback
-        )
-        
-        if not df.empty:
-            if keyword in LONG_SIGNALS:
-                long_signals_df.append(df)
-            elif keyword in SHORT_SIGNALS:
-                short_signals_df.append(df)
-    
-    # Combine dataframes
-    if long_signals_df:
-        all_long_signals = pd.concat(long_signals_df, ignore_index=True)
-        all_long_signals = all_long_signals.drop_duplicates(subset=['Ticker'], keep='last')
-    else:
-        all_long_signals = pd.DataFrame()
-    
-    if short_signals_df:
-        all_short_signals = pd.concat(short_signals_df, ignore_index=True)
-        all_short_signals = all_short_signals.drop_duplicates(subset=['Ticker'], keep='last')
-    else:
-        all_short_signals = pd.DataFrame()
-    
-    # Create tabs for long and short recommendations
-    long_tab, short_tab = st.tabs(["🟢 Long Recommendations", "🔴 Short Recommendations"])
-    
-    with long_tab:
-        if not all_long_signals.empty:
-            st.write("**Top Long Stock Picks Based on Scanner Signals:**")
-            
-            analyzed_long = analyze_stocks_with_prices(all_long_signals, 'long')
-            
-            if not analyzed_long.empty:
-                # Display top 10 long picks
-                top_long = analyzed_long.head(10)
-                
-                # Format the display
-                display_long = top_long.copy()
-                display_long['Current_Price'] = display_long['Current_Price'].apply(lambda x: f"${x:.2f}")
-                display_long['Volume_Ratio'] = display_long['Volume_Ratio'].apply(lambda x: f"{x:.1f}x")
-                display_long['Price_Change_1D'] = display_long['Price_Change_1D'].apply(lambda x: f"{x:+.1f}%")
-                display_long['Price_Change_5D'] = display_long['Price_Change_5D'].apply(lambda x: f"{x:+.1f}%")
-                display_long['Price_vs_SMA20'] = display_long['Price_vs_SMA20'].apply(lambda x: f"{x:+.1f}%")
-                display_long['Volatility'] = display_long['Volatility'].apply(lambda x: f"{x:.1f}%")
-                display_long['Distance_52W_Low'] = display_long['Distance_52W_Low'].apply(lambda x: f"{x:+.1f}%")
-                display_long['Market_Cap'] = display_long['Market_Cap'].apply(lambda x: f"${x/1e9:.1f}B" if x > 1e9 else f"${x/1e6:.1f}M")
-                
-                st.dataframe(display_long[['Ticker', 'Score', 'Current_Price', 'Volume_Ratio', 'Price_Change_1D', 
-                                         'Price_Change_5D', 'Price_vs_SMA20', 'Volatility', 'Distance_52W_Low', 
-                                         'Market_Cap', 'Sector', 'Signal']], use_container_width=True)
-                
-                # Download button
-                csv = analyzed_long.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Long Recommendations",
-                    data=csv,
-                    file_name=f"long_recommendations_{datetime.date.today()}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.warning("No long signals found with valid price data.")
-        else:
-            st.warning("No long signals found in the specified time period.")
-    
-    with short_tab:
-        if not all_short_signals.empty:
-            st.write("**Top Short Stock Picks Based on Scanner Signals:**")
-            
-            analyzed_short = analyze_stocks_with_prices(all_short_signals, 'short')
-            
-            if not analyzed_short.empty:
-                # Display top 10 short picks
-                top_short = analyzed_short.head(10)
-                
-                # Format the display
-                display_short = top_short.copy()
-                display_short['Current_Price'] = display_short['Current_Price'].apply(lambda x: f"${x:.2f}")
-                display_short['Volume_Ratio'] = display_short['Volume_Ratio'].apply(lambda x: f"{x:.1f}x")
-                display_short['Price_Change_1D'] = display_short['Price_Change_1D'].apply(lambda x: f"{x:+.1f}%")
-                display_short['Price_Change_5D'] = display_short['Price_Change_5D'].apply(lambda x: f"{x:+.1f}%")
-                display_short['Price_vs_SMA20'] = display_short['Price_vs_SMA20'].apply(lambda x: f"{x:+.1f}%")
-                display_short['Volatility'] = display_short['Volatility'].apply(lambda x: f"{x:.1f}%")
-                display_short['Distance_52W_High'] = display_short['Distance_52W_High'].apply(lambda x: f"{x:+.1f}%")
-                display_short['Market_Cap'] = display_short['Market_Cap'].apply(lambda x: f"${x/1e9:.1f}B" if x > 1e9 else f"${x/1e6:.1f}M")
-                
-                st.dataframe(display_short[['Ticker', 'Score', 'Current_Price', 'Volume_Ratio', 'Price_Change_1D', 
-                                          'Price_Change_5D', 'Price_vs_SMA20', 'Volatility', 'Distance_52W_High', 
-                                          'Market_Cap', 'Sector', 'Signal']], use_container_width=True)
-                
-                # Download button
-                csv = analyzed_short.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Short Recommendations",
-                    data=csv,
-                    file_name=f"short_recommendations_{datetime.date.today()}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.warning("No short signals found with valid price data.")
-        else:
-            st.warning("No short signals found in the specified time period.")
 
 def run():
     """Main function to run the Streamlit application"""
@@ -534,35 +508,31 @@ def run():
             refresh_interval = st.slider("Refresh Interval (minutes)", 1, 30, 10)
         
         st.markdown("---")
-        
-        # Scoring explanation
-        st.subheader("📊 Scoring Methodology")
-        st.markdown("""
-        **Long Signals Score:**
-        - Volume ratio > 2x: +20 points
-        - Positive 1D momentum: +10-15 points
-        - Above SMA20/50: +10 points each
-        - Near 52W low: +10-15 points
-        - Market cap > $1B: +5-10 points
-        
-        **Short Signals Score:**
-        - Volume ratio > 2x: +20 points
-        - Negative 1D momentum: +10-15 points
-        - Below SMA20/50: +10 points each
-        - Near 52W high: +10-15 points
-        - Market cap > $1B: +5-10 points
-        """)
 
-    # Header with refresh button
-    col1, col2 = st.columns([3, 1])
+    # Market data
+    col1, col2, col3 = st.columns([2, 2, 1])
     
     with col1:
-        st.title("📈 ThinkOrSwim Email Alerts Dashboard")
+        spy_price, qqq_price, spy_change, qqq_change = get_spy_qqq_prices()
+        if spy_price and spy_change is not None:
+            st.metric(
+                "SPY Latest", 
+                f"${spy_price}",
+                f"{spy_change:+.2f}%",
+                delta_color="normal"
+            )
     with col2:
+        if qqq_price and qqq_change is not None:
+            st.metric(
+                "QQQ Latest", 
+                f"${qqq_price}",
+                f"{qqq_change:+.2f}%",
+                delta_color="normal"
+            )
+    with col3:
         if st.button("🔄 Refresh Data"):
             st.session_state.cached_data.clear()
             st.session_state.processed_email_ids.clear()
-            st.cache_data.clear()
             st.rerun()
 
     # Auto-refresh logic
@@ -571,18 +541,14 @@ def run():
         if time_since_refresh >= refresh_interval * 60:
             st.session_state.cached_data.clear()
             st.session_state.processed_email_ids.clear()
-            st.cache_data.clear()
             st.session_state.last_refresh_time = time.time()
             st.rerun()
 
     # Scan type selection
-    section = st.radio("Select View", ["Recommendations", "Lower_timeframe", "Daily", "High Conviction"], 
+    section = st.radio("Select View", ["Lower_timeframe", "Daily", "High Conviction", "Live Options"], 
                       index=0, horizontal=True)
     
-    if section == "Recommendations":
-        render_recommendations_section(days_lookback)
-        
-    elif section == "Lower_timeframe":
+    if section == "Lower_timeframe":
         st.subheader("Lower Timeframe Scans")
         for keyword in Lower_timeframe_KEYWORDS:
             render_stock_section(keyword, days_lookback)
@@ -591,6 +557,11 @@ def run():
         st.subheader("Daily Scans")
         for keyword in DAILY_KEYWORDS:
             render_stock_section(keyword, days_lookback)
+            
+    elif section == "Live Options":
+        st.subheader("Live Options Scans")
+        for keyword in OPTION_KEYWORDS:
+            render_options_section(keyword, days_lookback)
             
     elif section == "High Conviction":
         st.subheader("High Conviction Scans")
@@ -608,7 +579,7 @@ def run():
             # Ignore tmo_long and tmo_Short for High Conviction
             high_conviction_df = high_conviction_stocks(
                 all_signals, 
-                ignore_keywords=["tmo_long", "tmo_Short"]
+                ignore_keywords=["tmo_long", "tmo_Short","orb_bull","orb_bear"]
             )
             
             if not high_conviction_df.empty:
