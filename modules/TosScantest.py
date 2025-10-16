@@ -340,7 +340,7 @@ def render_options_section(keyword, days_lookback):
             # Reorder columns to show most relevant info first
             column_order = ['Readable_Symbol', 'Date', 'Signal', 'Volume', 'Open_Interest']
             display_df = display_df[column_order]
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(display_df, width=True)
             
             csv = symbols_df.to_csv(index=False).encode('utf-8')
             st.download_button(
