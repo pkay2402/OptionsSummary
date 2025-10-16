@@ -336,7 +336,7 @@ def render_options_section(keyword, days_lookback):
             # Display with better formatting
             st.dataframe(
                 display_df, 
-                width=True,
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
