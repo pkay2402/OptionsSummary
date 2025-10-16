@@ -290,6 +290,13 @@ def render_options_section(keyword, days_lookback):
         if not symbols_df.empty:
             display_df = symbols_df.copy()
             display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Ensure Volume and Open_Interest columns exist
+            if 'Volume' not in display_df.columns:
+                display_df['Volume'] = 'N/A'
+            if 'Open_Interest' not in display_df.columns:
+                display_df['Open_Interest'] = 'N/A'
+            
             # Reorder columns to show most relevant info first
             column_order = ['Readable_Symbol', 'Date', 'Signal', 'Volume', 'Open_Interest']
             display_df = display_df[column_order]
@@ -331,6 +338,7 @@ def run():
     if st.button("🔄 Refresh Data"):
         st.session_state.cached_data.clear()
         st.session_state.processed_email_ids.clear()
+        get_option_data.cache_clear()  # Clear the LRU cache for option data
         st.rerun()
 
     # Auto-refresh logic
