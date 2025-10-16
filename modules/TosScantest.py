@@ -630,10 +630,10 @@ def run():
                 sort_by = st.selectbox(
                     "Sort by",
                     options=['AI Score', 'Volume', 'Vol/OI Ratio', 'Ticker', 'Date'],
-                    index=0
+                    index=3  # Default to Ticker
                 )
             with col_sort2:
-                sort_order = st.radio("Order", options=['Descending', 'Ascending'], horizontal=True, index=0)
+                sort_order = st.radio("Order", options=['Descending', 'Ascending'], horizontal=True, index=1)  # Default to Ascending
             
             # Apply sorting
             sort_mapping = {
