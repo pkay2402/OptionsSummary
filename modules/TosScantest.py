@@ -828,6 +828,117 @@ def run():
                 file_name=f"all_options_{datetime.date.today()}.csv",
                 mime="text/csv",
             )
+            
+            # Newsletter Summary Section
+            st.markdown("---")
+            st.markdown("## 📰 Newsletter Summary")
+            st.markdown("*Copy and paste this summary for your Substack readers*")
+            
+            # Generate newsletter content
+            today_str = datetime.datetime.now().strftime('%B %d, %Y')
+            
+            # Get top flows by AI score
+            top_flows = all_options_df.nlargest(10, 'Score')
+            
+            # Get most active tickers
+            ticker_counts = all_options_df['Ticker'].value_counts().head(5)
+            
+            # Category breakdown
+            category_counts = all_options_df['Category'].str.split(', ').explode().value_counts()
+            
+            # Build newsletter text
+            newsletter = f"""
+**Options Flow Report - {today_str}**
+
+📊 **Market Overview**
+- Total Unique Flows: {len(all_options_df)}
+- Active Tickers: {all_options_df['Ticker'].nunique()}
+- High Conviction Signals (Score 7+): {len(all_options_df[all_options_df['Score'] >= 7])}
+- Strong Signals (Score 5-6): {len(all_options_df[(all_options_df['Score'] >= 5) & (all_options_df['Score'] < 7)])}
+
+🔥 **Most Active Tickers**
+"""
+            for ticker, count in ticker_counts.items():
+                newsletter += f"- {ticker}: {count} flow{'s' if count > 1 else ''}\n"
+            
+            newsletter += f"""
+📈 **Category Breakdown**
+"""
+            for category, count in category_counts.items():
+                newsletter += f"- {category}: {count} signal{'s' if count > 1 else ''}\n"
+            
+            newsletter += f"""
+⭐ **Top 10 High-Conviction Flows**
+"""
+            for idx, (_, row) in enumerate(top_flows.iterrows(), 1):
+                score = row['Score']
+                ticker = row['Ticker']
+                option = row['Readable_Symbol']
+                volume = row['Volume'] if row['Volume'] != 'N/A' else 'N/A'
+                vol_oi = row['Vol/OI'] if row['Vol/OI'] != 'N/A' else 'N/A'
+                signals = row['AI_Signals']
+                
+                newsletter += f"""
+{idx}. **{ticker}** - Score: {score}/10
+   {option}
+   Volume: {volume:,} | Vol/OI: {vol_oi} 
+   {signals}
+"""
+            
+            newsletter += f"""
+---
+💡 **Key Takeaways**
+"""
+            # Add intelligent insights
+            insights = []
+            
+            # Check for bullish vs bearish sentiment
+            call_count = sum(1 for _, row in all_options_df.iterrows() if 'CALL' in row['Readable_Symbol'])
+            put_count = len(all_options_df) - call_count
+            
+            if call_count > put_count * 1.5:
+                insights.append(f"• Strong bullish sentiment with {call_count} calls vs {put_count} puts")
+            elif put_count > call_count * 1.5:
+                insights.append(f"• Bearish positioning with {put_count} puts vs {call_count} calls")
+            else:
+                insights.append(f"• Balanced sentiment: {call_count} calls, {put_count} puts")
+            
+            # Check for unusual activity
+            unusual_flows = len(all_options_df[all_options_df['AI_Signals'].str.contains('Unusual Activity', na=False)])
+            if unusual_flows > 0:
+                insights.append(f"• {unusual_flows} flows showing unusual activity (Vol/OI > 2.0)")
+            
+            # Check for trend alignment
+            aligned_flows = len(all_options_df[all_options_df['AI_Signals'].str.contains('Aligned with', na=False)])
+            if aligned_flows > 0:
+                insights.append(f"• {aligned_flows} flows aligned with underlying stock trends")
+            
+            # Add multiple category hits
+            multi_category = len(all_options_df[all_options_df['Category'].str.contains(',', na=False)])
+            if multi_category > 0:
+                insights.append(f"• {multi_category} options triggered multiple scanners (high conviction)")
+            
+            for insight in insights:
+                newsletter += f"{insight}\n"
+            
+            newsletter += f"""
+⚠️ *These are informational alerts based on unusual options activity. Always do your own due diligence.*
+
+---
+*Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+            
+            # Display in a text area for easy copying
+            st.text_area(
+                "Newsletter Content (Click to select all, then copy)",
+                newsletter,
+                height=600,
+                key="newsletter_content"
+            )
+            
+            # Add copy button hint
+            st.info("💡 **Tip:** Click inside the text box above, press Cmd+A (Mac) or Ctrl+A (Windows) to select all, then Cmd+C or Ctrl+C to copy.")
+            
         else:
             st.info(f"No signals found in the last {days_lookback} day(s)")
     
