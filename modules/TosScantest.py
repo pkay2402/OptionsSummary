@@ -151,25 +151,49 @@ def get_option_data(raw_symbol):
         match = OPTION_PATTERN.match(symbol)
         
         if not match:
+            logger.warning(f"Could not parse option symbol: {raw_symbol}")
             return None, None
         
-        ticker = match.group(1)
+        ticker, year, month, day, opt_type, strike = match.groups()
         
-        # Get option chain data
+        # Construct expiration date (YYYY-MM-DD format)
+        expiry_date = f"20{year}-{month}-{day}"
+        
+        # Get option chain data for the specific expiration date
         stock = yf.Ticker(ticker)
         
-        # Try to get the option data
-        option_info = stock.option_chain()
+        # Get all available expiration dates
+        expirations = stock.options
         
-        # Search in calls and puts
-        for chain in [option_info.calls, option_info.puts]:
-            matching_options = chain[chain['contractSymbol'] == raw_symbol]
-            if not matching_options.empty:
-                volume = matching_options['volume'].values[0] if 'volume' in matching_options else 0
-                open_interest = matching_options['openInterest'].values[0] if 'openInterest' in matching_options else 0
-                return volume, open_interest
+        if expiry_date not in expirations:
+            logger.warning(f"Expiration date {expiry_date} not found for {ticker}")
+            return None, None
         
-        return None, None
+        # Get option chain for the specific date
+        option_chain = stock.option_chain(expiry_date)
+        
+        # Determine if it's a call or put
+        if opt_type == 'C':
+            chain = option_chain.calls
+        else:
+            chain = option_chain.puts
+        
+        # Search for matching contract symbol
+        matching_options = chain[chain['contractSymbol'] == raw_symbol]
+        
+        if not matching_options.empty:
+            volume = matching_options['volume'].values[0]
+            open_interest = matching_options['openInterest'].values[0]
+            
+            # Handle NaN values
+            volume = int(volume) if pd.notna(volume) else 0
+            open_interest = int(open_interest) if pd.notna(open_interest) else 0
+            
+            logger.info(f"Fetched data for {raw_symbol}: Volume={volume}, OI={open_interest}")
+            return volume, open_interest
+        else:
+            logger.warning(f"Contract {raw_symbol} not found in option chain")
+            return None, None
         
     except Exception as e:
         logger.warning(f"Could not fetch option data for {raw_symbol}: {e}")
