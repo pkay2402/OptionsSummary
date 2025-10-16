@@ -150,6 +150,39 @@ def parse_option_symbol(option_symbol):
 
     return option_symbol
 
+@lru_cache(maxsize=50)
+def get_stock_data(ticker):
+    """Fetch recent stock price action for analysis."""
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="5d")
+        
+        if hist.empty:
+            return None
+        
+        current_price = hist['Close'].iloc[-1]
+        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+        price_change_pct = ((current_price - prev_close) / prev_close) * 100
+        
+        # Calculate momentum indicators
+        high_5d = hist['High'].max()
+        low_5d = hist['Low'].min()
+        avg_volume = hist['Volume'].mean()
+        recent_volume = hist['Volume'].iloc[-1]
+        volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+        
+        return {
+            'current_price': current_price,
+            'price_change_pct': price_change_pct,
+            'high_5d': high_5d,
+            'low_5d': low_5d,
+            'volume_ratio': volume_ratio,
+            'trend': 'bullish' if price_change_pct > 1 else 'bearish' if price_change_pct < -1 else 'neutral'
+        }
+    except Exception as e:
+        logger.warning(f"Could not fetch stock data for {ticker}: {e}")
+        return None
+
 @lru_cache(maxsize=100)
 def get_option_data(raw_symbol):
     """Fetch option data including volume and open interest."""
@@ -205,14 +238,33 @@ def get_option_data(raw_symbol):
         
         if not matching_options.empty:
             # If multiple matches, take the first one (should be rare)
-            volume = matching_options['volume'].values[0]
-            open_interest = matching_options['openInterest'].values[0]
-            contract_found = matching_options['contractSymbol'].values[0]
+            row = matching_options.iloc[0]
+            contract_found = row['contractSymbol']
+            
+            # Try different possible column names for volume
+            if 'volume' in matching_options.columns:
+                volume = row['volume']
+            elif 'Volume' in matching_options.columns:
+                volume = row['Volume']
+            else:
+                volume = None
+            
+            # Try different possible column names for open interest
+            if 'openInterest' in matching_options.columns:
+                open_interest = row['openInterest']
+            elif 'open_interest' in matching_options.columns:
+                open_interest = row['open_interest']
+            elif 'OpenInterest' in matching_options.columns:
+                open_interest = row['OpenInterest']
+            else:
+                open_interest = None
             
             # Handle NaN values
             volume = int(volume) if pd.notna(volume) else 0
             open_interest = int(open_interest) if pd.notna(open_interest) else 0
             
+            # Debug logging to see what columns are available
+            logger.info(f"Available columns: {matching_options.columns.tolist()}")
             logger.info(f"Fetched data for {raw_symbol} -> {contract_found}: Volume={volume}, OI={open_interest}")
             return volume, open_interest
         else:
@@ -331,6 +383,89 @@ def get_all_options_data(days_lookback):
     else:
         return pd.DataFrame()
 
+def analyze_flow_strength(row, stock_data):
+    """Analyze option flow strength using AI logic."""
+    score = 0
+    signals = []
+    
+    # Volume analysis
+    if row['Volume'] != 'N/A' and row['Volume'] > 0:
+        if row['Volume'] > 5000:
+            score += 3
+            signals.append("🔥 High Volume")
+        elif row['Volume'] > 2000:
+            score += 2
+            signals.append("📈 Strong Volume")
+        elif row['Volume'] > 1000:
+            score += 1
+            signals.append("✓ Good Volume")
+    
+    # Volume to OI ratio (if OI > 0)
+    if row['Vol/OI'] != 'N/A' and row['Vol/OI'] != '∞':
+        try:
+            vol_oi_ratio = float(row['Vol/OI'])
+            if vol_oi_ratio > 2.0:
+                score += 2
+                signals.append("⚡ Unusual Activity")
+            elif vol_oi_ratio > 1.0:
+                score += 1
+                signals.append("↗️ Active Flow")
+        except:
+            pass
+    
+    # Stock alignment analysis
+    if stock_data:
+        option_type = 'CALL' if 'CALL' in row['Readable_Symbol'] else 'PUT'
+        trend = stock_data['trend']
+        
+        # Check if flow aligns with stock movement
+        if option_type == 'CALL' and trend == 'bullish':
+            score += 3
+            signals.append("✅ Aligned with uptrend")
+        elif option_type == 'PUT' and trend == 'bearish':
+            score += 3
+            signals.append("✅ Aligned with downtrend")
+        elif option_type == 'CALL' and trend == 'bearish':
+            score += 2
+            signals.append("🔄 Contrarian CALL (reversal?)")
+        elif option_type == 'PUT' and trend == 'bullish':
+            score += 2
+            signals.append("🔄 Contrarian PUT (hedge?)")
+        
+        # Volume spike check
+        if stock_data['volume_ratio'] > 1.5:
+            score += 1
+            signals.append("📊 Stock volume spike")
+    
+    # Multiple category appearance (high conviction)
+    # This would need to be checked at a higher level
+    
+    return score, ' | '.join(signals) if signals else 'Standard flow'
+
+def add_ai_analysis(df):
+    """Add AI-powered analysis to the dataframe."""
+    if df.empty:
+        return df
+    
+    df['Score'] = 0
+    df['AI_Signals'] = ''
+    
+    # Get unique tickers and fetch stock data
+    unique_tickers = df['Ticker'].unique()
+    stock_data_cache = {}
+    
+    for ticker in unique_tickers:
+        stock_data_cache[ticker] = get_stock_data(ticker)
+    
+    # Analyze each row
+    for idx, row in df.iterrows():
+        stock_data = stock_data_cache.get(row['Ticker'])
+        score, signals = analyze_flow_strength(row, stock_data)
+        df.at[idx, 'Score'] = score
+        df.at[idx, 'AI_Signals'] = signals
+    
+    return df
+
 def run():
     """Main function to run the Streamlit application"""
     # Initialize session state first
@@ -398,16 +533,68 @@ def run():
             if 'Open_Interest' not in all_options_df.columns:
                 all_options_df['Open_Interest'] = 'N/A'
             
-            # Debug: Check what's in the columns
-            logger.info(f"Combined dataframe columns: {all_options_df.columns.tolist()}")
-            logger.info(f"Sample Volume values: {all_options_df['Volume'].head().tolist() if 'Volume' in all_options_df.columns else 'Column missing'}")
-            logger.info(f"Sample OI values: {all_options_df['Open_Interest'].head().tolist() if 'Open_Interest' in all_options_df.columns else 'Column missing'}")
+            # Calculate Volume/OI Ratio
+            def calc_vol_oi_ratio(row):
+                try:
+                    vol = row['Volume']
+                    oi = row['Open_Interest']
+                    if vol == 'N/A' or oi == 'N/A':
+                        return 'N/A'
+                    vol = int(vol) if vol != 0 else 0
+                    oi = int(oi) if oi != 0 else 0
+                    if oi == 0:
+                        return '∞' if vol > 0 else 'N/A'
+                    return round(vol / oi, 2)
+                except:
+                    return 'N/A'
             
-            # Sort by ticker, then by date
-            all_options_df = all_options_df.sort_values(['Ticker', 'Date'], ascending=[True, False])
+            all_options_df['Vol/OI'] = all_options_df.apply(calc_vol_oi_ratio, axis=1)
+            
+            # Add AI analysis
+            with st.spinner('🤖 Analyzing flows with AI...'):
+                all_options_df = add_ai_analysis(all_options_df)
+            
+            # Sorting options
+            col_sort1, col_sort2 = st.columns([3, 2])
+            with col_sort1:
+                sort_by = st.selectbox(
+                    "Sort by",
+                    options=['AI Score', 'Volume', 'Vol/OI Ratio', 'Ticker', 'Date'],
+                    index=0
+                )
+            with col_sort2:
+                sort_order = st.radio("Order", options=['Descending', 'Ascending'], horizontal=True, index=0)
+            
+            # Apply sorting
+            sort_mapping = {
+                'AI Score': 'Score',
+                'Volume': 'Volume',
+                'Vol/OI Ratio': 'Vol/OI',
+                'Ticker': 'Ticker',
+                'Date': 'Date'
+            }
+            sort_col = sort_mapping[sort_by]
+            ascending = sort_order == 'Ascending'
+            
+            # Handle sorting for mixed types
+            if sort_col in ['Volume', 'Vol/OI']:
+                # Convert to numeric for sorting, keeping N/A and ∞ at the end
+                def sort_key(val):
+                    if val == 'N/A' or val == '∞':
+                        return -1 if ascending else float('inf')
+                    try:
+                        return float(val)
+                    except:
+                        return -1 if ascending else float('inf')
+                
+                all_options_df['_sort_key'] = all_options_df[sort_col].apply(sort_key)
+                all_options_df = all_options_df.sort_values('_sort_key', ascending=ascending)
+                all_options_df = all_options_df.drop('_sort_key', axis=1)
+            else:
+                all_options_df = all_options_df.sort_values(sort_col, ascending=ascending)
             
             # Reorder columns
-            column_order = ['Ticker', 'Readable_Symbol', 'Category', 'Date', 'Volume', 'Open_Interest']
+            column_order = ['Score', 'Ticker', 'Readable_Symbol', 'Category', 'Date', 'Volume', 'Open_Interest', 'Vol/OI', 'AI_Signals']
             display_df = all_options_df[column_order]
             
             # Display metrics
@@ -419,7 +606,18 @@ def run():
             with col3:
                 st.metric("Categories", display_df['Category'].nunique())
             
-            st.markdown("### All Options Flows")
+            st.markdown("### 🎯 AI-Ranked Options Flows")
+            
+            # Helper function to style rows based on score
+            def style_score(val):
+                if isinstance(val, (int, float)):
+                    if val >= 7:
+                        return 'background-color: #1a4d2e; color: white'
+                    elif val >= 5:
+                        return 'background-color: #2d5a3d; color: white'
+                    elif val >= 3:
+                        return 'background-color: #3d5a47'
+                return ''
             
             # Display with better formatting
             st.dataframe(
@@ -428,14 +626,24 @@ def run():
                 hide_index=True,
                 height=600,
                 column_config={
+                    "Score": st.column_config.NumberColumn("🎯 Score", width="small", help="AI-calculated strength score"),
                     "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                     "Readable_Symbol": st.column_config.TextColumn("Option", width="large"),
-                    "Category": st.column_config.TextColumn("Category", width="medium"),
-                    "Date": st.column_config.TextColumn("Alert Time", width="medium"),
-                    "Volume": st.column_config.NumberColumn("Volume", format="%d"),
-                    "Open_Interest": st.column_config.NumberColumn("Open Interest", format="%d"),
+                    "Category": st.column_config.TextColumn("Category", width="small"),
+                    "Date": st.column_config.TextColumn("Time", width="small"),
+                    "Volume": st.column_config.NumberColumn("Volume", format="%d", width="small"),
+                    "Open_Interest": st.column_config.NumberColumn("OI", format="%d", width="small"),
+                    "Vol/OI": st.column_config.TextColumn("Vol/OI", width="small", help="Volume to Open Interest ratio"),
+                    "AI_Signals": st.column_config.TextColumn("🤖 AI Signals", width="large", help="AI-generated insights"),
                 }
             )
+            
+            # Add legend
+            st.markdown("""
+            **Score Legend:** 
+            🟢 7+ = Strong conviction | 🟡 5-6 = Good setup | ⚪ 3-4 = Standard flow | ⚫ 0-2 = Weak signal
+            """)
+            
             
             # Download button
             csv = all_options_df.to_csv(index=False).encode('utf-8')
