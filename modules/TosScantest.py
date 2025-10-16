@@ -668,13 +668,16 @@ def run():
             display_df = all_options_df[column_order]
             
             # Display metrics
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Alerts", len(display_df))
             with col2:
                 st.metric("Unique Tickers", display_df['Ticker'].nunique())
             with col3:
                 st.metric("Categories", display_df['Category'].nunique())
+            with col4:
+                # Gamma analysis quick access
+                st.metric("📊 Gamma", "Available below ⬇️")
             
             st.markdown("### 🎯 AI-Ranked Options Flows")
             
@@ -716,7 +719,8 @@ def run():
             
             # Gamma Analysis Section
             st.markdown("---")
-            st.markdown("### 📊 Gamma Exposure Analysis")
+            st.markdown("## 📊 Gamma Exposure Analysis")
+            st.markdown("*Analyze dealer positioning and key support/resistance levels*")
             
             # Get unique ticker-expiry combinations
             ticker_expiry_combos = []
