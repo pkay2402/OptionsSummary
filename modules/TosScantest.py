@@ -449,6 +449,22 @@ def get_all_options_data(days_lookback):
     
     if all_data:
         combined_df = pd.concat(all_data, ignore_index=True)
+        
+        # Remove duplicates: group by Raw_Symbol and combine categories
+        # Keep the most recent date and aggregate categories
+        def combine_categories(group):
+            # Get the most recent entry
+            latest = group.sort_values('Date', ascending=False).iloc[0].copy()
+            # Combine all unique categories
+            categories = group['Category'].unique()
+            if len(categories) > 1:
+                latest['Category'] = ', '.join(sorted(categories))
+            return latest
+        
+        # Group by Raw_Symbol and apply the combination logic
+        combined_df = combined_df.groupby('Raw_Symbol', as_index=False).apply(combine_categories)
+        combined_df = combined_df.reset_index(drop=True)
+        
         return combined_df
     else:
         return pd.DataFrame()
