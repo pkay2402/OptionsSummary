@@ -237,7 +237,7 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         today = datetime.date.today()
         start_date = today
         if days_lookback > 1:
-            start_date = today - datetime.timedelta(days=days_lookback-2)
+            start_date = today - datetime.timedelta(days=days_lookback-1)
         
         date_since = start_date.strftime("%d-%b-%Y")
         search_criteria = f'(FROM "{sender_email}" SUBJECT "{keyword}" SINCE "{date_since}")'
@@ -499,7 +499,7 @@ def run():
             "Days to Look Back",
             min_value=1,
             max_value=3,
-            value=1,
+            value=2,
             help="Choose how many days of historical alerts to analyze"
         )
         
