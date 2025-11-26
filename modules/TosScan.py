@@ -38,7 +38,7 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 # Define keywords for different scan types
-Lower_timeframe_KEYWORDS = ["sqz_30"]
+Lower_timeframe_KEYWORDS = ["sqz_30","HG_30mins_L","HG_30mins_S"]
 DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "demark13_buy", "demark13_sell","bull_Daily_sqz", 
 "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short","StockReversalLong","StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call","call_swing","put_swing"]
