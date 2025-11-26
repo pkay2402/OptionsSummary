@@ -38,7 +38,7 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 # Define keywords for different scan types
-Lower_timeframe_KEYWORDS = ["Long_VP", "Short_VP", "orb_bull", "orb_bear", "volume_scan", "sqz_30", "tmo_long", "tmo_Short"]
+Lower_timeframe_KEYWORDS = ["sqz_30"]
 DAILY_KEYWORDS = ["HighVolumeSymbols","Long_IT_volume", "Short_IT_volume", "demark13_buy", "demark13_sell","bull_Daily_sqz", 
 "bear_Daily_sqz", "LSMHG_Long", "LSMHG_Short","StockReversalLong","StockReversalShort"]
 OPTION_KEYWORDS = ["ETF_options", "UOP_Call","call_swing","put_swing"]
@@ -237,7 +237,7 @@ def extract_stock_symbols_from_email(email_address, password, sender_email, keyw
         today = datetime.date.today()
         start_date = today
         if days_lookback > 1:
-            start_date = today - datetime.timedelta(days=days_lookback-1)
+            start_date = today - datetime.timedelta(days=days_lookback-2)
         
         date_since = start_date.strftime("%d-%b-%Y")
         search_criteria = f'(FROM "{sender_email}" SUBJECT "{keyword}" SINCE "{date_since}")'
