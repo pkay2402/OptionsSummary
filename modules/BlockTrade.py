@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # Sample list of top 100 stocks (S&P 100 subset for demonstration)
 with st.expander("Edit Ticker List", expanded=False):
     default_tickers = [
-        'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'NVDA', 'JPM', 'WMT', 'V',
+        'AAPL', 'ORCL','MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'NVDA', 'JPM', 'WMT', 'V',
         'PG', 'JNJ', 'UNH', 'HD', 'BAC', 'MA', 'XOM', 'AVGO', 'CVX', 'ABBV',
         'PFE', 'CSCO', 'LLY', 'COST', 'MRK', 'ADBE', 'CRM', 'KO', 'PEP', 'TMO',
         'ORCL', 'NKE', 'ABT', 'MCD', 'CMCSA', 'ACN', 'DHR', 'WFC', 'VZ', 'TXN',
